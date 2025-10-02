@@ -42,14 +42,20 @@ If you are proposing a feature:
 
 Ready to contribute? Here's how to set up `tidysdmx` for local development.
 
-1. Download a copy of `tidysdmx` locally.
+1. Download a copy of `tidysdmx` locally or clone the repo.
 
 2. Create and activate a conda environment for `tidysdmx`:
 
-    ```console
-    $ conda create -n tidysdmx python=3.11.9
-    $ conda activate tidysdmx
-    ```
+    - Using conda
+        ```console
+        $ conda create -n tidysdmx python=3.11.9
+        $ conda activate tidysdmx
+        ```
+    - Using `venv`
+        ```console
+        $ python -m venv tidysdmx
+        $ ./tidysdmx/Scripts/activate
+        ```
 
 3. Install `tidysdmx` using `poetry`:
 

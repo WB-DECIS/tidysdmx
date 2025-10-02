@@ -2,7 +2,7 @@
 name = "tidysdmx"
 version = "0.1.0"
 description = "A toolbox to work with SDMX data"
-authors = ["Tony Fujs"]
+authors = ["Tony Fujs", "Daniel Gil Sanchez"]
 license = "MIT"
 readme = "README.md"
 
