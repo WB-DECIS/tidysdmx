@@ -145,3 +145,6 @@ dmypy.json
 *.token
 *.creds
 *.secret
+
+# PEM files
+*.pem
