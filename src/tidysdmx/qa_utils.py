@@ -2,12 +2,12 @@ def qa_coerce_numeric(df, numeric_columns):
     """
     Coerces values from specified numeric columns to numeric, and removes rows where values cannot be coerced to numeric.
 
-    Parameters:
-    - df (pd.DataFrame): The input DataFrame.
-    - numeric_columns (list): A list of column names to be coerced to numeric.
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        numeric_columns (list): A list of column names to be coerced to numeric.
 
     Returns:
-    - pd.DataFrame: The DataFrame with numeric columns coerced to numeric and invalid rows removed.
+        pd.DataFrame: The DataFrame with numeric columns coerced to numeric and invalid rows removed.
     """
     for column in numeric_columns:
         if column in df.columns:
@@ -34,11 +34,11 @@ def qa_remove_duplicates(df):
     """
     Removes duplicate rows from the DataFrame and logs information about the rows being removed.
 
-    Parameters:
-    - df (pd.DataFrame): The input DataFrame.
+    Args:
+        df (pd.DataFrame): The input DataFrame.
 
     Returns:
-    - pd.DataFrame: The DataFrame with duplicate rows removed.
+        pd.DataFrame: The DataFrame with duplicate rows removed.
     """
     initial_length = len(df)
 

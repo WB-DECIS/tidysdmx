@@ -2,11 +2,11 @@ def kd_read_mappings(mapping_files):
     """
     Fetch multiple mappings from different files.
 
-    Parameters:
-    - mapping_files (dict): A dictionary where keys are dataset specific keys and values are file paths to the mapping files.
+    Args:
+        mapping_files (dict): A dictionary where keys are dataset specific keys and values are file paths to the mapping files.
 
     Returns:
-    - dict: A dictionary where the highest level keys are the dataset specific keys and values are the mappings.
+        dict: A dictionary where the highest level keys are the dataset specific keys and values are the mappings.
     """
     mappings = {}
 
@@ -16,16 +16,17 @@ def kd_read_mappings(mapping_files):
     return mappings
 
 def kd_standardize_sdmx(data, mappings, boolean=True):
-    """
+    """Standardize into SDMX format a partitioned dataset.
+    
     Creates a partitioned dataset by applying transform_source_to_target to each input dataframe with its corresponding mapping.
 
-    Parameters:
-    - mappings (dict): A dictionary where keys are dataset specific keys and values are mapping DataFrames.
-    - data (dict): A dictionary where keys are dataset specific keys and values are input DataFrames.
-    - boolean (bool): A boolean flag to force order execution in Kedro.
+    Args:
+        mappings (dict): A dictionary where keys are dataset specific keys and values are mapping DataFrames.
+        data (dict): A dictionary where keys are dataset specific keys and values are input DataFrames.
+        boolean (bool): A boolean flag to force order execution in Kedro.
 
     Returns:
-    - dict: A dictionary where keys are dataset specific keys and values are transformed DataFrames.
+        dict: A dictionary where keys are dataset specific keys and values are transformed DataFrames.
     """
     # CASE 1: Single mapping file
     ## subcase 1.a: single mapping received as a dict of the mappings
@@ -71,9 +72,7 @@ def kd_validate_dataset_local(df, schema=None, valid=None):
     """
     Production validation function for a DataFrame.
 
-    This wrapper calls the interactive validator (validate_dataset_local) to obtain a
-    DataFrame of errors, then logs messages and returns a tuple containing a boolean
-    and an error dictionary, in the same format as the original function.
+    This wrapper calls the interactive validator (validate_dataset_local) to obtain a DataFrame of errors, then logs messages and returns a tuple containing a boolean and an error dictionary, in the same format as the original function.
 
     Args:
         df (pd.DataFrame): The DataFrame to be validated.
@@ -81,10 +80,7 @@ def kd_validate_dataset_local(df, schema=None, valid=None):
         valid: Precomputed validation information (optional).
 
     Returns:
-        tuple: A tuple with two elements. The first element is a bool that indicates
-               True if the dataset was validated successfully (i.e., no errors), and False otherwise.
-               The second element is an empty dictionary if there are no errors, or a dictionary
-               with key "ValidationReport" mapping to the list of error messages.
+        tuple: A tuple with two elements. The first element is a bool that indicates `True` if the dataset was validated successfully (i.e., no errors), and False otherwise. The second element is an empty dictionary if there are no errors, or a dictionary with key "ValidationReport" mapping to the list of error messages.
     """
     errors_df = validate_dataset_local(df, schema=schema, valid=valid)
 
@@ -105,15 +101,15 @@ def kd_validate_datasets_local(
     boolean: bool,
 ):
     """Function to validate multiple datasets for SDMX compliance.
-    Ensures that each dataset has `STRUCTURE`, `STRUCTURE_ID`, and `ACTION` columns.
-    See this page for more details:
-    https://github.com/sdmx-twg/sdmx-csv/blob/master/data-message/docs/sdmx-csv-field-guide.md
+
+    It ensures that each dataset has `STRUCTURE`, `STRUCTURE_ID`, and `ACTION` columns. See this `page for more details. <https://github.com/sdmx-twg/sdmx-csv/blob/master/data-message/docs/sdmx-csv-field-guide.md>`__
+
     Args:
         datasets (dict): Dictionary of datasets to be validated.
         schema (px.model.dataflow.Schema): Schema object containing validation information.
+    
     Returns:
-        tuple: Two dictionaries. The first dictionary returns True or False for each file,
-               and the second dictionary contains errors for each file.
+        tuple: Two dictionaries. The first dictionary returns True or False for each file, and the second dictionary contains errors for each file.
     """
     # Extract validation info from schema
     valid = extract_validation_info(schema)
