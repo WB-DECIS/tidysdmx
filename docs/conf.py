@@ -7,8 +7,8 @@
 # -- Project information -----------------------------------------------------
 
 project = u"tidysdmx"
-copyright = u"2025, Tony Fujs"
-author = u"Tony Fujs"
+copyright = u"2025, DECGT - World Bank"
+author = u"DECGT - World Bank"
 
 # -- General configuration ---------------------------------------------------
 
