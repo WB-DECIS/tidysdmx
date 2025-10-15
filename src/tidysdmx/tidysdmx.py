@@ -5,16 +5,14 @@ import pysdmx as px
 from tidysdmx.qa_utils import *
 
 def check_dict_keys(dict1, dict2):
-    """
-    Checks whether the sorted keys of two dictionaries are the same.
+    """Checks whether the sorted keys of two dictionaries are the same.
 
-    Parameters:
-    - dict1 (dict): The first dictionary.
-    - dict2 (dict): The second dictionary.
+    Args:
+        dict1 (dict): The first dictionary.
+        dict2 (dict): The second dictionary.
 
     Returns:
-    - None if the keys are the same or can be made the same by removing file extensions.
-    - str: A formatted message highlighting the difference if the keys are not the same.
+        `None` if the keys are the same or can be made the same by removing file extensions, or a formatted message highlighting the difference if the keys are not the same.
     """
 
     keys1 = sorted(dict1.keys())
@@ -34,47 +32,43 @@ def check_dict_keys(dict1, dict2):
 
 
 def remove_extension(key):
-    """
-    Removes the file extension from a key by removing the last period and everything after it.
+    """Removes the file extension from a key by removing the last period and everything after it.
 
-    Parameters:
-    - key (str): The key from which to remove the extension.
+    Args:
+        key (str): The key from which to remove the extension.
 
     Returns:
-    - str: The key without the file extension.
+        str: The key without the file extension.
     """
     return key.rsplit(".", 1)[0]
 
 
 def modify_dict_keys(input_dict):
-    """
-    Modifies the keys of a dictionary by removing the file extensions.
+    """Modifies the keys of a dictionary by removing the file extensions.
 
-    Parameters:
-    - input_dict (dict): The input dictionary with keys that may contain file extensions.
+    Args:
+        input_dict (dict): The input dictionary with keys that may contain file extensions.
 
     Returns:
-    - dict: A new dictionary with the modified keys.
+        dict: A new dictionary with the modified keys.
     """
     return {remove_extension(key): value for key, value in input_dict.items()}
 
 
 def create_keys_dict(input_dict):
-    """
-    Creates a dictionary where the keys are the new keys (with extensions removed) and the values are the old keys (with extensions).
+    """Creates a dictionary where the keys are the new keys (with extensions removed) and the values are the old keys (with extensions).
 
-    Parameters:
-    - input_dict (dict): The input dictionary with keys that may contain file extensions.
+    Args:
+        input_dict (dict): The input dictionary with keys that may contain file extensions.
 
     Returns:
-    - dict: A new dictionary with the new keys as keys and the old keys as values.
+        dict: A new dictionary with the new keys as keys and the old keys as values.
     """
     keys_dict = {remove_extension(key): key for key in input_dict.keys()}
     return keys_dict
 
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
-    """
-    Fetches the Data Structure Definition (DSD) schema from a given Fusion Metadata Registry (FMR) URL.
+    """Fetches the Data Structure Definition (DSD) schema from a given Fusion Metadata Registry (FMR) URL.
 
     Args:
         fmr_params (dict): It has base url and endpoints to access FMR's API.
@@ -89,8 +83,8 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
         aiohttp.ClientError: If there is an issue with the HTTP request.
         px.io.exceptions.FormatError: If there is an issue with the format of the response.
 
-    Example:
-        schema = fetch_dsd_schema("https://example.com/fmr", "WB:WDI(1.0)")
+    Examples:
+        >>> schema = fetch_dsd_schema("https://example.com/fmr", "WB:WDI(1.0)")
     """
     format = px.io.format.StructureFormat.FUSION_JSON
 
@@ -158,15 +152,14 @@ def parse_dsd_id(dsd_id):
         raise ValueError("Invalid dsd_id format. Expected format: 'agency:id(version)'")
 
 def standardize_sdmx(data, mapping):
-    """
-    Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
+    """Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
 
-    Parameters:
-    - data (pd.DataFrame): The input DataFrame with raw data.
-    - mapping (dict): A dictionary containing the mapping DataFrame and other relevant information.
+    Args:
+        data (pd.DataFrame): The input DataFrame with raw data.
+        mapping (dict): A dictionary containing the mapping DataFrame and other relevant information.
 
     Returns:
-    - pd.DataFrame: The standardized DataFrame with columns transformed according to the mapping.
+        pd.DataFrame: The standardized DataFrame with columns transformed according to the mapping.
     """
     data = transform_source_to_target(data, mapping)
     data = map_to_sdmx(data, mapping)
@@ -178,12 +171,12 @@ def transform_source_to_target(raw, mapping):
     """
     Transforms raw DataFrame into the format defined by components_map.
 
-    Parameters:
-    - raw (pd.DataFrame): The input DataFrame with raw data.
-    - mapping (list): The master mapping list containing a mapping between the input file columns, and the DSD columns.
+    Args:
+        raw (pd.DataFrame): The input DataFrame with raw data.
+        mapping (list): The master mapping list containing a mapping between the input file columns, and the DSD columns.
 
     Returns:
-    - pd.DataFrame: The transformed DataFrame with columns as defined in components_map['TARGET'].
+        pd.DataFrame: The transformed DataFrame with columns as defined in `components_map['TARGET']`.
     """
     # Create an empty DataFrame with columns as defined in components_map['TARGET']
     components_map = mapping["components"]
@@ -201,24 +194,23 @@ def transform_source_to_target(raw, mapping):
     return result_df
 
 def vectorized_lookup_ordered_v1(series, mapping_df):
-    """
-    Apply ordered regex matching to a Pandas Series.
+    """Apply ordered regex matching to a Pandas Series.
 
     For each regex pattern (except the last one) in mapping_df,
     check if the value in series matches the pattern. The corresponding
     TARGET is assigned when a match is found, and later rules are skipped.
     Any cell that does not match any of the earlier patterns is assigned
-    the last rule’s TARGET (catch-all).
+    the last rule's TARGET (catch-all).
 
-    Parameters:
+    Args:
         series (pd.Series): The input data series (e.g., a DataFrame column).
         mapping_df (pd.DataFrame): A DataFrame with at least two columns:
-            'SOURCE': regex patterns (ordered by priority),
-            'TARGET': corresponding replacement values.
+
+            - 'SOURCE': regex patterns (ordered by priority)
+            - 'TARGET': corresponding replacement values
 
     Returns:
-        pd.Series: A new series with values replaced according to the first
-                   matching regex, or the last rule’s TARGET if no match is found.
+        pd.Series: A new series with values replaced according to the first matching regex, or the last rule's TARGET if no match is found.
     """
     # Convert the series to strings for regex operations.
     series_str = series.astype(str)
@@ -247,25 +239,26 @@ def vectorized_lookup_ordered_v1(series, mapping_df):
 
 
 def vectorized_lookup_ordered_v2(series, mapping_df):
-    """
-    Apply ordered matching (regex or exact) to a Pandas Series based on the "IS_REGEX" column.
+    """Apply ordered matching (regex or exact) to a Pandas Series based on the "IS_REGEX" column.
 
     For each row in mapping_df:
-    - If "IS_REGEX" is True, perform regex matching.
-    - If "IS_REGEX" is False, perform exact string matching.
-    The corresponding TARGET is assigned when a match is found, and later rules are skipped.
-    Any cell that does not match any of the earlier rules is assigned the last rule’s TARGET (catch-all).
 
-    Parameters:
+        - If "IS_REGEX" is True, perform regex matching.
+        - If "IS_REGEX" is False, perform exact string matching.
+    
+    The corresponding TARGET is assigned when a match is found, and later rules are skipped.
+    Any cell that does not match any of the earlier rules is assigned the last rule's TARGET (catch-all).
+
+    Args:
         series (pd.Series): The input data series (e.g., a DataFrame column).
         mapping_df (pd.DataFrame): A DataFrame with at least three columns:
-            'SOURCE': regex patterns or exact strings (ordered by priority),
-            'TARGET': corresponding replacement values,
-            'IS_REGEX': boolean indicating whether 'SOURCE' is a regex pattern.
+
+            - 'SOURCE': regex patterns or exact strings (ordered by priority),
+            - 'TARGET': corresponding replacement values,
+            - 'IS_REGEX': boolean indicating whether 'SOURCE' is a regex pattern.
 
     Returns:
-        pd.Series: A new series with values replaced according to the first
-                   matching rule, or the last rule’s TARGET if no match is found.
+        pd.Series: A new series with values replaced according to the first matching rule, or the last rule's TARGET if no match is found.
     """
     # Convert the series to strings for matching operations.
     series_str = series.astype(str)
@@ -301,29 +294,21 @@ def vectorized_lookup_ordered_v2(series, mapping_df):
     return pd.Series(result, index=series.index)
 
 def map_to_sdmx(df, mapping):
-    """
-    Map DataFrame columns to SDMX values using a lookup mapping.
+    """Map DataFrame columns to SDMX values using a lookup mapping.
 
     This function transforms the given pandas DataFrame columns to conform
     to the SDMX representation by applying either a fixed mapping or an ordered,
     regex-based mapping. For each key present in the DataFrame:
 
-      - Fixed Mapping:
-          If the mapping for a key contains a "TARGET" column but no "SOURCE" column,
-          then the entire column is replaced with the fixed value provided by "TARGET".
+        - Fixed Mapping: 
+            If the mapping for a key contains a "TARGET" column but no "SOURCE" column, then the entire column is replaced with the fixed value provided by "TARGET".
 
-      - Regex-based Mapping:
-          If the mapping for a key contains both "SOURCE" and "TARGET" columns, the function
-          applies ordered regex-based matching. For each cell in the DataFrame column, the
-          regex patterns are evaluated in order using the first-match-wins strategy. If no
-          match is found in the earlier rules, the last rule's TARGET is applied.
+        - Regex-based Mapping: 
+            If the mapping for a key contains both "SOURCE" and "TARGET" columns, the function applies ordered regex-based matching. For each cell in the DataFrame column, the regex patterns are evaluated in order using the first-match-wins strategy. If no match is found in the earlier rules, the last rule's TARGET is applied.
 
-    Parameters:
+    Args:
         df (pandas.DataFrame): The input DataFrame containing the data to be mapped.
-        mapping (dict): The lookup mapping in JSON format (as a dict). Each key represents
-                        an SDMX component and its value is expected to be either a list of
-                        dictionaries (with keys "SOURCE" and "TARGET") or a pandas DataFrame
-                        with those columns.
+        mapping (dict): The lookup mapping in JSON format (as a dict). Each key represents an SDMX component and its value is expected to be either a list of dictionaries (with keys "SOURCE" and "TARGET") or a pandas DataFrame with those columns.
 
     Returns:
         pandas.DataFrame: The transformed DataFrame with mapped column values.
@@ -375,25 +360,24 @@ def map_to_sdmx(df, mapping):
     return df
 
 def add_sdmx_reference_cols(df, dsd, structure="datastructure", action="I"):
-    """
-    Adds necessary columns for a successful upload into an SDMX database.
+    """Adds necessary columns for a successful upload into an SDMX database.
 
-    Parameters:
-    - df (pd.DataFrame): The input DataFrame to which the columns will be added.
-    - structure (str): The structure type. Default is 'datastructure'.
-      Potential options accepted by SDMX for structure include:
-      - 'datastructure': Represents a data structure definition.
-      - 'metadataflow': Represents a metadata flow definition.
-      - 'dataflow': Represents a data flow definition.
-    - dsd (str): The Data Structure Definition (DSD) identifier.
-    - action (str): The action type. Default is 'I'.
-      Potential options accepted by SDMX for action include:
-      - 'I': Insert
-      - 'U': Update
-      - 'D': Delete
+    Args:
+        df (pd.DataFrame): The input DataFrame to which the columns will be added.
+        structure (str): The structure type. Default is 'datastructure'. Potential options accepted by SDMX for structure include:
+
+            - 'datastructure': Represents a data structure definition.
+            - 'metadataflow': Represents a metadata flow definition.
+            - 'dataflow': Represents a data flow definition.
+        dsd (str): The Data Structure Definition (DSD) identifier.
+        action (str): The action type. Default is 'I'. Potential options accepted by SDMX for action include:
+            
+            - 'I': Insert
+            - 'U': Update
+            - 'D': Delete
 
     Returns:
-    - pd.DataFrame: The DataFrame with the added SDMX reference columns.
+        pd.DataFrame: The DataFrame with the added SDMX reference columns.
     """
     df["STRUCTURE"] = structure
     df["STRUCTURE_ID"] = dsd
@@ -402,8 +386,7 @@ def add_sdmx_reference_cols(df, dsd, structure="datastructure", action="I"):
     return df
 
 def standardize_indicator_id(df):
-    """
-    Fixes the 'INDICATOR' column by ensuring all values are upper case and start with dataset_id.
+    """Fixes the 'INDICATOR' column by ensuring all values are upper case and start with dataset_id.
 
     Args:
         df (pd.DataFrame): The DataFrame to modify.
@@ -411,16 +394,22 @@ def standardize_indicator_id(df):
     Returns:
         pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values.
 
-    Example:
-        Input DataFrame:
-            DATABASE_ID  INDICATOR
-            0  WB.DATA360  indicator.one
-            1  WB.DATA360  indicator.two
+    Examples:
 
-        Output DataFrame:
-            DATABASE_ID      INDICATOR
-            0  WB.DATA360  WB_DATA360_INDICATOR_ONE
-            1  WB.DATA360  WB_DATA360_INDICATOR_TWO
+        - Input DataFrame:
+        
+            | row |   DATABASE_ID   | INDICATOR                 |
+            | --  | ------------------------ | ------------------------- |
+            | 0   | WB.DATA360      | indicator.one  |
+            | 1   | WB.DATA360      | indicator.two  |
+
+        - Output DataFrame:
+        
+            | row |   DATABASE_ID   | INDICATOR                 |
+            | --  | ------------------------ | --------------------------------------------------- |
+            | 0   | WB.DATA360      | WB_DATA360_INDICATOR_ONE  |
+            | 1   | WB.DATA360      | WB_DATA360_INDICATOR_TWO  |
+            
     """
     # Extract the unique values of the 'DATABASE_ID' column
     dataset_id = df["DATABASE_ID"].unique()
@@ -439,27 +428,28 @@ def standardize_indicator_id(df):
     return df
 
 def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
-    """
-    Finalizes the DataFrame for a successful upload into an SDMX database by fixing the 'INDICATOR' values,
-    adding necessary reference columns, and reordering the columns.
+    """Standardizes the DataFrame for SDMX upload.
 
-    Parameters:
-    - df (pd.DataFrame): The input DataFrame to modify.
-    - dataset_id (str): The dataset identifier to prepend to the 'INDICATOR' values.
-    - dsd (str): The Data Structure Definition (DSD) identifier.
-    - structure (str): The structure type. Default is 'datastructure'.
-      Potential options accepted by SDMX for structure include:
-      - 'datastructure': Represents a data structure definition.
-      - 'metadataflow': Represents a metadata flow definition.
-      - 'dataflow': Represents a data flow definition.
-    - action (str): The action type. Default is 'I'.
-      Potential options accepted by SDMX for action include:
-      - 'I': Insert
-      - 'U': Update
-      - 'D': Delete
+    Finalizes the DataFrame for a successful upload into an SDMX database by fixing the 'INDICATOR' values, adding necessary reference columns, and reordering the columns.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to modify.
+        dataset_id (str): The dataset identifier to prepend to the 'INDICATOR' values.
+        dsd (str): The Data Structure Definition (DSD) identifier.
+        structure (str): The structure type. Default is 'datastructure'. Potential options accepted by SDMX for structure include:
+            
+            - 'datastructure': Represents a data structure definition.
+            - 'metadataflow': Represents a metadata flow definition.
+            - 'dataflow': Represents a data flow definition.
+        
+        action (str): The action type. Default is 'I'. Potential options accepted by SDMX for action include:
+    
+            - 'I': Insert
+            - 'U': Update
+            - 'D': Delete
 
     Returns:
-    - pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values, added reference columns, and reordered columns.
+        pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values, added reference columns, and reordered columns.
     """
 
     # QUALITY ASSURANCE OPERATION
@@ -487,14 +477,11 @@ def read_mapping(path):
     Reads a JSON file and parses its content into DataFrames.
 
     The function processes the JSON data with four main keys:
-      1. "schema_version": This key contains the version of the schema.
-      2. "dsd_id": This key contains the Data Structure Definition ID.
-      3. "components": This key is expected to contain a flat structure,
-         which is converted into a single DataFrame named "components".
-      4. "representation": This key contains multiple sub-keys, each of which
-         is associated with a flat structure. Each valid sub-key is converted
-         into a separate DataFrame. Sub-keys with empty or invalid content
-         are skipped.
+
+        1. "schema_version": This key contains the version of the schema.
+        2. "dsd_id": This key contains the Data Structure Definition ID.
+        3. "components": This key is expected to contain a flat structure, which is converted into a single DataFrame named "components".
+        4. "representation": This key contains multiple sub-keys, each of which is associated with a flat structure. Each valid sub-key is converted into a separate DataFrame. Sub-keys with empty or invalid content are skipped.
 
     Additionally, all occurrences of the string "NA" in the JSON data are
     converted to missing values (pd.NA) in the resulting DataFrames.
@@ -507,13 +494,10 @@ def read_mapping(path):
             - The "schema_version" value is stored under the key 'schema_version'.
             - The "dsd_id" value is stored under the key 'dsd_id'.
             - The "components" DataFrame is stored under the key 'components'.
-            - Each valid sub-key in "representation" is stored as a DataFrame
-              under its corresponding key.
+            - Each valid sub-key in "representation" is stored as a DataFrameunder its corresponding key.
 
     Raises:
-        ValueError: If the "components" key is missing, the "representation"
-                    key is invalid, or a sub-key in "representation" has an
-                    unexpected format.
+        ValueError: If the "components" key is missing, the "representation" key is invalid, or a sub-key in "representation" has an unexpected format.
     """
     # Load JSON data from file
     with open(path, "r") as file:
@@ -568,11 +552,9 @@ def read_mapping(path):
 
 # region Functions to validate formatted dataset
 def validate_dataset_local(df, schema=None, valid=None) -> pd.DataFrame:
-    """
-    Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
+    """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
 
-    Either a schema or a precomputed 'valid' object must be provided.
-    This design allows you to avoid re-computing the validation info for multiple datasets.
+    Either a schema or a precomputed 'valid' object must be provided. This design allows you to avoid re-computing the validation info for multiple datasets.
 
     Args:
         df (pd.DataFrame): The DataFrame to be validated.
@@ -580,8 +562,7 @@ def validate_dataset_local(df, schema=None, valid=None) -> pd.DataFrame:
         valid: Precomputed validation information (optional).
 
     Returns:
-        pd.DataFrame: A DataFrame containing all validation errors.
-                      Each row represents one error with columns like 'Validation' and 'Error'.
+        pd.DataFrame: A DataFrame containing all validation errors. Each row represents one error with columns like 'Validation' and 'Error'.
     """
     # Compute validation info only if not provided
     if valid is None:
@@ -621,13 +602,12 @@ def validate_dataset_local(df, schema=None, valid=None) -> pd.DataFrame:
 def validate_columns(
     df, valid_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 ):
-    """
-    Validate that all columns in the DataFrame are part of the specified components or sdmx_cols.
+    """Validate that all columns in the DataFrame are part of the specified components or sdmx_cols.
 
     Args:
         df (pd.DataFrame): The DataFrame to validate.
         valid_columns (list): List of valid component names.
-        sdmx_cols (list, optional): List of additional valid column names. Defaults to ["STRUCTURE", "STRUCTURE_ID", "ACTION"].
+        sdmx_cols (list, optional): List of additional valid column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
 
     Raises:
         ValueError: If any column in the DataFrame is not in the list of valid components or sdmx_cols.
@@ -645,9 +625,9 @@ def validate_mandatory_columns(
     Validate that all mandatory columns are present in the DataFrame.
 
     Args:
-    df (pd.DataFrame): The DataFrame to validate.
-    mandatory_columns (list): List of mandatory component names.
-    sdmx_cols (list, optional): List of additional mandatory column names. Defaults to ["STRUCTURE", "STRUCTURE_ID", "ACTION"].
+        df (pd.DataFrame): The DataFrame to validate.
+        mandatory_columns (list): List of mandatory component names.
+        sdmx_cols (list, optional): List of additional mandatory column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
 
     Raises:
         ValueError: If any mandatory column is not present in the DataFrame.
