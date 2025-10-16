@@ -3,6 +3,12 @@ import numpy as np
 import pysdmx as px
 
 from tidysdmx.qa_utils import *
+import warnings
+
+from pysdmx.io.format import StructureFormat # To extract json format
+from pysdmx.api import fmr # CLient to connect to FMR
+from urllib.parse import urljoin
+from typing import Literal
 
 def check_dict_keys(dict1, dict2):
     """Checks whether the sorted keys of two dictionaries are the same.
@@ -70,6 +76,10 @@ def create_keys_dict(input_dict):
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
     """Fetches the Data Structure Definition (DSD) schema from a given Fusion Metadata Registry (FMR) URL.
 
+    DEPRECATION:
+        This function is deprecated and will be removed in a future release.
+        Use `fetch_schema` instead.
+
     Args:
         fmr_params (dict): It has base url and endpoints to access FMR's API.
         env (str): FMR Environment to get the data from. It could be 'sandbox', 'qa', 'dev' or 'prod'.
@@ -86,6 +96,14 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
     Examples:
         >>> schema = fetch_dsd_schema("https://example.com/fmr", "WB:WDI(1.0)")
     """
+    
+    warnings.warn(
+        "fetch_dsd_schema is deprecated and will be removed in a future release. "
+        "Please use fetch_schema instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
     format = px.io.format.StructureFormat.FUSION_JSON
 
     fmr_url = fmr_params[env]["url"]
@@ -101,6 +119,39 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
     agency, id, version = parse_dsd_id(dsd_id)
     schema = client.get_schema("datastructure", agency, id, version)
     return schema
+
+def fetch_schema(
+		base_url:str,
+		artefact_id: str,
+		context: Literal["dataflow", "datastructure", "provisionagreement"]):
+	"""Fetches the schema of a specified artefact from an SDMX registry.
+	
+	Args:
+		base_url (str): The base URL of the FMR.
+		artefact_id (str): The identifier of the artefact, typically in the format "agency:id(version)".
+        context (Literal["dataflow", "datastructure", "provisionagreement"]): The context of the artefact to fetch.
+		
+	Returns:
+		schema: The fetched schema object.
+	"""
+	format = StructureFormat.FUSION_JSON
+
+	# Ensure the URL is syntactically valid
+	base_url = urljoin(base_url, "/FMR/sdmx/v2/")
+
+	# Initialize the client
+	client = fmr.RegistryClient(
+        base_url,
+        format=format,
+    )
+
+	# Parse the artefact ID
+	agency, id, version = parse_artefact_id(artefact_id)
+
+	# Fetch the schema
+	schema = client.get_schema(context, agency, id, version)
+	
+	return schema
 
 def extract_validation_info(schema):
     """
@@ -134,6 +185,10 @@ def parse_dsd_id(dsd_id):
     """
     Parses the Data Structure Definition (DSD) identifier into its components.
 
+    DEPRECATION:
+        This function is deprecated and will be removed in a future release.
+        Use `parse_artefact_id` instead.
+
     Args:
         dsd_id (str): The identifier of the Data Structure Definition, typically in the format "agency:id(version)".
 
@@ -143,13 +198,44 @@ def parse_dsd_id(dsd_id):
     Raises:
         ValueError: If the dsd_id is not in the expected format.
     """
+
+    warnings.warn(
+        "parse_dsd_id is deprecated and will be removed in a future release. "
+        "Please use parse_artefact_id instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
     try:
-        agency, rest = dsd_id.split(":")
-        id, version = rest.split("(")
-        version = version.rstrip(")")
-        return agency, id, version
-    except ValueError:
+        agency, rest = dsd_id.split(":", 1)
+        id_part, version_part = rest.split("(", 1)
+        version = version_part.rstrip(")")
+        return agency, id_part, version
+    except Exception:
         raise ValueError("Invalid dsd_id format. Expected format: 'agency:id(version)'")
+    
+
+def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
+    """Parses artefact identifier (DSD, Dataflow, Codelist, etc) into its components: agency, id and version.
+
+    Args:
+        artefact_id (str): The identifier of the artefact, typically in the format "agency:id(version)".
+
+    Returns:
+        tuple[str, str, str]: A tuple containing the agency, id, and version.
+
+    Raises:
+        ValueError: If the artefact_id is not in the expected format.
+    """
+
+    try:
+        agency, rest = artefact_id.split(":", 1)
+        id_part, version_part = rest.split("(", 1)
+        version = version_part.rstrip(")")
+        return agency, id_part, version
+    except Exception:
+        raise ValueError("Invalid artefact_id format. Expected format: 'agency:id(version)'")
+    
 
 def standardize_sdmx(data, mapping):
     """Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
