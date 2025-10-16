@@ -6,45 +6,85 @@ import pytest
 from tidysdmx import tidysdmx as tx
 
 
+class parse_dsd_id:
+    # Test cases for the parse_dsd_id function
+    def test_parse_dsd_id_valid_input():
+        # Test with a valid DSD ID
+        dsd_id = "WB:WDI(1.0)"
+        expected_result = ("WB", "WDI", "1.0")
+        assert tx.parse_dsd_id(dsd_id) == expected_result
 
-# Test cases for the parse_dsd_id function
-def test_parse_dsd_id_valid_input():
-    # Test with a valid DSD ID
-    dsd_id = "WB:WDI(1.0)"
-    expected_result = ("WB", "WDI", "1.0")
-    assert tx.parse_dsd_id(dsd_id) == expected_result
+    def test_parse_dsd_id_missing_colon():
+        # Test with a DSD ID missing the colon
+        dsd_id = "WBWDI(1.0)"
+        try:
+            tx.parse_dsd_id(dsd_id)
+        except ValueError as e:
+            assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
 
-def test_parse_dsd_id_missing_colon():
-    # Test with a DSD ID missing the colon
-    dsd_id = "WBWDI(1.0)"
-    try:
-        tx.parse_dsd_id(dsd_id)
-    except ValueError as e:
-        assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
+    def test_parse_dsd_id_missing_parentheses():
+        # Test with a DSD ID missing the parentheses
+        dsd_id = "WB:WDI1.0"
+        try:
+            tx.parse_dsd_id(dsd_id)
+        except ValueError as e:
+            assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
 
-def test_parse_dsd_id_missing_parentheses():
-    # Test with a DSD ID missing the parentheses
-    dsd_id = "WB:WDI1.0"
-    try:
-        tx.parse_dsd_id(dsd_id)
-    except ValueError as e:
-        assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
+    def test_parse_dsd_id_empty_string():
+        # Test with an empty string
+        dsd_id = ""
+        try:
+            tx.parse_dsd_id(dsd_id)
+        except ValueError as e:
+            assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
 
-def test_parse_dsd_id_empty_string():
-    # Test with an empty string
-    dsd_id = ""
-    try:
-        tx.parse_dsd_id(dsd_id)
-    except ValueError as e:
-        assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
+    def test_parse_dsd_id_extra_colon():
+        # Test with an extra colon in the DSD ID
+        dsd_id = "WB:WDI:Extra(1.0)"
+        try:
+            tx.parse_dsd_id(dsd_id)
+        except ValueError as e:
+            assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
 
-def test_parse_dsd_id_extra_colon():
-    # Test with an extra colon in the DSD ID
-    dsd_id = "WB:WDI:Extra(1.0)"
-    try:
-        tx.parse_dsd_id(dsd_id)
-    except ValueError as e:
-        assert str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
+class parse_artefact_id:
+    # Test cases for the parse_artefact_id function
+    def test_parse_artefact_id_valid_input():
+        # Test with a valid artefact ID
+        artefact_id = "WB:WDI(1.0)"
+        expected_result = ("WB", "WDI", "1.0")
+        assert tx.parse_artefact_id(artefact_id) == expected_result
+
+    def test_parse_artefact_id_missing_colon():
+        # Test with a artefact ID missing the colon
+        artefact_id = "WBWDI(1.0)"
+        try:
+            tx.parse_artefact_id(artefact_id)
+        except ValueError as e:
+            assert str(e) == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+
+    def test_parse_artefact_id_missing_parentheses():
+        # Test with a artefact ID missing the parentheses
+        artefact_id = "WB:WDI1.0"
+        try:
+            tx.parse_artefact_id(artefact_id)
+        except ValueError as e:
+            assert str(e) == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+
+    def test_parse_artefact_id_empty_string():
+        # Test with an empty string
+        artefact_id = ""
+        try:
+            tx.parse_artefact_id(artefact_id)
+        except ValueError as e:
+            assert str(e) == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+
+    def test_parse_artefact_id_extra_colon():
+        # Test with an extra colon in the artefact ID
+        artefact_id = "WB:WDI:Extra(1.0)"
+        try:
+            tx.parse_artefact_id(artefact_id)
+        except ValueError as e:
+            assert str(e) == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
 
 # Test standardize_indicator_id()
 def test_standardize_indicator_id_basic():
