@@ -538,3 +538,17 @@ class TestCreateKeysDict:
             "another.file.with.periods": "another.file.with.periods.json",
         }
         assert tx.create_keys_dict(input_dict) == expected_output
+
+
+# Test for fetch_schema()
+class TestFetchSchema:
+    def test_fetch_schema_valid(self):
+        # This is a placeholder test. In a real scenario, you would mock the network call.
+        base_url = "https://fmrqa.worldbank.org/"
+        artefact_id = "WB.DATA360:DS_DATA360(1.3)"
+        context = "datastructure"
+        try:
+            schema = tx.fetch_schema(base_url, artefact_id, context)
+            assert schema is not None 
+        except Exception as e:
+            pytest.fail(f"Unexpected exception raised: {e}")
