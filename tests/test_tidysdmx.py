@@ -1,4 +1,5 @@
 import pandas as pd
+from pandas.testing import assert_frame_equal
 import numpy as np
 import pysdmx as px
 import pytest
@@ -552,3 +553,104 @@ class TestFetchSchema:
             assert schema is not None 
         except Exception as e:
             pytest.fail(f"Unexpected exception raised: {e}")
+
+
+# Test for transform_source_to_target()
+class TestTransformSourceToTarget:
+    """Unit tests for the transform_source_to_target function."""
+
+    # Fixtures
+    @pytest.fixture
+    def sample_raw_df(self):
+        """Sample raw DataFrame for testing."""
+        return pd.DataFrame({
+            "col_a": [1, 2, 3],
+            "col_b": ["x", "y", "z"],
+            "col_extra": [10, 20, 30]
+        })
+
+    @pytest.fixture
+    def sample_mapping_dict(self):
+        """Sample mapping dict that includes components."""
+        return {
+            "components": [
+                {"SOURCE": "col_a", "TARGET": "target_a"},
+                {"SOURCE": "col_b", "TARGET": "target_b"},
+                {"SOURCE": "NA", "TARGET": "target_c"}
+            ]
+        }
+    
+    # Tests
+    def test_basic_transformation(self, sample_raw_df, sample_mapping_dict):
+        """Test that source columns are properly renamed and mapped."""
+        expected_df = pd.DataFrame({
+            "target_a": [1, 2, 3],
+            "target_b": ["x", "y", "z"],
+            "target_c": [np.nan, np.nan, np.nan]
+        })
+        # Change dtype to be consistent with what is created by the function
+        expected_df["target_c"] = expected_df["target_c"].astype(object) 
+
+        result_df = tx.transform_source_to_target(sample_raw_df, 
+                                                  sample_mapping_dict)
+        assert_frame_equal(result_df, expected_df)
+
+    def test_missing_source_column(self, sample_raw_df):
+        """If a source column doesn't exist, the target should exist but be empty."""
+        mapping = {
+            "components": [
+                {"SOURCE": "nonexistent", "TARGET": "target_x"},
+                {"SOURCE": "col_a", "TARGET": "target_a"},
+            ]
+        }
+
+        result_df = tx.transform_source_to_target(sample_raw_df, mapping)
+        
+        expected_df = pd.DataFrame({
+            "target_x": [pd.NA, pd.NA, pd.NA],
+            "target_a": [1, 2, 3]
+        })
+
+        assert set(result_df.columns) == set(expected_df.columns)
+        assert result_df["target_a"].equals(expected_df["target_a"])
+        assert result_df["target_x"].isna().all()
+
+    def test_mapping_as_dataframe(self, sample_raw_df):
+        """Ensure it works if mapping['components'] is a DataFrame instead of a list."""
+        components_df = pd.DataFrame([
+            {"SOURCE": "col_a", "TARGET": "target_a"},
+            {"SOURCE": "col_b", "TARGET": "target_b"}
+        ])
+        mapping = {"components": components_df}
+
+        result_df = tx.transform_source_to_target(sample_raw_df, mapping)
+        expected_df = pd.DataFrame({
+            "target_a": [1, 2, 3],
+            "target_b": ["x", "y", "z"]
+        })
+        assert_frame_equal(result_df, expected_df)
+
+    def test_empty_mapping(self, sample_raw_df):
+        """If mapping is empty, should raise an error"""
+        mapping = {"components": []}
+        with pytest.raises(KeyError, match="The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty."):
+            tx.transform_source_to_target(sample_raw_df, mapping)
+
+    def test_missing_components_key(self, sample_raw_df):
+        """Should raise KeyError if mapping has no 'components' key."""
+        mapping = {}
+        with pytest.raises(KeyError, match="The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty."):
+            tx.transform_source_to_target(sample_raw_df, mapping)
+
+    def test_extra_columns_in_raw_are_ignored(self, 
+                                              sample_raw_df, 
+                                              sample_mapping_dict):
+        """Ensure extra columns in raw not defined in mapping are ignored."""
+        result_df = tx.transform_source_to_target(sample_raw_df, sample_mapping_dict)
+        assert set(result_df.columns) == {"target_a", "target_b", "target_c"}
+        assert "col_extra" not in result_df.columns
+
+    def test_invalid_mapping_type(self, sample_raw_df):
+        """Optional: ensure invalid mapping type raises an error (if enforced later)."""
+        with pytest.raises(Exception):
+            tx.transform_source_to_target(sample_raw_df, ["invalid_structure"])

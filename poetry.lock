@@ -2052,14 +2052,14 @@ windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
 name = "pysdmx"
-version = "1.7.0"
+version = "1.8.1"
 description = "Your opinionated Python SDMX library"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "pysdmx-1.7.0-py3-none-any.whl", hash = "sha256:daa22c552689c57741116b3e677c0b66f50dd1b8fe9b025fb77cb210b47b55f8"},
-    {file = "pysdmx-1.7.0.tar.gz", hash = "sha256:e8f1aa850f7063f77b239c52ebc30b1b98b5029d5ee4089181622daad390d089"},
+    {file = "pysdmx-1.8.1-py3-none-any.whl", hash = "sha256:153101199e54e410dd96ab28da900f5e198edc85ad4c33a8cd10a349471fe3c3"},
+    {file = "pysdmx-1.8.1.tar.gz", hash = "sha256:3ad3373d9501d22451db3f93da9f3aae7a3d3a390ace62be865b3705da843c95"},
 ]
 
 [package.dependencies]

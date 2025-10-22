@@ -1,0 +1,292 @@
+{
+  "schema_version": "v1",
+  "dsd_id": "WB.DATA360:DS_DATA360(1.2)",
+  "components": [
+    {
+      "SOURCE": "NA",
+      "TARGET": "FREQ"
+    },
+    {
+      "SOURCE": "countrycode",
+      "TARGET": "REF_AREA"
+    },
+    {
+      "SOURCE": "indicator",
+      "TARGET": "INDICATOR"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "SEX"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "AGE"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "URBANISATION"
+    },
+    {
+      "SOURCE": "indicator",
+      "TARGET": "UNIT_MEASURE"
+    },
+    {
+      "SOURCE": "welftype",
+      "TARGET": "COMP_BREAKDOWN_1"
+    },
+    {
+      "SOURCE": "period",
+      "TARGET": "COMP_BREAKDOWN_2"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "COMP_BREAKDOWN_3"
+    },
+    {
+      "SOURCE": "year",
+      "TARGET": "TIME_PERIOD"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "AGG_METHOD"
+    },
+    {
+      "SOURCE": "indicator",
+      "TARGET": "UNIT_TYPE"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "DECIMALS"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "DATABASE_ID"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "TIME_FORMAT"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "COMMENT_TS"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "COMMENT_OBS"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "UNIT_MULT"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "OBS_STATUS"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "DATA_SOURCE"
+    },
+    {
+      "SOURCE": "NA",
+      "TARGET": "OBS_CONF"
+    },
+    {
+      "SOURCE": "value",
+      "TARGET": "OBS_VALUE"
+    }
+  ],
+  "representation": {
+    "FREQ": [
+        {
+            "TARGET": "A",
+            "LABEL": "Annual"
+        }
+    ],
+    "REF_AREA": {},
+    "INDICATOR": [
+      {
+        "SOURCE": "WB.SP.meanb40",
+        "TARGET": "WB_SHP_MEANB40"
+      },
+      {
+        "SOURCE": "WB.SP.median",
+        "TARGET": "WB_SHP_MEDIAN"
+      },
+      {
+        "SOURCE": "WB.SP.meantotal",
+        "TARGET": "WB_SHP_MEANTOTAL"
+      }      
+        ],
+    "SEX": [
+            {
+                "TARGET": "_Z",
+                "LABEL": "NA"
+            }
+        ],
+    "AGE": [
+            {
+                "TARGET": "_Z",
+                "LABEL": "NA"
+            }
+        ],
+    "URBANISATION": [
+            {
+                "TARGET": "_Z",
+                "LABEL": "NA"
+            }
+        ],
+    "UNIT_MEASURE": [
+      {
+        "SOURCE": "\\.meanb40",
+        "TARGET": "PPP_PS_D"
+      },
+      {
+        "SOURCE": "\\.median",
+        "TARGET": "PPP_PS_D"
+      },
+      {
+        "SOURCE": "\\.meantotal",
+        "TARGET": "PPP_PS_D"
+      }
+    ],
+    "COMP_BREAKDOWN_1": [
+      {
+        "SOURCE": "INC",
+        "TARGET": "WB_PIP_I"
+      },
+      {
+        "SOURCE": "CONS",
+        "TARGET": "WB_PIP_C"
+      }
+    ],
+    "COMP_BREAKDOWN_2": [
+      {"SOURCE": "2008-2012", "TARGET": "WB_SHP_PERIOD_1"},
+      {"SOURCE": "2014-2017", "TARGET": "WB_SHP_PERIOD_2"},
+      {"SOURCE": "2013-2018", "TARGET": "WB_SHP_PERIOD_3"},
+      {"SOURCE": "2006-2011", "TARGET": "WB_SHP_PERIOD_4"},
+      {"SOURCE": "2007-2012", "TARGET": "WB_SHP_PERIOD_5"},
+      {"SOURCE": "2009-2014", "TARGET": "WB_SHP_PERIOD_6"},
+      {"SOURCE": "2011-2016", "TARGET": "WB_SHP_PERIOD_7"},
+      {"SOURCE": "2012-2017", "TARGET": "WB_SHP_PERIOD_8"},
+      {"SOURCE": "2014-2019", "TARGET": "WB_SHP_PERIOD_9"},
+      {"SOURCE": "2016-2020", "TARGET": "WB_SHP_PERIOD_10"},
+      {"SOURCE": "2016-2021", "TARGET": "WB_SHP_PERIOD_11"},
+      {"SOURCE": "2008-2013", "TARGET": "WB_SHP_PERIOD_12"},
+      {"SOURCE": "2010-2015", "TARGET": "WB_SHP_PERIOD_13"},
+      {"SOURCE": "2014-2018", "TARGET": "WB_SHP_PERIOD_14"},
+      {"SOURCE": "2015-2020", "TARGET": "WB_SHP_PERIOD_15"},
+      {"SOURCE": "2011-2015", "TARGET": "WB_SHP_PERIOD_16"},
+      {"SOURCE": "2005-2010", "TARGET": "WB_SHP_PERIOD_17"},
+      {"SOURCE": "2010-2016", "TARGET": "WB_SHP_PERIOD_18"},
+      {"SOURCE": "2007-2011", "TARGET": "WB_SHP_PERIOD_19"},
+      {"SOURCE": "2015-2018", "TARGET": "WB_SHP_PERIOD_20"},
+      {"SOURCE": "2015-2019", "TARGET": "WB_SHP_PERIOD_21"},
+      {"SOURCE": "2012-2015", "TARGET": "WB_SHP_PERIOD_22"},
+      {"SOURCE": "2002-2009", "TARGET": "WB_SHP_PERIOD_23"},
+      {"SOURCE": "2009-2015", "TARGET": "WB_SHP_PERIOD_24"},
+      {"SOURCE": "2010-2013", "TARGET": "WB_SHP_PERIOD_25"},
+      {"SOURCE": "2009-2013", "TARGET": "WB_SHP_PERIOD_26"},
+      {"SOURCE": "2013-2017", "TARGET": "WB_SHP_PERIOD_27"},
+      {"SOURCE": "2013-2015", "TARGET": "WB_SHP_PERIOD_28"},
+      {"SOURCE": "2013-2016", "TARGET": "WB_SHP_PERIOD_29"},
+      {"SOURCE": "2008-2015", "TARGET": "WB_SHP_PERIOD_30"},
+      {"SOURCE": "2007-2014", "TARGET": "WB_SHP_PERIOD_31"},
+      {"SOURCE": "2004-2012", "TARGET": "WB_SHP_PERIOD_32"},
+      {"SOURCE": "2005-2011", "TARGET": "WB_SHP_PERIOD_33"},
+      {"SOURCE": "2008-2011", "TARGET": "WB_SHP_PERIOD_34"},
+      {"SOURCE": "2004-2009", "TARGET": "WB_SHP_PERIOD_35"},
+      {"SOURCE": "2010-2014", "TARGET": "WB_SHP_PERIOD_36"},
+      {"SOURCE": "2017-2022", "TARGET": "WB_SHP_PERIOD_37"},
+      {"SOURCE": "2017-2021", "TARGET": "WB_SHP_PERIOD_38"},
+      {"SOURCE": "2010-2012", "TARGET": "WB_SHP_PERIOD_39"},
+      {"SOURCE": "2008-2014", "TARGET": "WB_SHP_PERIOD_40"},
+      {"SOURCE": "2004-2010", "TARGET": "WB_SHP_PERIOD_41"},
+      {"SOURCE": "2012-2016", "TARGET": "WB_SHP_PERIOD_42"},
+      {"SOURCE": "2009-2012", "TARGET": "WB_SHP_PERIOD_43"},
+      {"SOURCE": "2011-2014", "TARGET": "WB_SHP_PERIOD_44"},
+      {"SOURCE": "2015-2017", "TARGET": "WB_SHP_PERIOD_45"},
+      {"SOURCE": "2004-2011", "TARGET": "WB_SHP_PERIOD_46"},
+      {"SOURCE": "2006-2012", "TARGET": "WB_SHP_PERIOD_47"},
+      {"SOURCE": "2006-2010", "TARGET": "WB_SHP_PERIOD_48"},
+      {"SOURCE": "2008-2010", "TARGET": "WB_SHP_PERIOD_49"},
+      {"SOURCE": "2012-2018", "TARGET": "WB_SHP_PERIOD_50"},
+      {"SOURCE": "2006-2009", "TARGET": "WB_SHP_PERIOD_51"},
+      {"SOURCE": "2016-2019", "TARGET": "WB_SHP_PERIOD_52"},
+      {"SOURCE": "2011-2018", "TARGET": "WB_SHP_PERIOD_53"},
+      {"SOURCE": "2016-2018", "TARGET": "WB_SHP_PERIOD_54"},
+      {"SOURCE": "2002-2008", "TARGET": "WB_SHP_PERIOD_55"},
+      {"SOURCE": "2003-2009", "TARGET": "WB_SHP_PERIOD_56"},
+      {"SOURCE": "2005-2009", "TARGET": "WB_SHP_PERIOD_57"},
+      {"SOURCE": "2003-2010", "TARGET": "WB_SHP_PERIOD_58"},
+      {"SOURCE": "2007-2013", "TARGET": "WB_SHP_PERIOD_59"},
+      {"SOURCE": "2015-2021", "TARGET": "WB_SHP_PERIOD_60"},
+      {"SOURCE": "2009-2011", "TARGET": "WB_SHP_PERIOD_61"},
+      {"SOURCE": "2007-2010", "TARGET": "WB_SHP_PERIOD_62"},
+      {"SOURCE": "2012-2014", "TARGET": "WB_SHP_PERIOD_63"},
+      {"SOURCE": "2009-2016", "TARGET": "WB_SHP_PERIOD_64"},
+      {"SOURCE": "2005-2012", "TARGET": "WB_SHP_PERIOD_65"},
+      {"SOURCE": "2011-2017", "TARGET": "WB_SHP_PERIOD_66"}],
+    "COMP_BREAKDOWN_3": [
+            {
+                "TARGET": "_Z",
+                "LABEL": "NA"
+            }
+        ],
+    "TIME_PERIOD": {},
+    "AGG_METHOD": {},
+    "UNIT_TYPE": [
+      {
+        "SOURCE": "\\.meanb40",
+        "TARGET": "CUR"
+      },
+      {
+        "SOURCE": "\\.median",
+        "TARGET": "CUR"
+      },
+      {
+        "SOURCE": "\\.meantotal",
+        "TARGET": "CUR"
+      }
+    ],
+    "DECIMALS": [
+            {
+                "TARGET": "2",
+                "LABEL": "Two"
+            }
+        ],
+    "DATABASE_ID": [
+      {
+        "TARGET": "WB_SHP",
+        "LABEL": "Global Database Of Shared Prosperity"
+      }
+    ],
+    "TIME_FORMAT": [
+            {
+                "TARGET": "602",
+                "LABEL": "CCYY"
+            }
+        ],
+    "COMMENT_TS": {},
+    "COMMENT_OBS": {},
+    "UNIT_MULT": [
+            {
+                "TARGET": 0,
+                "LABEL": "Units"
+            }
+        ],
+    "OBS_STATUS": {},
+    "DATA_SOURCE": [
+      {
+        "TARGET": "WB_SHP",
+        "LABEL": "Global Database Of Shared Prosperity"
+      }
+    ],
+    "OBS_CONF": [
+            {
+                "TARGET": "PU",
+                "LABEL": "Public"
+            }
+        ],
+    "OBS_VALUE": {}
+  }
+}
