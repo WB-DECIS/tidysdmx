@@ -1,8 +1,14 @@
 # Changelog
 
 <!--next-version-placeholder-->
-## v0.2.0 (16/10/2025)
+## v0.3.0 (23/10/2025)
+### Changed
 
+- Updated function `transform_source_to_target` function and added tests to it.
+- Modified functions that were in the package but not yet passed QA, to support some pipelines in Databricks.
+- Users can now access import functions directly without referring to submodules.
+
+## v0.2.0 (16/10/2025)
 ### Added
 
 - Added function `fetch_schema` to fetch DSDs, Dataflows and Provision agreements from FMR.
@@ -15,5 +21,4 @@
 
 
 ## v0.1.0 (14/03/2025)
-
 - First release of `tidysdmx`!
