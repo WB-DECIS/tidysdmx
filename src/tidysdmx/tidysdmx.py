@@ -522,8 +522,15 @@ def standardize_indicator_id(df):
 			| 1   | WB.DATA360      | WB_DATA360_INDICATOR_TWO  |
 			
 	"""
-	# Extract the unique values of the 'DATABASE_ID' column
-	dataset_id = df["DATABASE_ID"].unique()
+	# Extract the unique values of the 'DATASET_ID'/'DATABASE_ID' column
+	id_column = None
+	for col in ["DATABASE_ID", "DATASET_ID"]:
+		if col in df.columns:
+			id_column = col
+			break
+
+	# Extract unique values
+	dataset_id = df[id_column].unique()
 	if len(dataset_id) != 1:
 		raise ValueError(
 			f"The 'DATABASE_ID' column has {len(dataset_id)} unique values. Expected exactly 1 unique value."
