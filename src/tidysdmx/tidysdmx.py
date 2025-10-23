@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pysdmx as px
+import json
 
 from tidysdmx.qa_utils import *
 import warnings
@@ -321,6 +322,11 @@ def vectorized_lookup_ordered_v1(series, mapping_df):
 	if mapping_df.empty:
 		return series
 
+	# Sort mapping by length of SOURCE descending
+	mapping_df = mapping_df.copy()
+	mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
+	mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(columns="SOURCE_LEN")
+	
 	conditions = []
 	choices = []
 
@@ -368,7 +374,11 @@ def vectorized_lookup_ordered_v2(series, mapping_df):
 	# If there are no mapping rules, return the original series.
 	if mapping_df.empty:
 		return series
-
+	# Sort mapping by length of SOURCE descending
+	mapping_df = mapping_df.copy()
+	mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
+	mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(columns="SOURCE_LEN")
+	
 	conditions = []
 	choices = []
 
@@ -418,46 +428,45 @@ def map_to_sdmx(df, mapping):
 	# Extract schema version
 	schema_version = mapping["schema_version"]
 	# Remove the "components" key from mapping if present.
-	representation_mapping = mapping.copy()
-	for key in ["components", "schema_version", "dsd_id"]:
-		representation_mapping.pop(key, None)
+	representation_mapping = mapping.get("representation", {})
 
 	# Get the total number of items in the mapping.
 	total_items = len(representation_mapping)
 
 	# Iterate over each key in the mapping dictionary.
-	for index, (key, mapping_value) in enumerate(
-		representation_mapping.items(), start=1
-	):
-		logger.info(f"Processing {index}/{total_items}: {key}")
-		# Only apply mapping if the key exists in the DataFrame.
-		if key in df.columns:
-			# Convert mapping_value to a DataFrame if it is not already.
-			if not isinstance(mapping_value, pd.DataFrame):
-				mapping_value = pd.DataFrame(mapping_value)
+	for index, (key, mapping_value) in enumerate(representation_mapping.items(), start=1):
+		print(f"Processing {index}/{total_items}: {key}")
 
-			# Fixed mapping: if there's no SOURCE column, assign the fixed TARGET value to the entire column.
-			if (
-				"TARGET" in mapping_value.columns
-				and "SOURCE" not in mapping_value.columns
-			):
-				df[key] = mapping_value["TARGET"].iloc[0]
-			# Regex mapping: use the vectorized ordered lookup.
-			elif (
-				"SOURCE" in mapping_value.columns and "TARGET" in mapping_value.columns
-			):
-				if schema_version == "v1":
-					df[key] = vectorized_lookup_ordered_v1(df[key], mapping_value)
-				if schema_version == "v2":
-					df[key] = vectorized_lookup_ordered_v2(df[key], mapping_value)
-				else:
-					raise ValueError(f"Unsupported schema version: {schema_version}")
+		# Skip empty mappings
+		if not mapping_value:
+			print(f"Skipping '{key}' because mapping is empty")
+			continue
+
+		# Skip if column not in DataFrame
+		if key not in df.columns:
+			print(f"Skipping '{key}' because column not in DataFrame")
+			continue
+
+		# Ensure mapping_value is a DataFrame
+		if not isinstance(mapping_value, pd.DataFrame):
+			mapping_value = pd.DataFrame(mapping_value)
+
+		# Fixed mapping: no SOURCE column
+		if "TARGET" in mapping_value.columns and "SOURCE" not in mapping_value.columns:
+			df[key] = mapping_value["TARGET"].iloc[0]
+
+		# Regex / ordered lookup mapping: both SOURCE and TARGET exist
+		elif "SOURCE" in mapping_value.columns and "TARGET" in mapping_value.columns:
+			if schema_version == "v1":
+				df[key] = vectorized_lookup_ordered_v1(df[key], mapping_value)
+			elif schema_version == "v2":
+				df[key] = vectorized_lookup_ordered_v2(df[key], mapping_value)
 			else:
-				raise ValueError(
-					f"Invalid mapping for '{key}': expected 'SOURCE' and 'TARGET' columns."
-				)
+				raise ValueError(f"Unsupported schema version: {schema_version}")
+
 		else:
-			logger.warning(f"Key '{key}' not found in the mapping dictionnary.")
+			# This catches unexpected structures
+			print(f"Skipping '{key}': invalid mapping structure (expected SOURCE and TARGET columns)")
 
 	return df
 
@@ -513,14 +522,24 @@ def standardize_indicator_id(df):
 			| 1   | WB.DATA360      | WB_DATA360_INDICATOR_TWO  |
 			
 	"""
-	# Extract the unique values of the 'DATABASE_ID' column
-	dataset_id = df["DATABASE_ID"].unique()
+	# Extract the unique values of the 'DATASET_ID'/'DATABASE_ID' column
+	id_column = None
+	for col in ["DATABASE_ID", "DATASET_ID"]:
+		if col in df.columns:
+			id_column = col
+			break
+
+	# Extract unique values
+	dataset_id = df[id_column].unique()
 	if len(dataset_id) != 1:
 		raise ValueError(
 			f"The 'DATABASE_ID' column has {len(dataset_id)} unique values. Expected exactly 1 unique value."
 		)
 	dataset_id = dataset_id[0]
 	# Ensure INDICATOR IDs matches conventions
+	df["INDICATOR"] = df["INDICATOR"].astype(str)
+	dataset_id = str(dataset_id)
+
 	if not df["INDICATOR"].str.startswith(dataset_id).all():
 		df["INDICATOR"] = dataset_id + "_" + df["INDICATOR"]
 	if not df["INDICATOR"].str.isupper().all():
