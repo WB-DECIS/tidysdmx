@@ -1,3 +1,5 @@
+import pandas as pd
+
 def qa_coerce_numeric(df, numeric_columns):
     """
     Coerces values from specified numeric columns to numeric, and removes rows where values cannot be coerced to numeric.
@@ -19,10 +21,10 @@ def qa_coerce_numeric(df, numeric_columns):
 
             if not invalid_rows.empty:
                 # Log information about the rows being deleted
-                logger.info(
+                print(
                     f"Removing {len(invalid_rows)} rows from column '{column}' that cannot be coerced to numeric."
                 )
-                logger.debug(f"Invalid rows:\n{invalid_rows}")
+                print(f"Invalid rows:\n{invalid_rows}")
 
                 # Remove rows with NaN values in the numeric column
                 df = df.dropna(subset=[column])
@@ -50,7 +52,7 @@ def qa_remove_duplicates(df):
 
     if duplicates_removed > 0:
         # Log information about the rows being removed
-        logger.info(f"Removed {duplicates_removed} duplicate rows.")
+        print(f"Removed {duplicates_removed} duplicate rows.")
 
     return df
 

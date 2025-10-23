@@ -1,3 +1,5 @@
+from tidysdmx.tidysdmx import *
+
 def kd_read_mappings(mapping_files):
     """
     Fetch multiple mappings from different files.
@@ -85,13 +87,13 @@ def kd_validate_dataset_local(df, schema=None, valid=None):
     errors_df = validate_dataset_local(df, schema=schema, valid=valid)
 
     if not errors_df.empty:
-        logger.info(
+        print(
             "Validation finished with Errors! JSON report will be exported to working repository"
         )
         error_list = errors_df["Error"].tolist()  # Extract the error messages
         return False, {"ValidationReport": error_list}
     else:
-        logger.info("Complete - no errors")
+        print("Complete - no errors")
         return True, {}
 
 
@@ -115,12 +117,12 @@ def kd_validate_datasets_local(
     valid = extract_validation_info(schema)
 
     if boolean:
-        logger.info("Validating files against DSD...")
+        print("Validating files against DSD...")
 
         validated = {}
         error = {}
         for key in datasets.keys():
-            logger.info(f"Validating {key}")
+            print(f"Validating {key}")
             temp_df = datasets[key]()
             temp_validated, temp_error = kd_validate_dataset_local(
                 df=temp_df, valid=valid
