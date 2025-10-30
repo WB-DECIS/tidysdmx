@@ -672,52 +672,56 @@ def read_mapping(path):
 # endregion
 
 # region Functions to validate formatted dataset
-def validate_dataset_local(df, schema=None, valid=None) -> pd.DataFrame:
-	"""Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
+def validate_dataset_local(
+    df, schema=None, valid=None, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+) -> pd.DataFrame:
+    """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
 
-	Either a schema or a precomputed 'valid' object must be provided. This design allows you to avoid re-computing the validation info for multiple datasets.
+    Either a schema or a precomputed 'valid' object must be provided. This design allows you to avoid re-computing the validation info for multiple datasets.
 
-	Args:
-		df (pd.DataFrame): The DataFrame to be validated.
-		schema: The schema object (optional if 'valid' is provided).
-		valid: Precomputed validation information (optional).
+    Args:
+        df (pd.DataFrame): The DataFrame to be validated.
+        schema: The schema object (optional if 'valid' is provided).
+        valid: Precomputed validation information (optional).
 
-	Returns:
-		pd.DataFrame: A DataFrame containing all validation errors. Each row represents one error with columns like 'Validation' and 'Error'.
-	"""
-	# Compute validation info only if not provided
-	if valid is None:
-		if schema is None:
-			raise ValueError("Either a schema or precomputed 'valid' must be provided.")
-		valid = extract_validation_info(schema)
+    Returns:
+        pd.DataFrame: A DataFrame containing all validation errors. Each row represents one error with columns like 'Validation' and 'Error'.
+    """
+    # Compute validation info only if not provided
+    if valid is None:
+        if schema is None:
+            raise ValueError("Either a schema or precomputed 'valid' must be provided.")
+        valid = extract_validation_info(schema)
 
-	error_records = []
-	try:
-		validate_columns(df, valid_columns=valid["valid_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "columns", "Error": str(e)})
+    error_records = []
+    try:
+        validate_columns(df, valid_columns=valid["valid_comp"])
+    except ValueError as e:
+        error_records.append({"Validation": "columns", "Error": str(e)})
 
-	try:
-		validate_mandatory_columns(df, mandatory_columns=valid["mandatory_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "mandatory_columns", "Error": str(e)})
+    try:
+        validate_mandatory_columns(
+            df, mandatory_columns=valid["mandatory_comp"], sdmx_cols=sdmx_cols
+        )
+    except ValueError as e:
+        error_records.append({"Validation": "mandatory_columns", "Error": str(e)})
 
-	try:
-		validate_codelist_ids(df, valid["codelist_ids"])
-	except ValueError as e:
-		error_records.append({"Validation": "codelist_ids", "Error": str(e)})
+    try:
+        validate_codelist_ids(df, valid["codelist_ids"])
+    except ValueError as e:
+        error_records.append({"Validation": "codelist_ids", "Error": str(e)})
 
-	try:
-		validate_duplicates(df, dim_comp=valid["dim_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "duplicates", "Error": str(e)})
+    try:
+        validate_duplicates(df, dim_comp=valid["dim_comp"])
+    except ValueError as e:
+        error_records.append({"Validation": "duplicates", "Error": str(e)})
 
-	try:
-		validate_no_missing_values(df, mandatory_columns=valid["mandatory_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "missing_values", "Error": str(e)})
+    try:
+        validate_no_missing_values(df, mandatory_columns=valid["mandatory_comp"])
+    except ValueError as e:
+        error_records.append({"Validation": "missing_values", "Error": str(e)})
 
-	return pd.DataFrame(error_records)
+    return pd.DataFrame(error_records)
 
 
 def validate_columns(
