@@ -721,7 +721,7 @@ def validate_dataset_local(
     except ValueError as e:
         error_records.append({"Validation": "missing_values", "Error": str(e)})
 
-    return pd.DataFrame(error_records)
+    return pd.DataFrame(error_records, columns=["Validation", "Error"])
 
 
 def validate_columns(
