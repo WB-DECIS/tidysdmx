@@ -691,9 +691,7 @@ def validate_dataset_local(
         valid: Precomputed validation information (optional).
 
     Returns:
-        pd.DataFrame: A DataFrame containing all validation errors. Each row represents one error with
-                      columns defined by `error_columns`. If no errors, returns an empty DataFrame
-                      with these columns.
+        pd.DataFrame: A DataFrame containing all validation errors. Each row represents one type of error. 
     """
     # Define column names once
     error_columns = ["Validation", "Error"]
