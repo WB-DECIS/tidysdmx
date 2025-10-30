@@ -5,6 +5,7 @@ __version__ = version("tidysdmx")
 from .tidysdmx import *
 from .qa_utils import *
 from .kedro import *
+from .tidysdmx2 import *
 
 __all__ = ["fetch_dsd_schema", "fetch_schema", "extract_validation_info",
            "parse_dsd_id", "parse_artefact_id", "standardize_sdmx",
@@ -18,4 +19,4 @@ __all__ = ["fetch_dsd_schema", "fetch_schema", "extract_validation_info",
            "validate_no_missing_values", 
            "qa_coerce_numeric", "qa_remove_duplicates",
            "kd_read_mappings", "kd_standardize_sdmx",
-           "kd_validate_dataset_local", "kd_validate_datasets_local"]
+           "kd_validate_dataset_local", "kd_validate_datasets_local", "filter_raw", "map_structures"]
