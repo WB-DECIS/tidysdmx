@@ -22,18 +22,24 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, objec
             - dim_comp: List of dimension component names.
     """
     comp = schema.components
-    validation_info = {
-        "valid_comp": [c.id for c in comp],
-        "mandatory_comp": [c.id for c in comp if comp[c.id].required],
-        "coded_comp": [c.id for c in comp if comp[c.id].local_codes is not None],
-        "codelist_ids": get_codelist_ids(
-            comp, [c.id for c in comp if comp[c.id].local_codes is not None]
-        ),
-        "dim_comp": [c.id for c in comp if comp[c.id].role == px.model.Role.DIMENSION],
-    }
-    return validation_info
+    # Precompute reusable objects
+    valid_comp = [c.id for c in comp]
+    mandatory_comp = [c.id for c in comp if comp[c.id].required]
+    coded_comp = [c.id for c in comp if comp[c.id].local_codes is not None]
+    dim_comp = [c.id for c in comp if comp[c.id].role == px.model.Role.DIMENSION]
 
-def get_codelist_ids(comp, coded_comp):
+    out = {
+        "valid_comp": valid_comp,
+        "mandatory_comp": mandatory_comp,
+        "coded_comp": coded_comp,
+        "codelist_ids": get_codelist_ids(comp, coded_comp),
+        "dim_comp": dim_comp,
+    }
+
+    return out
+
+@typechecked
+def get_codelist_ids(comp: px.model.dataflow.Components, coded_comp: List) -> Dict[str, list[str]]:
     """
     Retrieve all codelist IDs for given coded components.
 
@@ -48,9 +54,10 @@ def get_codelist_ids(comp, coded_comp):
     for component in coded_comp:
         codes = comp[component].local_codes.items
         codelist_dict[component] = [code.id for code in codes]
+    
     return codelist_dict
 
-def filter_rows(df: pd.DataFrame, codelist_ids: Dict[str, List[Any]]) -> pd.DataFrame:
+def filter_rows(df: pd.DataFrame, codelist_ids: Dict[str, list[str]]) -> pd.DataFrame:
     """
     Filters out rows where values are not in the allowed codelist for coded columns.
     Compares as strings but does not change df dtypes.

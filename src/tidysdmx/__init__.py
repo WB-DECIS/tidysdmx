@@ -6,6 +6,7 @@ from .tidysdmx import *
 from .qa_utils import *
 from .kedro import *
 from .tidysdmx2 import *
+from .validation import extract_validation_info, get_codelist_ids, filter_rows
 
 __all__ = ["fetch_dsd_schema", "fetch_schema", "extract_validation_info",
            "parse_dsd_id", "parse_artefact_id", "standardize_sdmx",
