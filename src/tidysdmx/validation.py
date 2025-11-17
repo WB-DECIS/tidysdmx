@@ -57,6 +57,7 @@ def get_codelist_ids(comp: px.model.dataflow.Components, coded_comp: List) -> Di
     
     return codelist_dict
 
+@typechecked
 def filter_rows(df: pd.DataFrame, codelist_ids: Dict[str, list[str]]) -> pd.DataFrame:
     """
     Filters out rows where values are not in the allowed codelist for coded columns.
