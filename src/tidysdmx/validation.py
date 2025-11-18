@@ -82,9 +82,10 @@ def filter_rows(df: pd.DataFrame, codelist_ids: Dict[str, list[str]]) -> pd.Data
 
     return df.loc[~rows_to_drop].copy()
 
-def filter_raw(
+@typechecked
+def filter_tidy_raw(
     df: pd.DataFrame,
-    schema: Dict[str, Any],
+    schema: px.model.dataflow.Schema,
 ) -> pd.DataFrame:
     """
     Validate and filter SDMX-like input, returning a cleaned DataFrame.

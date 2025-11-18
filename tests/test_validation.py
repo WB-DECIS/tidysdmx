@@ -62,35 +62,35 @@ def test_filter_rows_raises_on_invalid_df(invalid_df):
 
 def test_filter_rows_returns_dataframe_with_same_columns():
     """Ensure returned DataFrame has same columns as input."""
-    df = pd.DataFrame({"A": [1, 2], "B": ["x", "y"]})
-    codelist_ids = {"A": [1]}
+    df = pd.DataFrame({"A": ["1", "2"], "B": ["x", "y"]})
+    codelist_ids = {"A": ["1"]}
     result = v.filter_rows(df, codelist_ids)
 
     assert isinstance(result, pd.DataFrame)
     assert list(result.columns) == list(df.columns)
 
 
-# def test_filter_rows_index_type_preserved():
-#     """Ensure index type is preserved in returned DataFrame."""
-#     df = pd.DataFrame({"A": [1, 2]}, index=pd.Index([10, 20], name="custom_index"))
-#     codelist_ids = {"A": [1]}
-#     result = filter_rows(df, codelist_ids)
+def test_filter_rows_index_type_preserved():
+    """Ensure index type is preserved in returned DataFrame."""
+    df = pd.DataFrame({"A": ["1", "2"]}, index=pd.Index([10, 20], name="custom_index"))
+    codelist_ids = {"A": ["1"]}
+    result = v.filter_rows(df, codelist_ids)
 
-#     assert isinstance(result.index, pd.Index)
-#     assert result.index.name == "custom_index"
+    assert isinstance(result.index, pd.Index)
+    assert result.index.name == "custom_index"
 
 
-# def test_filter_rows_empty_result_has_correct_structure():
-#     """Ensure empty result still has same columns and correct dtypes."""
-#     df = pd.DataFrame({"A": [1, 2], "B": ["x", "y"]})
-#     codelist_ids = {"A": [99]}  # No matches
-#     result = filter_rows(df, codelist_ids)
+def test_filter_rows_empty_result_has_correct_structure():
+    """Ensure empty result still has same columns and correct dtypes."""
+    df = pd.DataFrame({"A": ["1", "2"], "B": ["x", "y"]})
+    codelist_ids = {"A": ["99"]}  # No matches
+    result = v.filter_rows(df, codelist_ids)
 
-#     assert result.empty
-#     assert list(result.columns) == list(df.columns)
-#     # Dtypes should match original
-#     for col in df.columns:
-#         assert result[col].dtype == df[col].dtype
+    assert result.empty
+    assert list(result.columns) == list(df.columns)
+    # Dtypes should match original
+    for col in df.columns:
+        assert result[col].dtype == df[col].dtype
 
 
 def test_filter_rows_returns_copy(sample_df):
@@ -163,6 +163,6 @@ def test_filter_rows_allowed_values_as_strings(sample_df):
 
 # endregion
 
-# region Testing filter_rows()
+# region Testing filter_tidy_raw()
 
 # endregion
