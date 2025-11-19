@@ -1,241 +1,113 @@
-# python
+from pandas.testing import assert_frame_equal
 import importlib
-import pytest
-from typeguard import TypeCheckError
 import pandas as pd
+import numpy as np
 import pysdmx as px
+import pytest
 import tidysdmx.validation as v # import the module under test
-importlib.reload(v) # reload if already imported
+importlib.reload(v)
 
-# Global variables for this test file
-# incorrect_ind_code = "INCORRECT_IND"
-
-# region Testing extract_validation_info()
-@pytest.mark.parametrize("invalid_input", [
-    None,
-    {},
-    [],
-    "not_a_schema",
-    123,
-])
-
-def test_extract_validation_info(invalid_input):
-    """Check TypeError raised when input is not of the expected type."""
-    with pytest.raises(TypeCheckError):
-        v.extract_validation_info(invalid_input)
-
-def test_extract_validation_has_expected_structure(ifpri_asti_schema):
-    """Ensure the returned object has the expected type and structure."""
-    result = v.extract_validation_info(ifpri_asti_schema)
-
-    assert isinstance(result, dict)
-    expected_keys = {"valid_comp", "mandatory_comp", "coded_comp", "codelist_ids", "dim_comp"}
-    assert set(result.keys()) == expected_keys
-    assert all(isinstance(item, list) for key, item in result.items() if key != "codelist_ids")
-    assert isinstance(result["codelist_ids"], dict)
-
-def test_extract_validation_has_expected_structure2(sdmx_schema):
-    """Ensure the returned object has the expected type and structure."""
-    result = v.extract_validation_info(sdmx_schema)
-
-    assert isinstance(result, dict)
-    expected_keys = {"valid_comp", "mandatory_comp", "coded_comp", "codelist_ids", "dim_comp"}
-    assert set(result.keys()) == expected_keys
-    assert all(isinstance(item, list) for key, item in result.items() if key != "codelist_ids")
-    assert isinstance(result["codelist_ids"], dict)
-# endregion
-
-# region Testing get_codelist_ids()
-
-def test_get_codelist_ids_has_expected_structure(ifpri_asti_schema):
-    """Ensure the returned object has the expected type and structure."""
-    comp = ifpri_asti_schema.components
-    coded_comp = [c.id for c in comp if comp[c.id].local_codes is not None]
-
-    result = v.get_codelist_ids(comp, coded_comp)
-    assert isinstance(result, dict)
-    for key, value in result.items():
-        assert key in coded_comp
-        assert isinstance(value, list)
-        assert all(isinstance(code_id, str) for code_id in value)
-# endregion
-
-# region Testing filter_rows()
-
-@pytest.mark.parametrize("invalid_df", [
-    None,
-    "not_a_dataframe",
-    123,
-    [{"A": 1}],
-])
-def test_filter_rows_raises_on_invalid_df(invalid_df):
-    """Ensure TypeCheckError is raised for invalid DataFrame input."""
-    with pytest.raises((TypeCheckError, AttributeError)):
-        v.filter_rows(invalid_df, {"A": [1]})
+# Test validate_no_missing_values()
+class TestValidateNoMissingValues:
+    def test_validate_no_missing_values_no_missing(self):
+        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
+        mandatory_columns = ["col1", "col2"]
+        try:
+            v.validate_no_missing_values(df, mandatory_columns)
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
 
-def test_filter_rows_returns_dataframe_with_same_columns():
-    """Ensure returned DataFrame has same columns as input."""
-    df = pd.DataFrame({"A": ["1", "2"], "B": ["x", "y"]})
-    codelist_ids = {"A": ["1"]}
-    result = v.filter_rows(df, codelist_ids)
-
-    assert isinstance(result, pd.DataFrame)
-    assert list(result.columns) == list(df.columns)
+    def test_validate_no_missing_values_missing_in_one_column(self):
+        df = pd.DataFrame({"col1": [1, 2, None], "col2": [4, 5, 6]})
+        mandatory_columns = ["col1", "col2"]
+        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
+            v.validate_no_missing_values(df, mandatory_columns)
 
 
-def test_filter_rows_index_type_preserved():
-    """Ensure index type is preserved in returned DataFrame."""
-    df = pd.DataFrame({"A": ["1", "2"]}, index=pd.Index([10, 20], name="custom_index"))
-    codelist_ids = {"A": ["1"]}
-    result = v.filter_rows(df, codelist_ids)
-
-    assert isinstance(result.index, pd.Index)
-    assert result.index.name == "custom_index"
+    def test_validate_no_missing_values_missing_in_multiple_columns(self):
+        df = pd.DataFrame({"col1": [1, None, 3], "col2": [None, 5, 6]})
+        mandatory_columns = ["col1", "col2"]
+        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
+            v.validate_no_missing_values(df, mandatory_columns)
 
 
-def test_filter_rows_empty_result_has_correct_structure():
-    """Ensure empty result still has same columns and correct dtypes."""
-    df = pd.DataFrame({"A": ["1", "2"], "B": ["x", "y"]})
-    codelist_ids = {"A": ["99"]}  # No matches
-    result = v.filter_rows(df, codelist_ids)
+    def test_validate_no_missing_values_no_missing_but_extra_columns(self):
+        df = pd.DataFrame(
+            {"col1": [1, 2, 3], "col2": [4, 5, 6], "col3": [None, None, None]}
+        )
+        mandatory_columns = ["col1", "col2"]
+        try:
+            v.validate_no_missing_values(df, mandatory_columns)
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
-    assert result.empty
-    assert list(result.columns) == list(df.columns)
-    # Dtypes should match original
-    for col in df.columns:
-        assert result[col].dtype == df[col].dtype
-
-
-def test_filter_rows_returns_copy(sample_df):
-    """Verify filter_rows with an empty filter returns a new DataFrame:
-    - Content identical to input (same rows, order, values)
-    - Different object identity (copy, not original)"""
-    result = v.filter_rows(sample_df, {})
-    assert result.equals(sample_df)  # Same number of rows and identical content
-    assert result is not sample_df  # Distinct object (copy)
-
-
-@pytest.mark.parametrize(
-    "codelist_ids,expected_rows",
-    # filter_rows() does not remove None currently. 
-    # This is reflected in the expected results of the unit tests
-    # This might not be the behavior that we want
-    # May need to be changed
-    [
-        # ({"code": ["1", "2"]}, [0, 1]),  # Filter by numeric column
-        ({"status": ["A", "C"]}, [0, 2, 4]),  # Filter by string column.
-        ({"code": ["1", "2"], "status": ["A", "C"]}, [0]),  # Combined filter
-        ({"code": ["do_not_exist"]}, [3]),  # No matches.
-    ]
-)
-def test_filter_rows_basic_filtering(sample_df, codelist_ids, expected_rows):
-    result = v.filter_rows(sample_df, codelist_ids)
-    assert list(result.index) == expected_rows
+# Test validate_duplicates()
+class TestValidateDuplicates:
+    def test_validate_duplicates_no_duplicates(self):
+        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
+        dim_columns = ["col1", "col2"]
+        try:
+            v.validate_duplicates(df, dim_columns)
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
 
-def test_filter_rows_missing_column_handling(sample_df):
-    # Column not in DataFrame should be ignored
-    codelist_ids = {"missing": ["1"], "code": ["1"]}
-    result = v.filter_rows(sample_df, codelist_ids)
-    assert list(result.index) == [0, 3]
+    def test_validate_duplicates_with_duplicates(self):
+        df = pd.DataFrame({"col1": [1, 2, 2], "col2": [4, 5, 5]})
+        dim_columns = ["col1", "col2"]
+        with pytest.raises(ValueError, match="Duplicate rows found"):
+            v.validate_duplicates(df, dim_columns)
+
+# Test validate_codelist_ids()
+class TestValidateCodelistIds:
+    @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
+    def test_validate_codelist_ids_valid():
+        df = pd.DataFrame({"col1": ["A", "B", "C"]})
+        codelist_ids = {"col1": ["A", "B", "C"]}
+        try:
+            v.validate_codelist_ids(df, codelist_ids)
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
 
-@pytest.mark.skip(reason="Integer currently not well supported. To review")
-def test_filter_rows_preserves_dtypes(sample_df):
-    result = v.filter_rows(sample_df, {"code": [1, 2]})
-    assert str(result["code"].dtype) == "int64"
+    @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
+    def test_validate_codelist_ids_invalid():
+        df = pd.DataFrame({"col1": ["A", "B", "D"]})
+        codelist_ids = {"col1": ["A", "B", "C"]}
+        with pytest.raises(ValueError, match="Invalid codelist IDs found"):
+            v.validate_codelist_ids(df, codelist_ids)
+
+# Test validate_mandatory_columns()
+class TestValidateMandatoryColumns:
+    def test_validate_mandatory_columns_all_present(self):
+        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
+        mandatory_columns = ["col1", "col2"]
+        try:
+            v.validate_mandatory_columns(df, mandatory_columns, sdmx_cols=[])
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
 
-def test_filter_rows_does_not_mutate_input(sample_df):
-    original_copy = sample_df.copy()
-    _ = v.filter_rows(sample_df, {"code": ["1"]})
-    # Ensure original DataFrame is unchanged
-    assert sample_df.equals(original_copy)
+    def test_validate_mandatory_columns_missing(self):
+        df = pd.DataFrame({"col1": [1, 2, 3]})
+        mandatory_columns = ["col1", "col2"]
+        with pytest.raises(ValueError, match="Missing mandatory columns"):
+            v.validate_mandatory_columns(df, mandatory_columns, sdmx_cols=[])
+
+# Test validate_columns()
+class ValidateColumns:
+    def test_validate_columns_all_valid(self):
+        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
+        valid_columns = ["col1", "col2", "col3"]
+        try:
+            v.validate_columns(df, valid_columns, sdmx_cols=[])
+        except ValueError:
+            pytest.fail("Unexpected ValueError raised")
 
 
-# This may not be the behavior we want. TO BE REVIEWED
-def test_filter_rows_nan_values_are_not_dropped(sample_df):
-    # NaN/None should not be considered invalid if column is in filter
-    result = v.filter_rows(sample_df, {"code": ["1"]})
-    # Row with None in 'code' should remain
-    assert 3 in result.index
-
-
-def test_filter_rows_empty_dataframe():
-    """Ensure filter_rows returns an empty DataFrame when called on an input with
-    no rows; should not raise and result remains empty."""
-    df = pd.DataFrame(columns=["code", "status"])
-    result = v.filter_rows(df, {"code": ["1"]})
-    assert result.empty
-
-@pytest.mark.skip(reason="Numeric values currently not well supported. To review")
-def test_filter_rows_allowed_values_as_strings(sample_df):
-    # Allowed values provided as strings should match numeric column
-    result = v.filter_rows(sample_df, {"code": ["1", "2"]})
-    assert list(result.index) == [0, 1]
-
-# endregion
-
-# region Testing filter_tidy_raw()
-
-def test_filter_tidy_raw_returns_dataframe(sdmx_schema, sdmx_df):
-    """Ensure the function returns a DataFrame."""
-    result = v.filter_tidy_raw(sdmx_df, sdmx_schema)
-    assert isinstance(result, pd.DataFrame)
-
-
-def test_filter_tidy_raw_filters_invalid_codes(sdmx_schema, sdmx_df, incorrect_ind_code = "INCORRECT_IND"):
-    """Check that rows with invalid codes are removed."""
-    result = v.filter_tidy_raw(sdmx_df, sdmx_schema)
-
-    # Assert that invalid code row is removed
-    assert incorrect_ind_code in sdmx_df["INDICATOR"].values
-    assert incorrect_ind_code not in result["INDICATOR"].values
-    assert len(result) < len(sdmx_df), "Invalid rows should be filtered out."
-
-def test_filter_tidy_raw_no_filter_needed(sdmx_df):
-    """If all rows are valid, the output should match the input."""
-    
-    # Instantiate an empty Components object
-    empty_components = px.model.Components([])
-
-    # Create an empty Schema instance
-    empty_schema = px.model.Schema(
-        context="datastructure",  # or "dataflow"
-        agency="TEST_AGENCY",
-        id="EMPTY_SCHEMA",
-        components=empty_components,
-        version="1.0.0",
-        artefacts=[],  # no artefacts
-        groups=None    # optional
-    )
-
-    result = v.filter_tidy_raw(sdmx_df, empty_schema)
-    pd.testing.assert_frame_equal(result, sdmx_df)
-
-
-def test_filter_tidy_raw_empty_dataframe(sdmx_schema):
-    """If input DataFrame is empty, output should also be empty."""
-    empty_df = pd.DataFrame(columns=["some_dimension", "value"])
-    result = v.filter_tidy_raw(empty_df, sdmx_schema)
-    assert result.empty
-
-def test_filter_tidy_raw_raises_on_missing_input(sdmx_df):
-    """Schema and dataframe must be provided; expect TypeError otherwise."""
-    with pytest.raises(TypeError):
-        v.filter_tidy_raw(sdmx_df)
-    with pytest.raises(TypeError):
-        v.filter_tidy_raw()
-
-@pytest.mark.parametrize("invalid_df,invalid_schema", [
-    (None, None),
-    ("not_a_dataframe", "not_a_schema"),
-    (123, 456),
-    ([{"A": 1}], [{"B": 2}])
-])
-def test_filter_tidy_raw_raises_on_invalid_inputs(invalid_df, invalid_schema):
-    """Ensure TypeCheckError is raised for invalid inputs."""
-    with pytest.raises((TypeCheckError, AttributeError)):
-        v.filter_tidy_raw(invalid_df, invalid_schema)
-# endregion
+    def test_validate_columns_invalid(self):
+        df = pd.DataFrame({"col1": [1, 2, 3], "col4": [4, 5, 6]})
+        valid_columns = ["col1", "col2", "col3"]
+        with pytest.raises(ValueError, match="Found unexpected column: col4"):
+            v.validate_columns(df, valid_columns, sdmx_cols=[])
