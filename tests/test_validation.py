@@ -3,8 +3,12 @@ import importlib
 import pytest
 from typeguard import TypeCheckError
 import pandas as pd
+import pysdmx as px
 import tidysdmx.validation as v # import the module under test
 importlib.reload(v) # reload if already imported
+
+# Global variables for this test file
+# incorrect_ind_code = "INCORRECT_IND"
 
 # region Testing extract_validation_info()
 @pytest.mark.parametrize("invalid_input", [
@@ -20,9 +24,19 @@ def test_extract_validation_info(invalid_input):
     with pytest.raises(TypeCheckError):
         v.extract_validation_info(invalid_input)
 
-def test_extract_validation_has_expected_structure(dsd_schema):
+def test_extract_validation_has_expected_structure(ifpri_asti_schema):
     """Ensure the returned object has the expected type and structure."""
-    result = v.extract_validation_info(dsd_schema)
+    result = v.extract_validation_info(ifpri_asti_schema)
+
+    assert isinstance(result, dict)
+    expected_keys = {"valid_comp", "mandatory_comp", "coded_comp", "codelist_ids", "dim_comp"}
+    assert set(result.keys()) == expected_keys
+    assert all(isinstance(item, list) for key, item in result.items() if key != "codelist_ids")
+    assert isinstance(result["codelist_ids"], dict)
+
+def test_extract_validation_has_expected_structure2(sdmx_schema):
+    """Ensure the returned object has the expected type and structure."""
+    result = v.extract_validation_info(sdmx_schema)
 
     assert isinstance(result, dict)
     expected_keys = {"valid_comp", "mandatory_comp", "coded_comp", "codelist_ids", "dim_comp"}
@@ -33,9 +47,9 @@ def test_extract_validation_has_expected_structure(dsd_schema):
 
 # region Testing get_codelist_ids()
 
-def test_get_codelist_ids_has_expected_structure(dsd_schema):
+def test_get_codelist_ids_has_expected_structure(ifpri_asti_schema):
     """Ensure the returned object has the expected type and structure."""
-    comp = dsd_schema.components
+    comp = ifpri_asti_schema.components
     coded_comp = [c.id for c in comp if comp[c.id].local_codes is not None]
 
     result = v.get_codelist_ids(comp, coded_comp)
@@ -165,4 +179,63 @@ def test_filter_rows_allowed_values_as_strings(sample_df):
 
 # region Testing filter_tidy_raw()
 
+def test_filter_tidy_raw_returns_dataframe(sdmx_schema, sdmx_df):
+    """Ensure the function returns a DataFrame."""
+    result = v.filter_tidy_raw(sdmx_df, sdmx_schema)
+    assert isinstance(result, pd.DataFrame)
+
+
+def test_filter_tidy_raw_filters_invalid_codes(sdmx_schema, sdmx_df, incorrect_ind_code = "INCORRECT_IND"):
+    """Check that rows with invalid codes are removed."""
+    result = v.filter_tidy_raw(sdmx_df, sdmx_schema)
+
+    # Assert that invalid code row is removed
+    assert incorrect_ind_code in sdmx_df["INDICATOR"].values
+    assert incorrect_ind_code not in result["INDICATOR"].values
+    assert len(result) < len(sdmx_df), "Invalid rows should be filtered out."
+
+def test_filter_tidy_raw_no_filter_needed(sdmx_df):
+    """If all rows are valid, the output should match the input."""
+    
+    # Instantiate an empty Components object
+    empty_components = px.model.Components([])
+
+    # Create an empty Schema instance
+    empty_schema = px.model.Schema(
+        context="datastructure",  # or "dataflow"
+        agency="TEST_AGENCY",
+        id="EMPTY_SCHEMA",
+        components=empty_components,
+        version="1.0.0",
+        artefacts=[],  # no artefacts
+        groups=None    # optional
+    )
+
+    result = v.filter_tidy_raw(sdmx_df, empty_schema)
+    pd.testing.assert_frame_equal(result, sdmx_df)
+
+
+def test_filter_tidy_raw_empty_dataframe(sdmx_schema):
+    """If input DataFrame is empty, output should also be empty."""
+    empty_df = pd.DataFrame(columns=["some_dimension", "value"])
+    result = v.filter_tidy_raw(empty_df, sdmx_schema)
+    assert result.empty
+
+def test_filter_tidy_raw_raises_on_missing_input(sdmx_df):
+    """Schema and dataframe must be provided; expect TypeError otherwise."""
+    with pytest.raises(TypeError):
+        v.filter_tidy_raw(sdmx_df)
+    with pytest.raises(TypeError):
+        v.filter_tidy_raw()
+
+@pytest.mark.parametrize("invalid_df,invalid_schema", [
+    (None, None),
+    ("not_a_dataframe", "not_a_schema"),
+    (123, 456),
+    ([{"A": 1}], [{"B": 2}])
+])
+def test_filter_tidy_raw_raises_on_invalid_inputs(invalid_df, invalid_schema):
+    """Ensure TypeCheckError is raised for invalid inputs."""
+    with pytest.raises((TypeCheckError, AttributeError)):
+        v.filter_tidy_raw(invalid_df, invalid_schema)
 # endregion
