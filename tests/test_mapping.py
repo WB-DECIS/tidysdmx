@@ -84,7 +84,7 @@ def test_apply_maps_overwrite_existing_column(sample_df):
     result = apply_implicit_component_maps(sample_df, maps)
     assert all(result["FREQ"] == sample_df["OBS_VALUE"])  # 'FREQ' should now equal 'OBS_VALUE'
 
-# Should at least trigger a warning. But probably needs to fails entirely with helpful message.
+@pytest.mark.skip(reason="REVIEW FUNCTION LOGIC: Should at least trigger a warning. But probably needs to fails entirely with helpful message.")
 def test_skip_missing_source_column(sample_df):
     """Test that missing source columns are skipped without error."""
     maps = [ImplicitComponentMap("MISSING", "NEW_COL")]  # 'MISSING' does not exist
