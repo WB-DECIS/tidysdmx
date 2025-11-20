@@ -61,6 +61,7 @@ def map_structures(df: pd.DataFrame, structure_map: px.model.map.StructureMap, v
 
     return result_df
 
+@typechecked
 def apply_fixed_value_maps(
     df: pd.DataFrame, fixed_value_maps: List[px.model.map.FixedValueMap]
 ) -> pd.DataFrame:
@@ -99,6 +100,7 @@ def apply_fixed_value_maps(
 
     return result_df
 
+@typechecked
 def apply_implicit_component_maps(
     df: pd.DataFrame,
     implicit_maps: List[px.model.map.ImplicitComponentMap],
@@ -150,6 +152,7 @@ def apply_implicit_component_maps(
 
     return result_df
 
+@typechecked
 def apply_component_map(
     df: pd.DataFrame, component_map: px.model.map.ComponentMap, verbose: bool = False
 ) -> pd.DataFrame:
@@ -201,6 +204,7 @@ def apply_component_map(
 
     return result_df
 
+@typechecked
 def apply_multi_component_map(
     df: pd.DataFrame,
     multi_component_map: px.model.map.MultiComponentMap,
