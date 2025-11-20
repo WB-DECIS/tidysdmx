@@ -2,7 +2,6 @@ from typeguard import TypeCheckError
 from pysdmx.model import FixedValueMap, ImplicitComponentMap
 import pytest
 import pandas as pd
-from typing import List
 # Load tidysdmx functions
 from tidysdmx.mapping import apply_fixed_value_maps, apply_implicit_component_maps
 

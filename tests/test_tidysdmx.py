@@ -1,7 +1,6 @@
 import pandas as pd
 from pandas.testing import assert_frame_equal
 import numpy as np
-import pysdmx as px
 import pytest
 
 from tidysdmx import tidysdmx as tx

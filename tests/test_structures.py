@@ -1,6 +1,3 @@
-from pysdmx.model import Role, DataType
-from pysdmx.model.dataflow import Schema
-import importlib
 import pandas as pd
 import pytest
 # Import tidysdmx functions
