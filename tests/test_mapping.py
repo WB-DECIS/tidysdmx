@@ -67,7 +67,6 @@ def test_apply_fixed_value_maps_does_not_mutate_original(sample_df, fixed_maps):
 
 # endregion
 
-
 # region apply_implicit_component_maps
 
 def test_apply_maps_add_new_columns(sample_df, implicit_maps):

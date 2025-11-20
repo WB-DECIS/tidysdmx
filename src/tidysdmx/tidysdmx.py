@@ -154,33 +154,6 @@ def fetch_schema(
 	
 	return schema
 
-def extract_validation_info(schema):
-	"""
-	Extract validation information from a given schema.
-
-	Args:
-		schema: The schema object containing validation information.
-
-	Returns:
-		dict: A dictionary containing validation information with the following keys:
-			- valid_comp: List of valid component names.
-			- mandatory_comp: List of mandatory component names.
-			- coded_comp: List of coded component names.
-			- codelist_ids: Dictionary with coded components as keys and list of codelist IDs as values.
-			- dim_comp: List of dimension component names.
-	"""
-	comp = schema.components
-	validation_info = {
-		"valid_comp": [c.id for c in comp],
-		"mandatory_comp": [c.id for c in comp if comp[c.id].required],
-		"coded_comp": [c.id for c in comp if comp[c.id].local_codes is not None],
-		"codelist_ids": get_codelist_ids(
-			comp, [c.id for c in comp if comp[c.id].local_codes is not None]
-		),
-		"dim_comp": [c.id for c in comp if comp[c.id].role == px.model.Role.DIMENSION],
-	}
-	return validation_info
-
 
 def parse_dsd_id(dsd_id):
 	"""
@@ -295,7 +268,6 @@ def transform_source_to_target(
 	except KeyError as e:
 		raise KeyError("The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty.") from e
 
-
 def vectorized_lookup_ordered_v1(series, mapping_df):
 	"""Apply ordered regex matching to a Pandas Series.
 
@@ -344,7 +316,6 @@ def vectorized_lookup_ordered_v1(series, mapping_df):
 	result = np.select(conditions, choices, default=default_value)
 
 	return pd.Series(result, index=series.index)
-
 
 def vectorized_lookup_ordered_v2(series, mapping_df):
 	"""Apply ordered matching (regex or exact) to a Pandas Series based on the "IS_REGEX" column.
