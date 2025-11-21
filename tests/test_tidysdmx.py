@@ -1,7 +1,6 @@
 import pandas as pd
 from pandas.testing import assert_frame_equal
 import numpy as np
-import pysdmx as px
 import pytest
 
 from tidysdmx import tidysdmx as tx
@@ -378,125 +377,6 @@ class TestVectorizedLookupOrderedV2:
         pd.testing.assert_series_equal(
             tx.vectorized_lookup_ordered_v2(series, mapping_df), expected_output
         )
-
-
-# Test validate_no_missing_values()
-class TestValidateNoMissingValues:
-    def test_validate_no_missing_values_no_missing(self):
-        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
-        mandatory_columns = ["col1", "col2"]
-        try:
-            tx.validate_no_missing_values(df, mandatory_columns)
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-    def test_validate_no_missing_values_missing_in_one_column(self):
-        df = pd.DataFrame({"col1": [1, 2, None], "col2": [4, 5, 6]})
-        mandatory_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
-            tx.validate_no_missing_values(df, mandatory_columns)
-
-
-    def test_validate_no_missing_values_missing_in_multiple_columns(self):
-        df = pd.DataFrame({"col1": [1, None, 3], "col2": [None, 5, 6]})
-        mandatory_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
-            tx.validate_no_missing_values(df, mandatory_columns)
-
-
-    def test_validate_no_missing_values_no_missing_but_extra_columns(self):
-        df = pd.DataFrame(
-            {"col1": [1, 2, 3], "col2": [4, 5, 6], "col3": [None, None, None]}
-        )
-        mandatory_columns = ["col1", "col2"]
-        try:
-            tx.validate_no_missing_values(df, mandatory_columns)
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-# Test validate_duplicates()
-class TestValidateDuplicates:
-    def test_validate_duplicates_no_duplicates(self):
-        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
-        dim_columns = ["col1", "col2"]
-        try:
-            tx.validate_duplicates(df, dim_columns)
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-    def test_validate_duplicates_with_duplicates(self):
-        df = pd.DataFrame({"col1": [1, 2, 2], "col2": [4, 5, 5]})
-        dim_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Duplicate rows found"):
-            tx.validate_duplicates(df, dim_columns)
-
-
-# Test validate_codelist_ids()
-class TestValidateCodelistIds:
-    @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
-    def test_validate_codelist_ids_valid():
-        df = pd.DataFrame({"col1": ["A", "B", "C"]})
-        codelist_ids = {"col1": ["A", "B", "C"]}
-        try:
-            tx.validate_codelist_ids(df, codelist_ids)
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-    @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
-    def test_validate_codelist_ids_invalid():
-        df = pd.DataFrame({"col1": ["A", "B", "D"]})
-        codelist_ids = {"col1": ["A", "B", "C"]}
-        with pytest.raises(ValueError, match="Invalid codelist IDs found"):
-            tx.validate_codelist_ids(df, codelist_ids)
-
-
-# Test get_codelist_ids()
-@pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
-def test_get_codelist_ids():
-    comp = {"dim1": "Dimension 1", "dim2": "Dimension 2"}
-    coded_comp = {"dim1": ["A", "B"], "dim2": ["C", "D"]}
-    expected_output = {"dim1": ["A", "B"], "dim2": ["C", "D"]}
-    assert tx.get_codelist_ids(comp, coded_comp) == expected_output
-
-
-# Test validate_mandatory_columns()
-class TestValidateMandatoryColumns:
-    def test_validate_mandatory_columns_all_present(self):
-        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
-        mandatory_columns = ["col1", "col2"]
-        try:
-            tx.validate_mandatory_columns(df, mandatory_columns, sdmx_cols=[])
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-    def test_validate_mandatory_columns_missing(self):
-        df = pd.DataFrame({"col1": [1, 2, 3]})
-        mandatory_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Missing mandatory columns"):
-            tx.validate_mandatory_columns(df, mandatory_columns, sdmx_cols=[])
-
-
-# Test validate_columns()
-class ValidateColumns:
-    def test_validate_columns_all_valid(self):
-        df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
-        valid_columns = ["col1", "col2", "col3"]
-        try:
-            tx.validate_columns(df, valid_columns, sdmx_cols=[])
-        except ValueError:
-            pytest.fail("Unexpected ValueError raised")
-
-
-    def test_validate_columns_invalid(self):
-        df = pd.DataFrame({"col1": [1, 2, 3], "col4": [4, 5, 6]})
-        valid_columns = ["col1", "col2", "col3"]
-        with pytest.raises(ValueError, match="Found unexpected column: col4"):
-            tx.validate_columns(df, valid_columns, sdmx_cols=[])
 
 
 # Test create_keys_dict()

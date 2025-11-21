@@ -3,7 +3,7 @@ import numpy as np
 import pysdmx as px
 import json
 
-from tidysdmx.qa_utils import *
+from .qa_utils import *
 import warnings
 
 from pysdmx.io.format import StructureFormat # To extract json format
@@ -124,7 +124,8 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
 def fetch_schema(
 		base_url:str,
 		artefact_id: str,
-		context: Literal["dataflow", "datastructure", "provisionagreement"]):
+		context: Literal["dataflow", "datastructure", "provisionagreement"]
+	):
 	"""Fetches the schema of a specified artefact from an SDMX registry.
 	
 	Args:
@@ -153,33 +154,6 @@ def fetch_schema(
 	schema = client.get_schema(context, agency, id, version)
 	
 	return schema
-
-def extract_validation_info(schema):
-	"""
-	Extract validation information from a given schema.
-
-	Args:
-		schema: The schema object containing validation information.
-
-	Returns:
-		dict: A dictionary containing validation information with the following keys:
-			- valid_comp: List of valid component names.
-			- mandatory_comp: List of mandatory component names.
-			- coded_comp: List of coded component names.
-			- codelist_ids: Dictionary with coded components as keys and list of codelist IDs as values.
-			- dim_comp: List of dimension component names.
-	"""
-	comp = schema.components
-	validation_info = {
-		"valid_comp": [c.id for c in comp],
-		"mandatory_comp": [c.id for c in comp if comp[c.id].required],
-		"coded_comp": [c.id for c in comp if comp[c.id].local_codes is not None],
-		"codelist_ids": get_codelist_ids(
-			comp, [c.id for c in comp if comp[c.id].local_codes is not None]
-		),
-		"dim_comp": [c.id for c in comp if comp[c.id].role == px.model.Role.DIMENSION],
-	}
-	return validation_info
 
 
 def parse_dsd_id(dsd_id):
@@ -238,7 +212,10 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
 		raise ValueError("Invalid artefact_id format. Expected format: 'agency:id(version)'")
 	
 
-def standardize_sdmx(data, mapping):
+def standardize_sdmx(
+		data: pd.DataFrame, 
+		mapping: dict
+	) -> pd.DataFrame:
 	"""Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
 
 	Args:
@@ -295,7 +272,6 @@ def transform_source_to_target(
 	except KeyError as e:
 		raise KeyError("The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty.") from e
 
-
 def vectorized_lookup_ordered_v1(series, mapping_df):
 	"""Apply ordered regex matching to a Pandas Series.
 
@@ -344,7 +320,6 @@ def vectorized_lookup_ordered_v1(series, mapping_df):
 	result = np.select(conditions, choices, default=default_value)
 
 	return pd.Series(result, index=series.index)
-
 
 def vectorized_lookup_ordered_v2(series, mapping_df):
 	"""Apply ordered matching (regex or exact) to a Pandas Series based on the "IS_REGEX" column.
@@ -669,168 +644,4 @@ def read_mapping(path):
 
 	return result
 
-# endregion
-
-# region Functions to validate formatted dataset
-def validate_dataset_local(df, schema=None, valid=None) -> pd.DataFrame:
-	"""Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
-
-	Either a schema or a precomputed 'valid' object must be provided. This design allows you to avoid re-computing the validation info for multiple datasets.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to be validated.
-		schema: The schema object (optional if 'valid' is provided).
-		valid: Precomputed validation information (optional).
-
-	Returns:
-		pd.DataFrame: A DataFrame containing all validation errors. Each row represents one error with columns like 'Validation' and 'Error'.
-	"""
-	# Compute validation info only if not provided
-	if valid is None:
-		if schema is None:
-			raise ValueError("Either a schema or precomputed 'valid' must be provided.")
-		valid = extract_validation_info(schema)
-
-	error_records = []
-	try:
-		validate_columns(df, valid_columns=valid["valid_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "columns", "Error": str(e)})
-
-	try:
-		validate_mandatory_columns(df, mandatory_columns=valid["mandatory_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "mandatory_columns", "Error": str(e)})
-
-	try:
-		validate_codelist_ids(df, valid["codelist_ids"])
-	except ValueError as e:
-		error_records.append({"Validation": "codelist_ids", "Error": str(e)})
-
-	try:
-		validate_duplicates(df, dim_comp=valid["dim_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "duplicates", "Error": str(e)})
-
-	try:
-		validate_no_missing_values(df, mandatory_columns=valid["mandatory_comp"])
-	except ValueError as e:
-		error_records.append({"Validation": "missing_values", "Error": str(e)})
-
-	return pd.DataFrame(error_records)
-
-
-def validate_columns(
-	df, valid_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-):
-	"""Validate that all columns in the DataFrame are part of the specified components or sdmx_cols.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		valid_columns (list): List of valid component names.
-		sdmx_cols (list, optional): List of additional valid column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
-
-	Raises:
-		ValueError: If any column in the DataFrame is not in the list of valid components or sdmx_cols.
-	"""
-	cols = df.columns
-	for col in cols:
-		if col not in sdmx_cols and col not in valid_columns:
-			raise ValueError(f"Found unexpected column: {col}")
-
-
-def validate_mandatory_columns(
-	df, mandatory_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-):
-	"""
-	Validate that all mandatory columns are present in the DataFrame.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		mandatory_columns (list): List of mandatory component names.
-		sdmx_cols (list, optional): List of additional mandatory column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
-
-	Raises:
-		ValueError: If any mandatory column is not present in the DataFrame.
-	"""
-	required_columns = set(mandatory_columns + sdmx_cols)
-	missing_columns = required_columns - set(df.columns)
-	if missing_columns:
-		raise ValueError(f"Missing mandatory columns: {missing_columns}")
-
-
-def get_codelist_ids(comp, coded_comp):
-	"""
-	Retrieve all codelist IDs for given coded components.
-
-	Args:
-		comp (list): List of components.
-		coded_comp (list): List of coded components.
-
-	Returns:
-		dict: Dictionary with coded components as keys and list of codelist IDs as values.
-	"""
-	codelist_dict = {}
-	for component in coded_comp:
-		codes = comp[component].local_codes.items
-		codelist_dict[component] = [code.id for code in codes]
-	return codelist_dict
-
-
-def validate_codelist_ids(df, codelist_ids):
-	"""
-	Validate that all values in specified columns of a DataFrame are within the allowed codelist IDs.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		codelist_ids (dict): A dictionary where keys are column names and values are lists of allowed IDs.
-
-	Raises:
-		ValueError: If any value in the specified columns is not in the allowed codelist IDs.
-	"""
-	for col, valid_ids in codelist_ids.items():
-		if col in df.columns:
-			# Convert all values to string before comparison
-			df[col] = df[col].astype(str)
-			valid_ids = [str(id) for id in valid_ids]
-			invalid_values = df[~df[col].isin(valid_ids)][col].unique()
-			if len(invalid_values) > 0:
-				raise ValueError(
-					f"Invalid values found in column '{col}': {invalid_values}"
-				)
-
-
-def validate_duplicates(df, dim_comp):
-	"""
-	Validate that there are no duplicate rows in the DataFrame for the given combination of columns.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		dim_columns (list): List of column names to check for duplicates.
-
-	Raises:
-		ValueError: If duplicate rows are found for the given combination of columns.
-	"""
-	# Check for duplicates
-	duplicates = df.duplicated(subset=dim_comp, keep=False)
-	if duplicates.any():
-		duplicate_rows = df[duplicates]
-		raise ValueError(f"Duplicate rows found:\n{duplicate_rows}")
-
-
-def validate_no_missing_values(df, mandatory_columns):
-	"""
-	Validate that there are no missing values in the mandatory columns of the DataFrame.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		mandatory_columns (list): List of mandatory column names to check for missing values.
-
-	Raises:
-		ValueError: If missing values are found in any of the mandatory columns.
-	"""
-	missing_values = df[mandatory_columns].isnull().any(axis=1)
-	if missing_values.any():
-		missing_rows = df[missing_values]
-		raise ValueError(f"Missing values found in mandatory columns:\n{missing_rows}")
 # endregion
