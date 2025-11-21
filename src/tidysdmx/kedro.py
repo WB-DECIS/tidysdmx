@@ -1,6 +1,6 @@
 from tidysdmx.tidysdmx import *
 
-def kd_read_mappings(mapping_files):
+def kd_read_mappings(mapping_files: dict) -> dict:
     """
     Fetch multiple mappings from different files.
 
@@ -17,7 +17,11 @@ def kd_read_mappings(mapping_files):
 
     return mappings
 
-def kd_standardize_sdmx(data, mappings, boolean=True):
+def kd_standardize_sdmx(
+        data: dict, 
+        mappings: dict, 
+        boolean: bool = True
+    ) -> dict:
     """Standardize into SDMX format a partitioned dataset.
     
     Creates a partitioned dataset by applying transform_source_to_target to each input dataframe with its corresponding mapping.
@@ -70,7 +74,11 @@ def kd_standardize_sdmx(data, mappings, boolean=True):
 
     return out
 
-def kd_validate_dataset_local(df, schema=None, valid=None):
+def kd_validate_dataset_local(
+        df: pd.DataFrame, 
+        schema=None, 
+        valid=None
+    ):
     """
     Production validation function for a DataFrame.
 

@@ -1,8 +1,10 @@
 import pandas as pd
 
-def qa_coerce_numeric(df, numeric_columns):
-    """
-    Coerces values from specified numeric columns to numeric, and removes rows where values cannot be coerced to numeric.
+def qa_coerce_numeric(
+        df: pd.DataFrame, 
+        numeric_columns: list[str]
+    ) -> pd.DataFrame:
+    """Coerces values from specified numeric columns to numeric, and removes rows where values cannot be coerced to numeric.
 
     Args:
         df (pd.DataFrame): The input DataFrame.
@@ -32,9 +34,8 @@ def qa_coerce_numeric(df, numeric_columns):
     return df
 
 
-def qa_remove_duplicates(df):
-    """
-    Removes duplicate rows from the DataFrame and logs information about the rows being removed.
+def qa_remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
+    """Removes duplicate rows from the DataFrame and logs information about the rows being removed.
 
     Args:
         df (pd.DataFrame): The input DataFrame.
