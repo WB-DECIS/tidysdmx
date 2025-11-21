@@ -1,6 +1,17 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.4.0 (21/11/2025)
+### Changed
+
+- Split code into separate modules
+
+### Added
+
+- Added a first batch new standardized functions
+- Added unit tests for these functions
+- Added scaffholding to handle fixtures for unit-testing
+
 ## v0.3.0 (23/10/2025)
 ### Changed
 
