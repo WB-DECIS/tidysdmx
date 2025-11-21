@@ -6,23 +6,20 @@ import re
 
 # region Funtions to handle mapping files
 
-def map_structures(df: pd.DataFrame, structure_map: px.model.map.StructureMap, verbose: bool = False) -> pd.DataFrame:
-    """
-    Apply all mapping components from a StructureMap to a DataFrame.
+def map_structures(
+        df: pd.DataFrame, 
+        structure_map: px.model.map.StructureMap, 
+        verbose: bool = False
+    ) -> pd.DataFrame:
+    """Apply all mapping components from a StructureMap to a DataFrame.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The source dataset.
-    structure_map : StructureMap
-        A StructureMap object containing various mapping components.
-    verbose : bool, optional
-        If True, print logs about applied mappings.
+    Args:
+        df (pd.DataFrame): The source dataset.
+        structure_map (px.model.map.StructureMap): A StructureMap object containing various mapping components.
+        verbose (bool, optional): If True, print logs about applied mappings.
 
-    Returns
-    -------
-    pd.DataFrame
-        Modified DataFrame with all mappings applied.
+    Returns:
+        pd.DataFrame: Modified DataFrame with all mappings applied.
     """
     result_df = df.copy()
 
@@ -51,7 +48,8 @@ def map_structures(df: pd.DataFrame, structure_map: px.model.map.StructureMap, v
             print(f"✅ Applied {len(fixed_value_maps)} FixedValueMap(s).")
 
     if implicit_maps:
-        result_df = apply_implicit_component_maps(result_df, implicit_maps, verbose=verbose)
+        result_df = apply_implicit_component_maps(result_df, implicit_maps, 
+                                                  verbose=verbose)
 
     for cmap in component_maps:
         result_df = apply_component_map(result_df, cmap, verbose=verbose)
@@ -63,22 +61,17 @@ def map_structures(df: pd.DataFrame, structure_map: px.model.map.StructureMap, v
 
 @typechecked
 def apply_fixed_value_maps(
-    df: pd.DataFrame, fixed_value_maps: List[px.model.map.FixedValueMap]
+    df: pd.DataFrame, 
+    fixed_value_maps: List[px.model.map.FixedValueMap]
 ) -> pd.DataFrame:
-    """
-    Apply FixedValueMap rules to a DataFrame.
+    """Apply FixedValueMap rules to a DataFrame.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The source dataset.
-    fixed_value_maps : List[FixedValueMap]
-        A list of FixedValueMap objects containing target and value.
+    Args:
+        df (pd.DataFrame): The source dataset.
+        fixed_value_maps (List[FixedValueMap]): A list of FixedValueMap objects containing target and value.
 
-    Returns
-    -------
-    pd.DataFrame
-        Modified DataFrame with fixed value columns added.
+    Returns:
+        pd.DataFrame: Modified DataFrame with fixed value columns added.
     """
 
     # Validate input types
@@ -106,22 +99,15 @@ def apply_implicit_component_maps(
     implicit_maps: List[px.model.map.ImplicitComponentMap],
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """
-    Apply ImplicitComponentMap rules to a DataFrame, supporting different source/target names.
+    """Apply ImplicitComponentMap rules to a DataFrame, supporting different source/target names.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The source dataset.
-    implicit_maps : List[ImplicitComponentMap]
-        A list of ImplicitComponentMap objects containing source and target.
-    verbose : bool, optional
-        If True, print logs about applied mappings and conflicts.
+    Args:
+        df (pd.DataFrame): The source dataset.
+        implicit_maps (List[ImplicitComponentMap]): A list of ImplicitComponentMap objects containing source and target.
+        verbose (bool, optional): If True, print logs about applied mappings and conflicts.
 
-    Returns
-    -------
-    pd.DataFrame
-        Modified DataFrame with implicit component mappings applied.
+    Returns:
+        pd.DataFrame: Modified DataFrame with implicit component mappings applied.
     """
     if not isinstance(df, pd.DataFrame):
         raise TypeError("df must be a pandas DataFrame.")
@@ -154,24 +140,19 @@ def apply_implicit_component_maps(
 
 @typechecked
 def apply_component_map(
-    df: pd.DataFrame, component_map: px.model.map.ComponentMap, verbose: bool = False
+    df: pd.DataFrame, 
+    component_map: px.model.map.ComponentMap, 
+    verbose: bool = False
 ) -> pd.DataFrame:
-    """
-    Apply a single ComponentMap with a RepresentationMap to a DataFrame.
+    """Apply a single ComponentMap with a RepresentationMap to a DataFrame.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Source data.
-    component_map : ComponentMap
-        ComponentMap object with source, target, and values (RepresentationMap).
-    verbose : bool, optional
-        If True, print progress.
+    Args:
+        df (pd.DataFrame): Source data.
+        component_map (ComponentMap): ComponentMap object with source, target, and values (RepresentationMap).
+        verbose (bool, optional): If True, print progress.
 
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with the target column added or overwritten.
+    Returns:
+        pd.DataFrame: DataFrame with the target column added or overwritten.
     """
 
     if not isinstance(df, pd.DataFrame):
@@ -210,25 +191,18 @@ def apply_multi_component_map(
     multi_component_map: px.model.map.MultiComponentMap,
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """
-    Apply a single MultiComponentMap with regex support, preserving rule order.
+    """Apply a single MultiComponentMap with regex support, preserving rule order.
 
     Rules are applied in the order they appear in multi_component_map.values.maps.
     The first matching rule wins.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Source data.
-    multi_component_map : MultiComponentMap
-        MultiComponentMap object with source columns, target column, and values (MultiRepresentationMap).
-    verbose : bool, optional
-        If True, print progress.
+    Args:
+        df (pd.DataFrame): Source data.
+        multi_component_map (MultiComponentMap): MultiComponentMap object with source columns, target column, and values (MultiRepresentationMap).
+        verbose (bool, optional): If True, print progress.
 
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with the target column added or overwritten.
+    Returns:
+        pd.DataFrame: DataFrame with the target column added or overwritten.
     """
     result_df = df.copy()
 

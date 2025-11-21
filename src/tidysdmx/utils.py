@@ -4,13 +4,10 @@ from typeguard import typechecked
 
 @typechecked
 def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, object]:
-    """
-    Extract validation information from a given schema.
+    """Extract validation information from a given schema.
 
     Args:
-    ---------_
-    schema: A pysdmx.model.dataflow.Schema object.
-    The schema object contains all necessary validation information.
+        schema (pysdmx.model.dataflow.Schema object.): The schema object contains all necessary validation information.
 
     Returns:
         dict: A dictionary containing validation information with the following keys:
@@ -39,8 +36,7 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, objec
 
 @typechecked
 def get_codelist_ids(comp: px.model.dataflow.Components, coded_comp: List) -> Dict[str, list[str]]:
-    """
-    Retrieve all codelist IDs for given coded components.
+    """Retrieve all codelist IDs for given coded components.
 
     Args:
         comp (list): List of components.

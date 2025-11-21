@@ -12,8 +12,7 @@ def validate_dataset_local(
     valid=None,
     sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"],
 ) -> pd.DataFrame:
-    """
-    Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
+    """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
 
     Either a schema or a precomputed 'valid' object must be provided to avoid
     recomputing validation info for multiple datasets.
@@ -99,8 +98,7 @@ def validate_columns(
 def validate_mandatory_columns(
 	df, mandatory_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 ):
-	"""
-	Validate that all mandatory columns are present in the DataFrame.
+	"""Validate that all mandatory columns are present in the DataFrame.
 
 	Args:
 		df (pd.DataFrame): The DataFrame to validate.
@@ -117,8 +115,7 @@ def validate_mandatory_columns(
 
 
 def get_codelist_ids(comp, coded_comp):
-	"""
-	Retrieve all codelist IDs for given coded components.
+	"""Retrieve all codelist IDs for given coded components.
 
 	Args:
 		comp (list): List of components.
@@ -135,8 +132,7 @@ def get_codelist_ids(comp, coded_comp):
 
 
 def validate_codelist_ids(df, codelist_ids):
-	"""
-	Validate that all values in specified columns of a DataFrame are within the allowed codelist IDs.
+	"""Validate that all values in specified columns of a DataFrame are within the allowed codelist IDs.
 
 	Args:
 		df (pd.DataFrame): The DataFrame to validate.
@@ -158,8 +154,7 @@ def validate_codelist_ids(df, codelist_ids):
 
 
 def validate_duplicates(df, dim_comp):
-	"""
-	Validate that there are no duplicate rows in the DataFrame for the given combination of columns.
+	"""Validate that there are no duplicate rows in the DataFrame for the given combination of columns.
 
 	Args:
 		df (pd.DataFrame): The DataFrame to validate.
@@ -176,8 +171,7 @@ def validate_duplicates(df, dim_comp):
 
 
 def validate_no_missing_values(df, mandatory_columns):
-	"""
-	Validate that there are no missing values in the mandatory columns of the DataFrame.
+	"""Validate that there are no missing values in the mandatory columns of the DataFrame.
 
 	Args:
 		df (pd.DataFrame): The DataFrame to validate.

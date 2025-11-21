@@ -6,11 +6,17 @@ import pysdmx as px
 
 
 @typechecked
-def filter_rows(df: pd.DataFrame, codelist_ids: Dict[str, list[str]]) -> pd.DataFrame:
-    """
-    Filters out rows where values are not in the allowed codelist for coded columns.
+def filter_rows(
+        df: pd.DataFrame, 
+        codelist_ids: Dict[str, list[str]]
+    ) -> pd.DataFrame:
+    """Filters out rows where values are not in the allowed codelist for coded columns.
     Compares as strings but does not change df dtypes.
     Does not mutate input df.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        codelist_ids (Dict[str, list[str]]): A dictionary mapping column names to lists of allowed codelist IDs.
 
     Returns:
         - Filtered DataFrame (only selected rows)
@@ -35,8 +41,14 @@ def filter_tidy_raw(
     df: pd.DataFrame,
     schema: px.model.dataflow.Schema,
 ) -> pd.DataFrame:
-    """
-    Validate and filter SDMX-like input, returning a cleaned DataFrame.
+    """Validate and filter SDMX-like input, returning a cleaned DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        schema (px.model.dataflow.Schema): The SDMX schema to validate against.
+    
+    Returns:
+        pd.DataFrame: The filtered DataFrame.
     """
     # if schema is None:
     #     raise ValueError("Schema must be provided.")

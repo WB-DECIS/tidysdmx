@@ -124,7 +124,8 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
 def fetch_schema(
 		base_url:str,
 		artefact_id: str,
-		context: Literal["dataflow", "datastructure", "provisionagreement"]):
+		context: Literal["dataflow", "datastructure", "provisionagreement"]
+	):
 	"""Fetches the schema of a specified artefact from an SDMX registry.
 	
 	Args:
@@ -211,7 +212,10 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
 		raise ValueError("Invalid artefact_id format. Expected format: 'agency:id(version)'")
 	
 
-def standardize_sdmx(data, mapping):
+def standardize_sdmx(
+		data: pd.DataFrame, 
+		mapping: dict
+	) -> pd.DataFrame:
 	"""Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
 
 	Args:

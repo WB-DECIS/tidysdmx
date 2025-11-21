@@ -11,8 +11,7 @@ def infer_role_dimension(
     df: pd.DataFrame, 
     value_col: str
 ) -> List[Union[str, Tuple[str, ...]]]:
-    """
-    Infers the minimal set of unique keys (dimension columns) for an observation column.
+    """Infers the minimal set of unique keys (dimension columns) for an observation column.
 
     This function identifies the smallest combination of columns that uniquely 
     identifies each record's observation value. It starts by checking single 
@@ -61,9 +60,20 @@ def infer_role_dimension(
             
     return []
 
-def infer_role(col_name: str, series, dimension_cols: set) -> Role:
-    """
-    Infer SDMX role for a column based on dimension detection and data characteristics.
+def infer_role(
+        col_name: str, 
+        series, 
+        dimension_cols: set
+    ) -> Role:
+    """Infer SDMX role for a column based on dimension detection and data characteristics.
+
+    Args:
+        col_name (str): The name of the column.
+        series (pd.Series): The data series for the column.
+        dimension_cols (set): A set of dimension column names.
+
+    Returns:
+        Role: The inferred role for the column.
     """
     if col_name in dimension_cols:
         return Role.DIMENSION
@@ -74,22 +84,45 @@ def infer_role(col_name: str, series, dimension_cols: set) -> Role:
     return Role.DIMENSION if unique_ratio < 0.5 else Role.ATTRIBUTE
 
 def infer_dtype(series) -> DataType:
-    """Map pandas dtype to SDMX DataType."""
+    """Map pandas dtype to SDMX DataType.
+    
+    Args:
+        series (pd.Series): The data series for the column.
+    
+    Returns:
+        DataType: The inferred SDMX data type.
+    """
     if series.dtype.kind in ["i", "f"]:
         return DataType.FLOAT
     if "datetime" in str(series.dtype):
         return DataType.PERIOD
     return DataType.STRING
 
-def infer_schema(df, agency="WB", id="INFERRED_SCHEMA", value_col="OBS_VALUE"):
-    """Infer a pysdmx Schema from a pandas DataFrame."""
+def infer_schema(
+        df: pd.DataFrame, 
+        agency: str = "WB", 
+        id: str = "INFERRED_SCHEMA", 
+        value_col: str = "OBS_VALUE"
+    ) -> Schema:
+    """Infer a pysdmx Schema from a pandas DataFrame.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        agency (str, optional): The agency ID for the schema. Defaults to "WB".
+        id (str, optional): The schema ID. Defaults to "INFERRED_SCHEMA".
+        value_col (str, optional): The name of the observation value column. Defaults to "OBS_VALUE".
+    
+    Returns:
+        Schema: The inferred pysdmx Schema object.
+    """
     # Infer dimension columns
     dim_cols = infer_role_dimension(df = df, value_col = value_col)
     
     components = []
 
     for col in df.columns:
-        role = infer_role(col_name = col, series = df[col], dimension_cols = dim_cols)
+        role = infer_role(col_name = col, series = df[col], 
+                          dimension_cols = dim_cols)
         dtype = infer_dtype(df[col])
         concept = Concept(id=col, name=col.title(), dtype=dtype)
 
