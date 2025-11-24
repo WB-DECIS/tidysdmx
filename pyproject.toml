@@ -24,6 +24,7 @@ jupyterlab = "^4.4.10"
 ipykernel = "^7.1.0"
 ipython = "^9.6.0"
 notebook = "^7.4.7"
+ruff = "^0.14.6"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -34,3 +35,14 @@ version_toml = [
     "pyproject.toml:tool.poetry.version",
 ]
 allow_zero_version = true
+
+[tool.ruff]
+# Enable docstring linting rules (prefix "D")
+lint.select = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+# Enforce Google-style docstrings
+convention = "google"
+
+# (Optional) Ignore specific rules, e.g., allow missing docstrings on __init__
+# ignore = ["D107"]
