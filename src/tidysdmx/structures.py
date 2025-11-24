@@ -1,9 +1,10 @@
 from typeguard import typechecked
 from typing import List, Tuple, Union, Optional, Literal
 from itertools import combinations
+from datetime import datetime
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap
 import pandas as pd
 
 # region infer dataset structure
@@ -282,4 +283,47 @@ def build_date_pattern_map(
         resolve_period=resolve_period
     )
 
+
+typechecked
+def build_value_map(
+    source: str,
+    target: str,
+    valid_from: Optional[datetime] = None,
+    valid_to: Optional[datetime] = None
+) -> ValueMap:
+    """Create a pysdmx ValueMap object mapping a source value to a target value.
+
+    Args:
+        source (str): The source value to map.
+        target (str): The target value to map to.
+        valid_from (Optional[datetime]): Start of business validity for the mapping.
+        valid_to (Optional[datetime]): End of business validity for the mapping.
+
+    Returns:
+        ValueMap: A pysdmx ValueMap object representing the mapping.
+
+    Raises:
+        ValueError: If source or target is empty.
+        TypeError: If source or target is not a string.
+
+    Examples:
+        >>> from datetime import datetime
+        >>> vm = build_value_map("BE", "BEL")
+        >>> isinstance(vm, ValueMap)
+        True
+        >>> vm.source
+        'BE'
+        >>> vm.target
+        'BEL'
+
+        >>> vm2 = build_value_map("DE", "GER", valid_from=datetime(2020, 1, 1))
+        >>> vm2.valid_from.year
+        2020
+    """
+    if not isinstance(source, str) or not isinstance(target, str):
+        raise TypeError("Source and target must be strings.")
+    if not source.strip() or not target.strip():
+        raise ValueError("Source and target cannot be empty.")
+
+    return ValueMap(source=source, target=target, valid_from=valid_from, valid_to=valid_to)
 # endregion

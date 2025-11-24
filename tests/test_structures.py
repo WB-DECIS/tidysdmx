@@ -1,9 +1,15 @@
 from typeguard import TypeCheckError
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap
+from datetime import datetime
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap
 import pandas as pd
 import pytest
 # Import tidysdmx functions
-from tidysdmx.structures import infer_role_dimension, build_fixed_map, build_implicit_component_map, build_date_pattern_map
+from tidysdmx.structures import (
+    infer_role_dimension, 
+    build_fixed_map, 
+    build_implicit_component_map, 
+    build_date_pattern_map,
+    build_value_map)
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -247,5 +253,79 @@ class TestBuildDatePatternMap:  # noqa: D101
         with pytest.raises(ValueError):
             build_date_pattern_map("DATE", "TIME_PERIOD", "   ", "M")
 # endregion
+
+# region Test build_value_map()
+class TestBuildValueMap:  # noqa: D101
+    def test_build_value_map_normal(self):
+        """Test normal case with source and target values."""
+        vm = build_value_map("BE", "BEL")
+        assert isinstance(vm, ValueMap)
+        assert vm.source == "BE"
+        assert vm.target == "BEL"
+        assert vm.valid_from is None
+        assert vm.valid_to is None
+
+    def test_build_value_map_with_validity_dates(self):
+        """Test case with both validity dates provided."""
+        start = datetime(2021, 1, 1)
+        end = datetime(2022, 1, 1)
+        vm = build_value_map("FR", "FRA", valid_from=start, valid_to=end)
+        assert vm.valid_from == start
+        assert vm.valid_to == end
+
+    def test_build_value_map_with_only_valid_from(self):
+        """Test case with only valid_from date provided."""
+        start = datetime(2020, 6, 15)
+        vm = build_value_map("DE", "GER", valid_from=start)
+        assert vm.valid_from == start
+        assert vm.valid_to is None
+
+    def test_build_value_map_with_only_valid_to(self):
+        """Test case with only valid_to date provided."""
+        end = datetime(2030, 12, 31)
+        vm = build_value_map("IT", "ITA", valid_to=end)
+        assert vm.valid_to == end
+        assert vm.valid_from is None
+
+    def test_build_value_map_empty_source(self):
+        """Empty source raises ValueError."""
+        with pytest.raises(ValueError):
+            build_value_map("", "BEL")
+
+    def test_build_value_map_empty_target(self):
+        """Empty target raises ValueError."""
+        with pytest.raises(ValueError):
+            build_value_map("BE", "")
+
+    def test_build_value_map_invalid_source_type(self):
+        """Non-string source raises TypeError."""
+        with pytest.raises(TypeError):
+            build_value_map(123, "BEL")
+
+    def test_build_value_map_invalid_target_type(self):
+        """Non-string target raises TypeError."""
+        with pytest.raises(TypeError):
+            build_value_map("BE", 456)
+
+    def test_build_value_map_whitespace_source(self):
+        """Whitespace-only source raises ValueError."""
+        with pytest.raises(ValueError):
+            build_value_map("   ", "BEL")
+
+    def test_build_value_map_whitespace_target(self):
+        """Whitespace-only target raises ValueError."""
+        with pytest.raises(ValueError):
+            build_value_map("BE", "   ")
+
+    def test_build_value_map_type_safety(self):
+        """Ensure returned object is of type ValueMap."""
+        vm = build_value_map("NL", "NLD")
+        assert isinstance(vm, ValueMap)
+
+    def test_build_value_map_validity_type(self):
+        """Ensure validity dates are datetime or None."""
+        vm = build_value_map("ES", "ESP", valid_from=datetime(2025, 1, 1))
+        assert isinstance(vm.valid_from, datetime)
+
 
 

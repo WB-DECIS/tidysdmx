@@ -23,7 +23,7 @@ from .tidy_raw import filter_rows, filter_tidy_raw
 from .utils import extract_validation_info, get_codelist_ids
 from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps
 from .validation import validate_dataset_local, validate_columns, validate_mandatory_columns, validate_codelist_ids, validate_duplicates, validate_no_missing_values 
-from .structures import infer_role_dimension, infer_schema, build_fixed_map, build_implicit_component_map, build_date_pattern_map
+from .structures import infer_role_dimension, infer_schema, build_fixed_map, build_implicit_component_map, build_date_pattern_map, build_value_map
 
 __all__ = [
     "fetch_dsd_schema",
@@ -62,5 +62,6 @@ __all__ = [
     "apply_implicit_component_maps",
     "build_fixed_map",
     "build_implicit_component_map",
-    "build_date_pattern_map"
+    "build_date_pattern_map",
+    "build_value_map"
     ]
