@@ -1,7 +1,9 @@
+from typeguard import TypeCheckError
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap
 import pandas as pd
 import pytest
 # Import tidysdmx functions
-from tidysdmx.structures import infer_role_dimension, build_fixed_map
+from tidysdmx.structures import infer_role_dimension, build_fixed_map, build_implicit_component_map
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -79,38 +81,38 @@ from tidysdmx.structures import infer_role_dimension, build_fixed_map
 #     assert result == set(), "No unique keys should be found"
 
 # region Test build_fixed_map
-class TestBuildFixedMap:
-    def test_build_fixed_map_normal():
+class TestBuildFixedMap:  # noqa: D101
+    def test_build_fixed_map_normal(self):
         """Valid mapping with default located_in."""
-        mapping = build_fixed_map("CONF_STATUS", "F")
+        mapping = build_fixed_map(target="CONF_STATUS", value="F")
         assert isinstance(mapping, FixedValueMap)
         assert mapping.target == "CONF_STATUS"
         assert mapping.value == "F"
         assert mapping.located_in == "target"
 
-    def test_build_fixed_map_valid_source_located_in():
+    def test_build_fixed_map_valid_source_located_in(self):
         """Valid mapping with located_in set to 'source'."""
         mapping = build_fixed_map("REPORTING_STATUS", "FINAL", located_in="source")
         assert mapping.located_in == "source"
         assert mapping.target == "REPORTING_STATUS"
         assert mapping.value == "FINAL"
 
-    def test_build_fixed_map_invalid_target():
+    def test_build_fixed_map_invalid_target(self):
         """Empty target should raise ValueError."""
         with pytest.raises(ValueError):
             build_fixed_map("", "F")
 
-    def test_build_fixed_map_invalid_value():
+    def test_build_fixed_map_invalid_value(self):
         """Empty value should raise ValueError."""
         with pytest.raises(ValueError):
             build_fixed_map("CONF_STATUS", "")
 
-    def test_build_fixed_map_invalid_located_in_raises():
+    def test_build_fixed_map_invalid_located_in_raises(self):
         """Invalid located_in should raise ValueError."""
         with pytest.raises(ValueError) as exc_info:
             build_fixed_map("CONF_STATUS", "F", located_in="invalid")
 
-    def test_build_fixed_map_type_safety():
+    def test_build_fixed_map_type_safety(self):
         """Ensure type safety enforced by typeguard."""
         with pytest.raises(TypeCheckError):
             build_fixed_map(123, "F")  # target must be str
@@ -118,4 +120,53 @@ class TestBuildFixedMap:
             build_fixed_map("CONF_STATUS", 456)  # value must be str
         with pytest.raises(TypeCheckError):
             build_fixed_map("CONF_STATUS", 456, located_in=None)
+# endregion
+
+# region Test build_fixed_map
+class TestBuildImplicitComponentMap:  # noqa: D101
+    def test_build_implicit_component_map_valid(self):
+        """Valid mapping should return an ImplicitComponentMap instance."""
+        mapping = build_implicit_component_map("FREQ", "FREQUENCY")
+        assert isinstance(mapping, ImplicitComponentMap)
+        assert mapping.source == "FREQ"
+        assert mapping.target == "FREQUENCY"
+
+    def test_build_implicit_component_map_empty_source_raises(self):
+        """Empty source should raise ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            build_implicit_component_map("", "FREQUENCY")
+        assert "non-empty" in str(exc_info.value)
+
+    def test_build_implicit_component_map_empty_target_raises(self):
+        """Empty target should raise ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            build_implicit_component_map("FREQ", "")
+        assert "non-empty" in str(exc_info.value)
+
+    def test_build_implicit_component_map_type_safety_source(self):
+        """Non-string source should raise TypeError due to typeguard."""
+        with pytest.raises(TypeCheckError):
+            build_implicit_component_map(123, "FREQUENCY")
+
+    def test_build_implicit_component_map_type_safety_target(self):
+        """Non-string target should raise TypeError due to typeguard."""
+        with pytest.raises(TypeCheckError):
+            build_implicit_component_map("FREQ", 456)
+
+    @pytest.mark.skip(reason="Not implemented.")
+    def test_build_implicit_component_map_whitespace_source(self):
+        """Whitespace-only source should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_implicit_component_map("   ", "FREQUENCY")
+
+    @pytest.mark.skip(reason="Not implemented.")
+    def test_build_implicit_component_map_whitespace_target(self):
+        """Whitespace-only target should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_implicit_component_map("FREQ", "   ")
+
+    def test_build_implicit_component_map_case_sensitivity(self):
+        """Ensure mapping preserves case of source and target."""
+        mapping = build_implicit_component_map("freq", "Frequency")
+        assert mapping.source == "freq"
 # endregion
