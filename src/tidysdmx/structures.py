@@ -1,9 +1,9 @@
 from typeguard import typechecked
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Union, Optional, Literal
 from itertools import combinations
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap
 import pandas as pd
 
 # region infer dataset structure
@@ -218,5 +218,68 @@ def build_implicit_component_map(source: str, target: str) -> ImplicitComponentM
         raise ValueError("Both 'source' and 'target' must be non-empty strings.")
 
     return ImplicitComponentMap(source=source, target=target)
+
+
+@typechecked
+def build_date_pattern_map(
+    source: str,
+    target: str,
+    pattern: str,
+    frequency: str,
+    id: Optional[str] = None,
+    locale: str = "en",
+    pattern_type: Literal["fixed", "variable"] = "fixed",
+    resolve_period: Optional[Literal["startOfPeriod", "endOfPeriod", "midPeriod"]] = None
+) -> DatePatternMap:
+    """Build a DatePatternMap object for mapping date patterns between SDMX components.
+
+    Args:
+        source (str): The ID of the source component.
+        target (str): The ID of the target component.
+        pattern (str): The SDMX date pattern describing the source date (e.g., "MMM yy").
+        frequency (str): The frequency code or reference (e.g., "M" for monthly).
+        id (Optional[str]): Optional map ID as defined in the registry.
+        locale (str): Locale for parsing the input date pattern. Defaults to "en".
+        pattern_type (Literal["fixed", "variable"]): Type of date pattern. Defaults to "fixed".
+            - "fixed": frequency is a fixed value (e.g., "A" for annual).
+            - "variable": frequency references a dimension or attribute (e.g., "FREQ").
+        resolve_period (Optional[Literal["startOfPeriod", "endOfPeriod", "midPeriod"]]): Point in time to resolve when mapping from low to high frequency periods.
+
+    Returns:
+        DatePatternMap: A fully constructed DatePatternMap instance.
+
+    Raises:
+        ValueError: If any required argument is empty or invalid.
+        TypeError: If argument types do not match expected types.
+
+    Examples:
+        >>> dpm = build_date_pattern_map(
+        ...     source="DATE",
+        ...     target="TIME_PERIOD",
+        ...     pattern="MMM yy",
+        ...     frequency="M"
+        ... )
+        >>> print(dpm)
+        source: DATE, target: TIME_PERIOD, pattern: MMM yy, frequency: M
+    """
+    if not source.strip():
+        raise ValueError("Source component ID cannot be empty.")
+    if not target.strip():
+        raise ValueError("Target component ID cannot be empty.")
+    if not pattern.strip():
+        raise ValueError("Pattern cannot be empty.")
+    if not frequency.strip():
+        raise ValueError("Frequency cannot be empty.")
+
+    return DatePatternMap(
+        source=source,
+        target=target,
+        pattern=pattern,
+        frequency=frequency,
+        id=id,
+        locale=locale,
+        pattern_type=pattern_type,
+        resolve_period=resolve_period
+    )
 
 # endregion

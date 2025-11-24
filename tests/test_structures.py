@@ -1,9 +1,9 @@
 from typeguard import TypeCheckError
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap
 import pandas as pd
 import pytest
 # Import tidysdmx functions
-from tidysdmx.structures import infer_role_dimension, build_fixed_map, build_implicit_component_map
+from tidysdmx.structures import infer_role_dimension, build_fixed_map, build_implicit_component_map, build_date_pattern_map
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -170,3 +170,82 @@ class TestBuildImplicitComponentMap:  # noqa: D101
         mapping = build_implicit_component_map("freq", "Frequency")
         assert mapping.source == "freq"
 # endregion
+
+# region Test build_date_pattern_map()
+class TestBuildDatePatternMap:  # noqa: D101
+    
+    def test_build_date_pattern_map_valid_fixed(self):
+        """Valid case with fixed pattern type."""
+        dpm = build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M")
+        assert isinstance(dpm, DatePatternMap)
+        assert dpm.source == "DATE"
+        assert dpm.target == "TIME_PERIOD"
+        assert dpm.pattern == "MMM yy"
+        assert dpm.frequency == "M"
+        assert dpm.pattern_type == "fixed"
+        assert dpm.locale == "en"
+
+    def test_build_date_pattern_map_valid_variable(self):
+        """Valid case with variable pattern type."""
+        dpm = build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "FREQ", pattern_type="variable")
+        assert dpm.pattern_type == "variable"
+        assert dpm.frequency == "FREQ"
+
+    def test_build_date_pattern_map_with_id_and_locale(self):
+        """Valid case with custom ID and locale."""
+        dpm = build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M", id="map1", locale="fr")
+        assert dpm.id == "map1"
+        assert dpm.locale == "fr"
+
+    def test_build_date_pattern_map_with_resolve_period(self):
+        """Valid case with resolve_period specified."""
+        dpm = build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M", resolve_period="endOfPeriod")
+        assert dpm.resolve_period == "endOfPeriod"
+
+    def test_build_date_pattern_map_empty_source(self):
+        """Empty source should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("", "TIME_PERIOD", "MMM yy", "M")
+
+    def test_build_date_pattern_map_empty_target(self):
+        """Empty target should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("DATE", "", "MMM yy", "M")
+
+    def test_build_date_pattern_map_empty_pattern(self):
+        """Empty pattern should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("DATE", "TIME_PERIOD", "", "M")
+
+    def test_build_date_pattern_map_empty_frequency(self):
+        """Empty frequency should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "")
+
+    def test_build_date_pattern_map_invalid_pattern_type(self):
+        """Invalid pattern_type should raise TypeError."""
+        with pytest.raises(TypeCheckError):
+            build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M", pattern_type="wrong")  # type: ignore
+
+    def test_build_date_pattern_map_invalid_resolve_period(self):
+        """Invalid resolve_period should raise TypeError."""
+        with pytest.raises(TypeCheckError):
+            build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M", resolve_period="invalid")  # type: ignore
+
+    def test_build_date_pattern_map_whitespace_source(self):
+        """Whitespace-only source should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("   ", "TIME_PERIOD", "MMM yy", "M")
+
+    def test_build_date_pattern_map_whitespace_target(self):
+        """Whitespace-only target should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("DATE", "   ", "MMM yy", "M")
+
+    def test_build_date_pattern_map_whitespace_pattern(self):
+        """Whitespace-only pattern should raise ValueError."""
+        with pytest.raises(ValueError):
+            build_date_pattern_map("DATE", "TIME_PERIOD", "   ", "M")
+# endregion
+
+
