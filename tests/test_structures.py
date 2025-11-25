@@ -1,6 +1,6 @@
 from typeguard import TypeCheckError
 from datetime import datetime
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap
+from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap, MultiValueMap
 import pandas as pd
 import pytest
 # Import tidysdmx functions
@@ -9,7 +9,8 @@ from tidysdmx.structures import (
     build_fixed_map, 
     build_implicit_component_map, 
     build_date_pattern_map,
-    build_value_map)
+    build_value_map,
+    build_value_map_list)
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -326,6 +327,71 @@ class TestBuildValueMap:  # noqa: D101
         """Ensure validity dates are datetime or None."""
         vm = build_value_map("ES", "ESP", valid_from=datetime(2025, 1, 1))
         assert isinstance(vm.valid_from, datetime)
+# endregion
 
 
+class TestBuildValueMapList:  # noqa: D101
+    def test_build_value_map_list_valid(self, value_map_df_mandatory_cols):
+        """Valid DataFrame should return a list of ValueMap objects."""
+        result = build_value_map_list(value_map_df_mandatory_cols, "source", "target")
+        assert isinstance(result, list)
+        assert all(isinstance(vm, ValueMap) for vm in result)
+        assert len(result) == value_map_df_mandatory_cols.shape[0]
+        assert result[0].source == "AR"
+        assert result[0].target == "ARG"
+    
+    
+    def test_build_value_map_list_validity_columns(self):
+        """DataFrame with custom validity column names should populate ValueMap."""
+        df = pd.DataFrame({
+            "source": ["BE", "FR"],
+            "target": ["BEL", "FRA"],
+            "start_date": ["2020-01-01", None],
+            "end_date": ["2025-12-31", None]
+        })
+        result = build_value_map_list(df, "source", "target", valid_from_col="start_date", valid_to_col="end_date")
+        assert result[0].valid_from == "2020-01-01"
+        assert result[0].valid_to == "2025-12-31"
+        assert result[1].valid_from is None
+        assert result[1].valid_to is None
+ 
+    def test_build_value_map_list_validity_columns_empty(self):
+        """Validity columns present but empty should be ignored."""
+        df = pd.DataFrame({
+            "source": ["BR"],
+            "target": ["BRA"],
+            "valid_from": [None],
+            "valid_to": [None]
+        })
+        result = build_value_map_list(df, "source", "target")
+        assert result[0].valid_from is None
+        assert result[0].valid_to is None
 
+    def test_build_value_map_list_empty_df(self):
+        """Empty DataFrame should raise ValueError."""
+        empty_df = pd.DataFrame(columns=["source", "target"])
+        with pytest.raises(ValueError):
+            build_value_map_list(empty_df, "source", "target")
+
+    def test_build_value_map_list_missing_column(self, value_map_df_mandatory_cols):
+        """Missing column should raise ValueError."""
+        df_missing = value_map_df_mandatory_cols.drop(columns=["target"])
+        with pytest.raises(ValueError):
+            build_value_map_list(df_missing, "source", "target")
+
+    def test_build_value_map_list_single_row(self):
+        """Single-row DataFrame should return a list with one ValueMap."""
+        df_single = pd.DataFrame({"source": ["BR"], "target": ["BRA"]})
+        result = build_value_map_list(df_single, "source", "target")
+        assert len(result) == 1
+        assert result[0].source == "BR"
+        assert result[0].target == "BRA"
+
+    def test_build_value_map_list_column_order_irrelevant(self, value_map_df_mandatory_cols):
+        """Column order should not affect the result."""
+        df_reordered = value_map_df_mandatory_cols[["target", "source"]]
+        # result = build_value_map_list(df_reordered.rename(columns={"target": "target", "source": "source"}), "source", "target")
+        result = build_value_map_list(df_reordered, "source", "target")
+        assert len(result) == value_map_df_mandatory_cols.shape[0]
+        assert result[1].source == "UY"
+        assert result[1].target == "URY"

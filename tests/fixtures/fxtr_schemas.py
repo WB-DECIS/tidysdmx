@@ -34,9 +34,7 @@ def api_params():
 
 @pytest.fixture(scope="session")
 def ifpri_asti_schema(api_params):
-    """
-    Fixture that records the FMR response for a DSD schema on first run and reuses it later.
-    """
+    """Fixture that records the FMR response for a DSD schema on first run and reuses it later."""
     cache_file = CACHE_DIR / "ifpri_asti_schema.pkl"
 
     if cache_file.exists():

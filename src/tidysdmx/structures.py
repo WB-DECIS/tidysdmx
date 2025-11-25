@@ -4,7 +4,14 @@ from itertools import combinations
 from datetime import datetime
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap
+from pysdmx.model.map import (
+    RepresentationMap, 
+    FixedValueMap, 
+    ImplicitComponentMap, 
+    DatePatternMap, 
+    ValueMap, 
+    MultiValueMap
+    )
 import pandas as pd
 
 # region infer dataset structure
@@ -326,4 +333,76 @@ def build_value_map(
         raise ValueError("Source and target cannot be empty.")
 
     return ValueMap(source=source, target=target, valid_from=valid_from, valid_to=valid_to)
+
+# endregion
+
+# region representation maps
+
+
+
+@typechecked
+def build_value_map_list(
+    df: pd.DataFrame,
+    source_col: str = "source",
+    target_col: str = "target",
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to"
+) -> list[ValueMap]:
+    """Build a list of ValueMap objects from a pandas DataFrame, optionally including validity periods.
+
+    Args:
+        df (pd.DataFrame): DataFrame where each row represents a mapping.
+        source_col (str): Column name for source values.
+        target_col (str): Column name for target values.
+        valid_from_col (str): Optional column name for validity start date. Defaults to "valid_from".
+        valid_to_col (str): Optional column name for validity end date. Defaults to "valid_to".
+
+    Returns:
+        list[ValueMap]: List of ValueMap objects created from the DataFrame.
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Notes:
+        - If validity columns exist and contain non-null values, they will be used.
+        - If validity columns are absent or contain only nulls, they are ignored.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {
+        ...     'source': ['BE', 'FR'],
+        ...     'target': ['BEL', 'FRA'],
+        ...     'valid_from': ['2020-01-01', None],
+        ...     'valid_to': ['2025-12-31', None]
+        ... }
+        >>> df = pd.DataFrame(data)
+        >>> value_maps = build_value_map_list(df, 'source', 'target')
+        >>> isinstance(value_maps[0], ValueMap)
+        True
+    """
+    if df.empty:
+        raise ValueError("Input DataFrame cannot be empty.")
+    if source_col not in df.columns or target_col not in df.columns:
+        raise ValueError(f"Columns '{source_col}' and '{target_col}' must exist in DataFrame.")
+    if not df[source_col].map(lambda x: isinstance(x, str)).all() or \
+       not df[target_col].map(lambda x: isinstance(x, str)).all():
+        raise TypeError("Source and target columns must contain only string values.")
+
+    has_valid_from = valid_from_col in df.columns
+    has_valid_to = valid_to_col in df.columns
+
+    value_maps: list[ValueMap] = []
+    for _, row in df.iterrows():
+        kwargs = {
+            "source": row[source_col],
+            "target": row[target_col]
+        }
+        if has_valid_from and pd.notna(row.get(valid_from_col)):
+            kwargs["valid_from"] = str(row[valid_from_col])
+        if has_valid_to and pd.notna(row.get(valid_to_col)):
+            kwargs["valid_to"] = str(row[valid_to_col])
+        value_maps.append(ValueMap(**kwargs))
+
+    return value_maps
 # endregion
