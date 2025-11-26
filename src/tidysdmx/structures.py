@@ -1,5 +1,5 @@
 from typeguard import typechecked
-from typing import List, Tuple, Union, Optional, Literal
+from typing import List, Tuple, Union, Optional, Literal, Sequence
 from itertools import combinations
 from datetime import datetime
 from pysdmx.model.dataflow import Schema, Components, Component
@@ -337,9 +337,6 @@ def build_value_map(
 # endregion
 
 # region representation maps
-
-
-
 @typechecked
 def build_value_map_list(
     df: pd.DataFrame,
@@ -405,4 +402,78 @@ def build_value_map_list(
         value_maps.append(ValueMap(**kwargs))
 
     return value_maps
+
+
+@typechecked
+def build_multi_value_map_list(
+    df: pd.DataFrame,
+    source_cols: Sequence[str],
+    target_col: str,
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to"
+) -> list[MultiValueMap]:
+    """Build a list of MultiValueMap objects from a pandas DataFrame, optionally including validity periods.
+
+    Args:
+        df (pd.DataFrame): DataFrame where each row represents a mapping.
+        source_cols (Sequence[str]): Column names for source values (multiple allowed).
+        target_col (str): Column name for target value (single column).
+        valid_from_col (str): Optional column name for validity start date. Defaults to "valid_from".
+        valid_to_col (str): Optional column name for validity end date. Defaults to "valid_to".
+
+    Returns:
+        list[MultiValueMap]: List of MultiValueMap objects created from the DataFrame.
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {
+        ...     'country': ['DE', 'CH'],
+        ...     'currency': ['LC', 'LC'],
+        ...     'iso_code': ['EUR', 'CHF']
+        ... }
+        >>> df = pd.DataFrame(data)
+        >>> multi_maps = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        >>> isinstance(multi_maps[0], MultiValueMap)
+        True
+    """
+    if df.empty:
+        raise ValueError("Input DataFrame cannot be empty.")
+    for col in source_cols:
+        if col not in df.columns:
+            raise ValueError(f"Source column '{col}' must exist in DataFrame.")
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' must exist in DataFrame.")
+
+    # Validate data types
+    for col in source_cols:
+        if not df[col].map(lambda x: isinstance(x, str)).all():
+            raise TypeError(f"Source column '{col}' must contain only string values.")
+    if not df[target_col].map(lambda x: isinstance(x, str)).all():
+        raise TypeError(f"Target column '{target_col}' must contain only string values.")
+
+    has_valid_from = valid_from_col in df.columns
+    has_valid_to = valid_to_col in df.columns
+
+    multi_value_maps: list[MultiValueMap] = []
+    for _, row in df.iterrows():
+        source_values = [row[col] for col in source_cols]
+        target_value = row[target_col]
+
+        kwargs = {
+            "source": source_values,
+            "target": [target_value]  # Wrap in list for consistency with MultiValueMap
+        }
+        if has_valid_from and pd.notna(row.get(valid_from_col)):
+            kwargs["valid_from"] = datetime.fromisoformat(str(row[valid_from_col]))
+        if has_valid_to and pd.notna(row.get(valid_to_col)):
+            kwargs["valid_to"] = datetime.fromisoformat(str(row[valid_to_col]))
+
+        multi_value_maps.append(MultiValueMap(**kwargs))
+
+    return multi_value_maps
+
 # endregion

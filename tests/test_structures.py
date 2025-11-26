@@ -3,6 +3,7 @@ from datetime import datetime
 from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap, MultiValueMap
 import pandas as pd
 import pytest
+import re
 # Import tidysdmx functions
 from tidysdmx.structures import (
     infer_role_dimension, 
@@ -10,7 +11,8 @@ from tidysdmx.structures import (
     build_implicit_component_map, 
     build_date_pattern_map,
     build_value_map,
-    build_value_map_list)
+    build_value_map_list,
+    build_multi_value_map_list)
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -337,8 +339,9 @@ class TestBuildValueMapList:  # noqa: D101
         assert isinstance(result, list)
         assert all(isinstance(vm, ValueMap) for vm in result)
         assert len(result) == value_map_df_mandatory_cols.shape[0]
-        assert result[0].source == "AR"
-        assert result[0].target == "ARG"
+        assert result[1].source == "UY"
+        assert result[1].target == "URY"
+        assert result[0].typed_source == re.compile(r"^A") 
     
     
     def test_build_value_map_list_validity_columns(self):
@@ -395,3 +398,86 @@ class TestBuildValueMapList:  # noqa: D101
         assert len(result) == value_map_df_mandatory_cols.shape[0]
         assert result[1].source == "UY"
         assert result[1].target == "URY"
+
+
+class TestBuildMultiValueMapList:  # noqa: D101
+    def test_build_multi_value_map_list_normal(self, multi_value_map_df):
+        """Normal case: first row should produce a valid MultiValueMap."""
+        df = multi_value_map_df.iloc[[0]]  # Row with DE/EUR
+        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], MultiValueMap)
+        assert result[0].source == ['DE', 'LC']
+        assert result[0].target == ['EUR']
+
+
+    def test_build_multi_value_map_list_regex_source(self, multi_value_map_df):
+        """Row with regex pattern in source should still work."""
+        df = multi_value_map_df.iloc[[1]]  # regex:^A
+        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        assert result[0].source[0].startswith("regex:^A")
+        assert result[0].typed_source[0] == re.compile(r"^A") 
+        assert result[0].target == ['ARG']
+
+
+    def test_build_multi_value_map_list_empty_source(self, multi_value_map_df):
+        """Row with empty string in source should be accepted as valid string."""
+        df = multi_value_map_df.iloc[[2]]  # Empty country
+        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        assert result[0].source[0] == ""
+        assert result[0].target == ['CHF']
+
+
+    def test_build_multi_value_map_list_with_validity(self, multi_value_map_df):
+        """Row with valid_from and valid_to should include datetime fields."""
+        df = multi_value_map_df.iloc[[3]]  # FR/FRA with validity
+        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        mv_map = result[0]
+        assert mv_map.source == ['FR', 'LC']
+        assert mv_map.target == ['FRA']
+        assert isinstance(mv_map.valid_from, datetime)
+        assert isinstance(mv_map.valid_to, datetime)
+        assert mv_map.valid_from.isoformat() == "2020-01-01T00:00:00"
+        assert mv_map.valid_to.isoformat() == "2025-12-31T00:00:00"
+
+
+    def test_build_multi_value_map_list_invalid_type(self, multi_value_map_df):
+        """Row with non-string source should raise TypeError."""
+        df = multi_value_map_df.iloc[[4]]  # Invalid type in country
+        with pytest.raises(TypeError):
+            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+
+
+    def test_build_multi_value_map_list_missing_target_column(self, multi_value_map_df):
+        """Missing target column should raise ValueError."""
+        df = multi_value_map_df.drop(columns=['iso_code'])
+        with pytest.raises(ValueError):
+            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+
+
+    def test_build_multi_value_map_list_missing_source_column(self, multi_value_map_df):
+        """Missing one source column should raise ValueError."""
+        df = multi_value_map_df.drop(columns=['currency'])
+        with pytest.raises(ValueError):
+            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+
+
+    def test_build_multi_value_map_list_empty_dataframe(self):
+        """Empty DataFrame should raise ValueError."""
+        df = pd.DataFrame()
+        with pytest.raises(ValueError):
+            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+
+
+    def test_build_multi_value_map_list_multiple_rows(self, multi_value_map_df):
+        """Multiple rows should return a list of MultiValueMap objects."""
+        df = multi_value_map_df.iloc[:3]  # First three rows
+        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        assert isinstance(result, list)
+        assert len(result) == df.shape[0]
+        for mv_map in result:
+            assert isinstance(mv_map, MultiValueMap)
+            assert isinstance(mv_map.source, list)
+            assert isinstance(mv_map.target, list)
+

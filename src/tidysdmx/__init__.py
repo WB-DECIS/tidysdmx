@@ -37,7 +37,8 @@ from .structures import (
     build_implicit_component_map, 
     build_date_pattern_map, 
     build_value_map,
-    build_value_map_list
+    build_value_map_list,
+    build_multi_value_map_list
     )
 
 __all__ = [
@@ -79,5 +80,6 @@ __all__ = [
     "build_implicit_component_map",
     "build_date_pattern_map",
     "build_value_map",
-    "build_value_map_list"
+    "build_value_map_list",
+    "build_multi_value_map_list"
     ]
