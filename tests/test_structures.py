@@ -1,6 +1,13 @@
 from typeguard import TypeCheckError
-from datetime import datetime
-from pysdmx.model.map import FixedValueMap, ImplicitComponentMap, DatePatternMap, ValueMap, MultiValueMap
+from datetime import datetime, timezone
+from pysdmx.model.map import (
+    FixedValueMap, 
+    ImplicitComponentMap, 
+    DatePatternMap, 
+    ValueMap, 
+    MultiValueMap, 
+    RepresentationMap
+    )
 import pandas as pd
 import pytest
 import re
@@ -12,7 +19,36 @@ from tidysdmx.structures import (
     build_date_pattern_map,
     build_value_map,
     build_value_map_list,
-    build_multi_value_map_list)
+    build_multi_value_map_list,
+    build_representation_map
+    )
+
+# region fixtures
+
+@pytest.fixture
+def id():
+    return "RM_ID"
+
+@pytest.fixture
+def name():
+    return "Country Map"
+
+@pytest.fixture
+def agency():
+    return "ECB"
+
+@pytest.fixture
+def source_cl():
+    return "urn:source:codelist"
+
+@pytest.fixture
+def target_cl():
+    return "urn:target:codelist"
+
+@pytest.fixture
+def description():
+    return "Mapping ISO2 to ISO3 codes"
+# endregion
 
 # # region infer_role_dimension
 # @pytest.mark.parametrize(
@@ -481,3 +517,76 @@ class TestBuildMultiValueMapList:  # noqa: D101
             assert isinstance(mv_map.source, list)
             assert isinstance(mv_map.target, list)
 
+class TestBuildRepresentationMap:  # noqa: D101
+
+    def test_build_representation_map_success(self, value_map_df_mandatory_cols, id, name, agency, source_cl, target_cl, description):
+        """Test successful creation of RepresentationMap from valid DataFrame."""
+        rm = build_representation_map(
+            df=value_map_df_mandatory_cols,
+            id=id,
+            name=name,
+            agency=agency,
+            source_cl=source_cl,
+            target_cl=target_cl,
+            description=description
+        )
+        assert isinstance(rm, RepresentationMap)
+        assert rm.id == id
+        assert rm.name == name
+        assert rm.agency == agency
+        assert rm.source == source_cl
+        assert rm.target == target_cl
+        assert rm.description == description
+        assert rm.version == "1.0"
+        assert len(rm.maps) == value_map_df_mandatory_cols.shape[0]
+        for vm in rm.maps:
+            assert isinstance(vm, ValueMap)
+
+    def test_build_representation_map_empty_df_raises(self):
+        """Empty DataFrame should raise ValueError."""
+        empty_df = pd.DataFrame(columns=["source", "target"])
+        with pytest.raises(ValueError):
+            build_representation_map(empty_df)
+
+    def test_build_representation_map_missing_columns_raises(self):
+        """Missing mandatory columns should raise ValueError."""
+        bad_df = pd.DataFrame({"src": ["A"], "tgt": ["B"]})
+        with pytest.raises(ValueError):
+            build_representation_map(bad_df)
+
+    def test_build_representation_map_non_string_values_raises(self):
+        """Non-string values in source or target columns should raise TypeError."""
+        bad_df = pd.DataFrame({"source": [123], "target": ["ABC"]})
+        with pytest.raises(TypeError):
+            build_representation_map(bad_df)
+
+    def test_build_representation_map_custom_column_names(self):
+        """Test with custom column names for source and target."""
+        df = pd.DataFrame({
+            "src": ["A", "B"],
+            "tgt": ["X", "Y"],
+            "valid_from": [None, None],
+            "valid_to": [None, None]
+        })
+        rm = build_representation_map(
+            df=df,
+            source_col="src",
+            target_col="tgt",
+            id="RM_CUSTOM",
+            name="Custom Map"
+        )
+        assert isinstance(rm, RepresentationMap)
+        assert rm.id == "RM_CUSTOM"
+        assert rm.name == "Custom Map"
+        assert len(rm.maps) == 2
+
+    def test_build_representation_map_validity_dates(self, value_map_df_mandatory_cols):
+        """Ensure validity dates are parsed correctly when present."""
+        rm = build_representation_map(df=value_map_df_mandatory_cols)
+        for vm in rm.maps:
+            if vm.valid_from:
+                assert isinstance(vm.valid_from, datetime)
+                assert vm.valid_from.tzinfo == timezone.utc or vm.valid_from.tzinfo is None
+            if vm.valid_to:
+                assert isinstance(vm.valid_to, datetime)
+                assert vm.valid_to.tzinfo == timezone.utc or vm.valid_to.tzinfo is None

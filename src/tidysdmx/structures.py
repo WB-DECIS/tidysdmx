@@ -476,4 +476,76 @@ def build_multi_value_map_list(
 
     return multi_value_maps
 
+
+@typechecked
+def build_representation_map(
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: Optional[str] = None,
+    name: Optional[str] = None,
+    source_cl: Optional[str] = None,
+    target_cl: Optional[str] = None,
+    version: str = "1.0",
+    description: Optional[str] = None,
+    source_col: str = "source",
+    target_col: str = "target",
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to"
+) -> RepresentationMap:
+    """Build a RepresentationMap object from a pandas DataFrame using build_value_map_list.
+
+    Args:
+        df (pd.DataFrame): DataFrame where each row represents a mapping.
+        agency (str): Agency maintaining the representation map.
+        id (str): Identifier for the representation map.
+        name (str): Name of the representation map.
+        source_cl (str): URN or identifier for the source codelist or data type.
+        target_cl (str): URN or identifier for the target codelist or data type.
+        version (str): Version of the representation map. Defaults to "1.0".
+        description (Optional[str]): Optional description of the representation map.
+        source_col (str): Column name for source values. Defaults to "source".
+        target_col (str): Column name for target values. Defaults to "target".
+        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
+        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+
+    Returns:
+        RepresentationMap: A RepresentationMap object containing the mappings.
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {
+        ...     'source': ['BE', 'FR'],
+        ...     'target': ['BEL', 'FRA'],
+        ...     'valid_from': ['2020-01-01', None],
+        ...     'valid_to': ['2025-12-31', None]
+        ... }
+        >>> df = pd.DataFrame(data)
+        >>> rm = build_representation_map(df, 'urn:source:codelist', 'urn:target:codelist', 'RM1', 'Country Map', 'ECB')
+        >>> isinstance(rm, RepresentationMap)
+        True
+    """
+    # Use the existing function to build value maps
+    value_maps = build_value_map_list(
+        df,
+        source_col=source_col,
+        target_col=target_col,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col
+    )
+
+    return RepresentationMap(
+        id=id,
+        name=name,
+        agency=agency,
+        source=source_cl,
+        target=target_cl,
+        maps=value_maps,
+        description=description,
+        version=version
+    )
+
 # endregion
