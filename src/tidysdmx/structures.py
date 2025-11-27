@@ -10,7 +10,8 @@ from pysdmx.model.map import (
     ImplicitComponentMap, 
     DatePatternMap, 
     ValueMap, 
-    MultiValueMap
+    MultiValueMap,
+    MultiRepresentationMap
     )
 import pandas as pd
 
@@ -544,6 +545,91 @@ def build_representation_map(
         source=source_cl,
         target=target_cl,
         maps=value_maps,
+        description=description,
+        version=version
+    )
+
+
+@typechecked
+def build_multi_representation_map(
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: Optional[str] = None,
+    name: Optional[str] = None,
+    source_cls: Optional[list[str]] = None,
+    target_cls: Optional[list[str]] = None,
+    version: str = "1.0",
+    description: Optional[str] = None,
+    source_cols: list[str] = ["source"],
+    target_cols: list[str] = ["target"],
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to"
+) -> MultiRepresentationMap:
+    """Build a MultiRepresentationMap object from a pandas DataFrame using build_multi_value_map_list.
+
+    Args:
+        df (pd.DataFrame): DataFrame where each row represents a multi-mapping.
+        agency (str): Agency maintaining the multi-representation map.
+        id (Optional[str]): Identifier for the multi-representation map.
+        name (Optional[str]): Name of the multi-representation map.
+        source_cls (Optional[list[str]]): List of URNs or identifiers for source codelists or data types.
+        target_cls (Optional[list[str]]): List of URNs or identifiers for target codelists or data types.
+        version (str): Version of the multi-representation map. Defaults to "1.0".
+        description (Optional[str]): Optional description of the multi-representation map.
+        source_cols (list[str]): Column names for source values. Defaults to ["source"].
+        target_cols (list[str]): Column names for target values. Defaults to ["target"].
+        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
+        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+
+    Returns:
+        MultiRepresentationMap: A MultiRepresentationMap object containing the mappings.
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {
+        ...     'source': ['BE', 'FR'],
+        ...     'target': ['BEL', 'FRA'],
+        ...     'valid_from': ['2020-01-01', None],
+        ...     'valid_to': ['2025-12-31', None]
+        ... }
+        >>> df = pd.DataFrame(data)
+        >>> mrm = build_multi_representation_map(df, id="MRM1", name="Country Multi Map", agency="ECB")
+        >>> isinstance(mrm, MultiRepresentationMap)
+        True
+    """
+    if df.empty:
+        raise ValueError("Input DataFrame cannot be empty.")
+
+    # Validate required columns
+    required_cols = set(source_cols + target_cols)
+    if not required_cols.issubset(df.columns):
+        raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
+
+    # Validate data types
+    for col in source_cols + target_cols:
+        if not all(isinstance(val, str) for val in df[col].dropna()):
+            raise TypeError(f"Column '{col}' contains non-string values.")
+
+    # Build multi-value maps
+    multi_value_maps = build_multi_value_map_list(
+        df,
+        source_cols=source_cols,
+        target_cols=target_cols,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col
+    )
+
+    return MultiRepresentationMap(
+        id=id,
+        name=name,
+        agency=agency,
+        sources=source_cls,
+        targets=target_cls,
+        maps=multi_value_maps,
         description=description,
         version=version
     )

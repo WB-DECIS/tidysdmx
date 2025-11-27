@@ -39,7 +39,8 @@ from .structures import (
     build_value_map,
     build_value_map_list,
     build_multi_value_map_list,
-    build_representation_map
+    build_representation_map,
+    build_multi_representation_map
     )
 
 __all__ = [
@@ -83,5 +84,6 @@ __all__ = [
     "build_value_map",
     "build_value_map_list",
     "build_multi_value_map_list",
-    "build_representation_map"
+    "build_representation_map",
+    "build_multi_representation_map"
     ]
