@@ -20,7 +20,7 @@ from .tidysdmx import (
 from .qa_utils import qa_coerce_numeric, qa_remove_duplicates
 from .kedro import kd_read_mappings, kd_standardize_sdmx, kd_validate_dataset_local, kd_validate_datasets_local
 from .tidy_raw import filter_rows, filter_tidy_raw
-from .utils import extract_validation_info, get_codelist_ids
+from .utils import extract_validation_info, get_codelist_ids, extract_component_ids, create_excel_mapping
 from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps
 from .validation import (
     validate_dataset_local, 
@@ -40,7 +40,8 @@ from .structures import (
     build_value_map_list,
     build_multi_value_map_list,
     build_representation_map,
-    build_multi_representation_map
+    build_multi_representation_map,
+    build_single_component_map
     )
 
 __all__ = [
@@ -85,5 +86,8 @@ __all__ = [
     "build_value_map_list",
     "build_multi_value_map_list",
     "build_representation_map",
-    "build_multi_representation_map"
+    "build_multi_representation_map",
+    "build_single_component_map",
+    "extract_component_ids",
+    "create_excel_mapping"
     ]

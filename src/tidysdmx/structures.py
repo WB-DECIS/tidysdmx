@@ -11,7 +11,8 @@ from pysdmx.model.map import (
     DatePatternMap, 
     ValueMap, 
     MultiValueMap,
-    MultiRepresentationMap
+    MultiRepresentationMap,
+    ComponentMap
     )
 import pandas as pd
 
@@ -634,4 +635,99 @@ def build_multi_representation_map(
         version=version
     )
 
+
+@typechecked
+def build_single_component_map(
+    df: pd.DataFrame,
+    source_component: str,
+    target_component: str,
+    agency: str = "FAKE_AGENCY",
+    id: Optional[str] = None,
+    name: Optional[str] = None,
+    source_cl: Optional[str] = None,
+    target_cl: Optional[str] = None,
+    version: str = "1.0",
+    description: Optional[str] = None,
+    source_col: str = "source",
+    target_col: str = "target",
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to"
+) -> ComponentMap:
+    """Build a ComponentMap mapping one source component to one target component using a RepresentationMap built from a pandas DataFrame.
+
+    Args:
+        df (pd.DataFrame): DataFrame where each row represents a mapping.
+        source_component (str): ID of the source component.
+        target_component (str): ID of the target component.
+        agency (str): Agency maintaining the representation map. Defaults to "FAKE_AGENCY".
+        id (Optional[str]): Identifier for the representation map.
+        name (Optional[str]): Name of the representation map.
+        source_cl (Optional[str]): URN or identifier for the source codelist or data type.
+        target_cl (Optional[str]): URN or identifier for the target codelist or data type.
+        version (str): Version of the representation map. Defaults to "1.0".
+        description (Optional[str]): Optional description of the representation map.
+        source_col (str): Column name for source values. Defaults to "source".
+        target_col (str): Column name for target values. Defaults to "target".
+        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
+        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+
+    Returns:
+        ComponentMap: A ComponentMap object mapping the source component to the target component.
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {
+        ...     'source': ['BE', 'FR'],
+        ...     'target': ['BEL', 'FRA'],
+        ...     'valid_from': ['2020-01-01', None],
+        ...     'valid_to': ['2025-12-31', None]
+        ... }
+        >>> df = pd.DataFrame(data)
+        >>> cm = build_single_component_map(
+        ...     df,
+        ...     source_component="COUNTRY",
+        ...     target_component="COUNTRY",
+        ...     agency="ECB",
+        ...     id="CM1",
+        ...     name="Country Component Map",
+        ...     source_cl="urn:source:codelist",
+        ...     target_cl="urn:target:codelist"
+        ... )
+        >>> isinstance(cm, ComponentMap)
+        True
+    """
+    # Validate DataFrame
+    if df.empty:
+        raise ValueError("Input DataFrame cannot be empty.")
+    for col in [source_col, target_col]:
+        if col not in df.columns:
+            raise ValueError(f"Missing required column: {col}")
+        if not df[col].map(lambda x: isinstance(x, str) or pd.isna(x)).all():
+            raise TypeError(f"Column '{col}' must contain only string values or NaN.")
+
+    # Build RepresentationMap using the provided helper
+    representation_map = build_representation_map(
+        df=df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cl=source_cl,
+        target_cl=target_cl,
+        version=version,
+        description=description,
+        source_col=source_col,
+        target_col=target_col,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col
+    )
+
+    # Return ComponentMap
+    return ComponentMap(source=source_component, target=target_component, values=representation_map)
+
+
 # endregion
+

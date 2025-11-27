@@ -6,7 +6,8 @@ from pysdmx.model.map import (
     DatePatternMap, 
     ValueMap, 
     MultiValueMap, 
-    RepresentationMap
+    RepresentationMap,
+    ComponentMap
     )
 import pandas as pd
 import pytest
@@ -20,7 +21,8 @@ from tidysdmx.structures import (
     build_value_map,
     build_value_map_list,
     build_multi_value_map_list,
-    build_representation_map
+    build_representation_map,
+    build_single_component_map
     )
 
 # region fixtures
@@ -367,7 +369,6 @@ class TestBuildValueMap:  # noqa: D101
         assert isinstance(vm.valid_from, datetime)
 # endregion
 
-
 class TestBuildValueMapList:  # noqa: D101
     def test_build_value_map_list_valid(self, value_map_df_mandatory_cols):
         """Valid DataFrame should return a list of ValueMap objects."""
@@ -434,7 +435,6 @@ class TestBuildValueMapList:  # noqa: D101
         assert len(result) == value_map_df_mandatory_cols.shape[0]
         assert result[1].source == "UY"
         assert result[1].target == "URY"
-
 
 class TestBuildMultiValueMapList:  # noqa: D101
     def test_build_multi_value_map_list_normal(self, multi_value_map_df):
@@ -590,3 +590,103 @@ class TestBuildRepresentationMap:  # noqa: D101
             if vm.valid_to:
                 assert isinstance(vm.valid_to, datetime)
                 assert vm.valid_to.tzinfo == timezone.utc or vm.valid_to.tzinfo is None
+
+
+class TestBuildSingleComponentMap:  # noqa: D101
+    def test_build_single_component_map_valid(self, value_map_df_mandatory_cols):
+        """Test normal case with valid DataFrame and fixture."""
+        df = value_map_df_mandatory_cols
+        cm = build_single_component_map(
+            df,
+            source_component="COUNTRY",
+            target_component="COUNTRY",
+            agency="ECB",
+            id="CM1",
+            name="Country Component Map",
+            source_cl="urn:source:codelist",
+            target_cl="urn:target:codelist"
+        )
+        assert isinstance(cm, ComponentMap)
+        assert cm.source == "COUNTRY"
+        assert cm.target == "COUNTRY"
+        assert isinstance(cm.values, RepresentationMap)
+
+
+    def test_build_single_component_map_empty_df(self):
+        """Empty DataFrame should raise ValueError."""
+        df = pd.DataFrame(columns=["source", "target"])
+        with pytest.raises(ValueError):
+            build_single_component_map(df, "COUNTRY", "COUNTRY")
+
+
+    def test_build_single_component_map_missing_column(self, value_map_df_mandatory_cols):
+        """Missing required column should raise ValueError."""
+        df = value_map_df_mandatory_cols.drop(columns=["source"])
+        with pytest.raises(ValueError):
+            build_single_component_map(df, "COUNTRY", "COUNTRY")
+
+
+    def test_build_single_component_map_invalid_type(self):
+        """Non-string values in source column should raise TypeError."""
+        df = pd.DataFrame({"source": [123], "target": ["BEL"]})
+        with pytest.raises(TypeError):
+            build_single_component_map(df, "COUNTRY", "COUNTRY")
+
+
+    def test_build_single_component_map_custom_columns(self):
+        """Test with custom column names for source and target."""
+        df = pd.DataFrame({
+            "src": ["BE", "FR"],
+            "tgt": ["BEL", "FRA"],
+            "valid_from": ["2020-01-01", None],
+            "valid_to": ["2025-12-31", None]
+        })
+        cm = build_single_component_map(
+            df,
+            source_component="COUNTRY",
+            target_component="COUNTRY",
+            source_col="src",
+            target_col="tgt"
+        )
+        assert isinstance(cm, ComponentMap)
+        assert isinstance(cm.values, RepresentationMap)
+
+
+    def test_build_single_component_map_with_validity_dates(self, value_map_df_mandatory_cols):
+        """Ensure validity columns are handled correctly."""
+        df = value_map_df_mandatory_cols.copy()
+        df["valid_from"] = ["2020-01-01", None, None]
+        df["valid_to"] = ["2025-12-31", None, None]
+        cm = build_single_component_map(
+            df,
+            source_component="COUNTRY",
+            target_component="COUNTRY"
+        )
+        assert isinstance(cm.values, RepresentationMap)
+        assert len(cm.values.maps) == len(df)
+
+
+    def test_build_single_component_map_id_and_name(self, value_map_df_mandatory_cols):
+        """Check that id and name propagate correctly to RepresentationMap."""
+        cm = build_single_component_map(
+            value_map_df_mandatory_cols,
+            source_component="COUNTRY",
+            target_component="COUNTRY",
+            id="TEST_ID",
+            name="Test Name"
+        )
+        assert cm.values.id == "TEST_ID"
+        assert cm.values.name == "Test Name"
+
+
+    def test_build_single_component_map_version_and_description(self, value_map_df_mandatory_cols):
+        """Check version and description fields."""
+        cm = build_single_component_map(
+            value_map_df_mandatory_cols,
+            source_component="COUNTRY",
+            target_component="COUNTRY",
+            version="2.0",
+            description="Test Description"
+        )
+        assert cm.values.version == "2.0"
+        assert cm.values.description == "Test Description"
