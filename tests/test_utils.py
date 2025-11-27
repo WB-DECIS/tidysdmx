@@ -1,7 +1,8 @@
 import pytest
 from typeguard import TypeCheckError
+from pysdmx.model import Component, Components, Schema
 # Import tidysdmx functions
-from tidysdmx.utils import get_codelist_ids, extract_validation_info 
+from tidysdmx.utils import get_codelist_ids, extract_validation_info, extract_component_ids
 
 # Global variables for this test file
 # incorrect_ind_code = "INCORRECT_IND"
@@ -68,3 +69,47 @@ class TestGetCodelistIds:
         expected_output = {"dim1": ["A", "B"], "dim2": ["C", "D"]}
         assert get_codelist_ids(comp, coded_comp) == expected_output
 # endregion
+
+class TestExtractCodelistIds:  # noqa: D101
+    def test_extract_component_ids_normal():
+        """Retrieve IDs from a valid schema with multiple components."""
+        comp1 = Component(id="FREQ")
+        comp2 = Component(id="TIME_PERIOD")
+        schema = Schema(context="datastructure", agency="ECB", id_="EXR",
+                        components=Components([comp1, comp2]),
+                        version="1.0.0", urns=[])
+        result = extract_component_ids(schema)
+        assert result == ["FREQ", "TIME_PERIOD"]
+        assert all(isinstance(cid, str) for cid in result)
+
+    def test_extract_component_ids_single_component(self):
+        """Schema with a single component returns a list with one ID."""
+        comp = Component(id="OBS_VALUE")
+        schema = Schema(context="datastructure", agency="ECB", id_="EXR",
+                        components=Components([comp]),
+                        version="1.0.0", urns=[])
+        result = extract_component_ids(schema)
+        assert result == ["OBS_VALUE"]
+        assert len(result) == 1
+
+    def test_extract_component_ids_empty(self):
+        """Schema with no components raises ValueError."""
+        schema = Schema(context="datastructure", agency="ECB", id_="EXR",
+                        components=Components([]),
+                        version="1.0.0", urns=[])
+        with pytest.raises(ValueError):
+            extract_component_ids(schema)
+
+    def test_extract_component_ids_invalid_type(self):
+        """Non-Schema input raises TypeError."""
+        with pytest.raises(TypeError):
+            extract_component_ids("not_a_schema")
+
+    def test_extract_component_ids_component_without_id(self):
+        """Component without an ID should raise Error."""
+        comp = Component(id=None)  # Simulate missing ID
+        schema = Schema(context="datastructure", agency="ECB", id_="EXR",
+                        components=Components([comp]),
+                        version="1.0.0", urns=[])
+        with pytest.raises(TypeError):
+            extract_component_ids(schema)
