@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, AbstractSet
 from typeguard import typechecked
 from pysdmx.model import Schema
 from pathlib import Path
@@ -91,92 +91,182 @@ def extract_component_ids(schema: Schema) -> list[str]:
 
 
 
-typechecked
-def create_excel_mapping(
-    components: List[str],
-    rep_maps: Optional[List[str]] = None,
+@typechecked
+def write_excel_mapping_template(
+    components: Sequence[str],
+    rep_maps: Sequence[str] | None = None,
     output_path: Path = Path("mapping.xlsx")
-) -> Workbook:
-    """Create an Excel file with a default mapping tab and optional representation mapping tabs.
-
-    The default tab contains a table with columns: source, target, mapping_rules.
-    - 'source' column is empty.
-    - 'target' column is populated with values from `components`.
-    - 'mapping_rules' column is empty unless `rep_maps` is provided.
-      If `rep_maps` is provided, each row in 'mapping_rules' will contain the corresponding
-      rep_map name and a hyperlink to its tab.
-
-    If `rep_maps` is provided, a new tab is created for each element in the list.
-    Each tab contains a table with columns: source, target, valid_from, valid_to.
+) -> Path:
+    """Generates an Excel file containing a default component mapping tab and optional tabs for representation maps by saving a Workbook object.
 
     Args:
-        components (List[str]): List of target component names for the default tab.
-        rep_maps (Optional[List[str]]): List of names for additional tabs.
-        output_path (Path): Path where the Excel file will be saved.
+        components (Sequence[str]): An ordered list of unique target component IDs.
+        rep_maps (Sequence[str] | None): A sequence of unique names for which
+            dedicated representation mapping tabs should be created.
+        output_path (Path): The full path where the Excel file will be saved.
 
     Returns:
-        Path: Path to the saved Excel file.
+        Path: The file path to the saved Excel workbook.
 
     Raises:
-        ValueError: If `components` is empty.
-        FileNotFoundError: If the output directory does not exist.
+        ValueError: If `components` validation fails (delegated to helper).
+        FileNotFoundError: If the parent directory for `output_path` does not exist.
+        RuntimeError: If saving the workbook fails due to I/O issues or if
+            workbook creation fails (delegated to helper).
 
     Examples:
         >>> from pathlib import Path
-        >>> create_excel_mapping(
-        ...     components=["comp1", "comp2"],
-        ...     rep_maps=["rep1", "rep2"],
-        ...     output_path=Path("mapping.xlsx")
-        ... )
-        PosixPath('mapping.xlsx')
+        >>> # Setup a temporary file path
+        >>> file_path = Path("temp_mapping_final.xlsx")
+        >>> try:
+        ...     write_excel_mapping_template(["C1", "C2"], ["C1"], file_path)
+        ...     print(f"File created: {file_path.exists()}")
+        ... finally:
+        ...     if file_path.exists():
+        ...         file_path.unlink() # Clean up
+        File created: True
     """
-    # Validate inputs
-    if not components:
-        raise ValueError("components cannot be empty.")
-    if not output_path.parent.exists():
-        raise FileNotFoundError(f"Directory {output_path.parent} does not exist.")
+    # 1. Validate environment
+    if output_path.parent != Path(".") and not output_path.parent.exists():
+        raise FileNotFoundError(
+            f"Directory {output_path.parent} does not exist. Please create it first."
+        )
 
-    # Create workbook
-    wb = Workbook()
-    default_sheet = wb.active
-    default_sheet.title = "comp_mapping"
+    # 2. Build Workbook
+    wb = build_excel_workbook(components, rep_maps)
 
+    # 3. Save Workbook
+    try:
+        wb.save(str(output_path))
+    except Exception as e:
+        # Catch I/O error or other unexpected save failures
+        raise RuntimeError(f"Failed to save Excel workbook to {output_path}: {e}") from e
+
+    return output_path
+
+@typechecked
+def create_mapping_rules(
+    components: Sequence[str],
+    rep_maps: AbstractSet[str] | None = None,
+) -> list[str]:
+    """Create Excel-style hyperlink formulas for SDMX dataflow components.
+
+    Creates a list of Excel-style hyperlink formulas for SDMX dataflow components
+    that have corresponding representation maps, or an empty string otherwise.
+
+    This utility is typically used when generating structured metadata output (e.g.,
+    a DSD specification to Excel) where a component linking to a separate sheet
+    (named after the component) indicates a custom mapping exists.
+
+    Args:
+        components (Sequence[str]): A list or sequence of SDMX component IDs.
+        rep_maps (AbstractSet[str] | None): A set of component IDs for which a
+            representation map exists and a hyperlink should be generated.
+
+    Returns:
+        list[str]: A list of strings, where each element is either an Excel
+        formula string (=HYPERLINK("#COMPONENT_ID!A1","COMPONENT_ID")) or an
+        empty string ("").
+
+    Raises:
+        TypeError: If any input argument fails type validation via @typechecked.
+
+    Examples:
+        >>> components = ["FREQ", "REF_AREA", "SEX", "OBS_VALUE"]
+        >>> rep_maps = {"REF_AREA", "SEX"}
+        >>> create_mapping_rules(components, rep_maps)
+        ['', '=HYPERLINK("#REF_AREA!A1","REF_AREA")', '=HYPERLINK("#SEX!A1","SEX")', '']
+
+        >>> create_mapping_rules(components, None)
+        ['', '', '', '']
+
+        >>> create_mapping_rules([], {"ANY"})
+        []
+    """
+    # Defensive check: ensure all components are non-empty strings before processing,
+    # though strict string type is covered by typechecked.
+    if not all(isinstance(c, str) and c for c in components):
+        invalid_components = [c for c in components if not (isinstance(c, str) and c)]
+        if invalid_components:
+            # Note: This is a defensive check; the typechecker handles non-string types.
+            # This catches non-truthy strings like "".
+            raise ValueError(
+                f"Component IDs must be non-empty strings, but found invalid values: {invalid_components}"
+            )
+
+    # Simplified logic using a list comprehension. Handles None and empty set/list
+    # for rep_maps efficiently.
+    if not rep_maps:
+        return [""] * len(components)
+
+    return [
+        f'=HYPERLINK("#{comp}!A1","{comp}")' if comp in rep_maps else ""
+        for comp in components
+    ]
+
+@typechecked
+def build_excel_workbook(
+    components: Sequence[str],
+    rep_maps: Sequence[str] | None = None,
+) -> Workbook:
+    """Construct an openpyxl Workbook containing the default component mapping sheet and optional template sheets for representation maps.
+
+    The primary sheet 'comp_mapping' contains three columns: 'source', 'target', and 'mapping_rules', with hyperlinks for components having a rep_map.
+
+    Args:
+        components (Sequence[str]): An ordered list of unique target component IDs.
+        rep_maps (Sequence[str] | None): A sequence of names (matching component
+            IDs) for which dedicated representation mapping tabs should be created.
+            The list is internally deduplicated via conversion to a set.
+
+    Returns:
+        Workbook: An openpyxl Workbook object populated with sheets and headers.
+
+    Raises:
+        ValueError: If 'components' validation fails (delegated to helper).
+        TypeCheckError: If any input argument fails type validation.
+        RuntimeError: If sheet creation fails due to invalid sheet names.
+    """
+    # 1. Prepare Data
+    # Convert rep_maps to a set early for efficient lookup and guaranteed unique sheet names.
+    rep_map_set: AbstractSet[str] = set(rep_maps) if rep_maps else set()
     
-# Prepare mapping_rules column
-    mapping_rules = []
-    if rep_maps and len(rep_maps) > 0:
-        for comp in components:
-            if comp in rep_maps:
-                # Add hyperlink only if component matches a rep_map name
-                mapping_rules.append(f'=HYPERLINK("#{comp}!A1","{comp}")')
-            else:
-                mapping_rules.append("")
-    else:
-        mapping_rules = ["" for _ in components]
-
-
-    # Prepare default mapping DataFrame
+    # Leverage helper function
+    mapping_rules: list[str] = create_mapping_rules(components, rep_map_set)
+    
     comp_mapping_df = pd.DataFrame({
-        "source": ["" for _ in components],
+        "source": [""] * len(components),
         "target": components,
         "mapping_rules": mapping_rules
     })
 
-    # Write default mapping to sheet
+    # 2. Create and Populate Workbook
+    wb = Workbook()
+
+    # a. Create sheet for components map
+    default_sheet = wb.active
+    default_sheet.title = "comp_mapping"
+
+    # Write the header and data rows
     for row in dataframe_to_rows(comp_mapping_df, index=False, header=True):
         default_sheet.append(row)
 
-    # Add representation mapping tabs if provided
-    if rep_maps:
-        for tab_name in rep_maps:
-            ws = wb.create_sheet(title=tab_name)
-            # Prepare empty DataFrame for representation mapping
-            df_rep = pd.DataFrame(columns=["source", "target", "valid_from", "valid_to"])
-            for row in dataframe_to_rows(df_rep, index=False, header=True):
-                ws.append(row)
+    # b. Create optional sheets for representation maps
+    if rep_map_set:
+        REP_MAP_HEADERS = ["source", "target", "valid_from", "valid_to"]
+        df_rep = pd.DataFrame(columns=REP_MAP_HEADERS)
 
-    # Save workbook
-    wb.save(output_path)
-    return output_path
+        for tab_name in rep_map_set:
+            try:
+                ws = wb.create_sheet(title=tab_name)
+                # Write header row only for the empty DataFrame
+                for row in dataframe_to_rows(df_rep, index=False, header=True):
+                    ws.append(row)
+            except Exception as e:
+                 # Openpyxl raises ValueError/KeyError for invalid or duplicate names.
+                 raise RuntimeError(
+                     f"Failed to create sheet with name: '{tab_name}'. "
+                     f"Check for invalid characters or excessively long names: {e}"
+                 )
 
-
+    return wb
