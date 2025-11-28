@@ -1,11 +1,24 @@
-from typing import Dict, List, Optional, Sequence, AbstractSet
+from typing import Dict, List, Optional, Sequence, AbstractSet, Literal, Any
 from typeguard import typechecked
-from pysdmx.model import Schema
 from pathlib import Path
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from pathlib import Path
+from datetime import datetime
+from dateutil.parser import parse as parse_date
 import pysdmx as px
 import pandas as pd
+
+# --- Import Official pysdmx Classes ---
+from pysdmx.model import (
+    StructureMap,
+    ComponentMap,
+    FixedValueMap,
+    ImplicitComponentMap,
+    RepresentationMap,
+    ValueMap,
+    Schema
+)
 
 @typechecked
 def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, object]:
@@ -87,8 +100,6 @@ def extract_component_ids(schema: Schema) -> list[str]:
     if not schema.components or len(schema.components) == 0:
         raise ValueError("Schema contains no components.")
     return [component.id for component in schema.components]
-
-
 
 
 @typechecked
@@ -270,3 +281,4 @@ def build_excel_workbook(
                  )
 
     return wb
+

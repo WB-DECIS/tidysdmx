@@ -1,5 +1,6 @@
 from typeguard import TypeCheckError
 from datetime import datetime, timezone
+from openpyxl import Workbook
 from pysdmx.model.map import (
     FixedValueMap, 
     ImplicitComponentMap, 
@@ -22,7 +23,13 @@ from tidysdmx.structures import (
     build_value_map_list,
     build_multi_value_map_list,
     build_representation_map,
-    build_single_component_map
+    build_single_component_map,
+    extract_mapping_definitions,
+    _read_comp_mapping_sheet,
+    _create_fixed_definition,
+    _create_implicit_definition,
+    _create_representation_definition
+
     )
 
 # region fixtures
@@ -690,3 +697,124 @@ class TestBuildSingleComponentMap:  # noqa: D101
         )
         assert cm.values.version == "2.0"
         assert cm.values.description == "Test Description"
+
+class TestExtractMappingDefinitions:  # noqa: D101
+    @pytest.fixture
+    def mock_empty_workbook(self) -> Workbook:
+        """Fixture returning a simple empty workbook."""
+        wb = Workbook()
+        return wb
+
+    @pytest.fixture
+    def mock_populated_workbook(self, mock_empty_workbook: Workbook) -> Workbook:
+        """Fixture returning a mock workbook with multiple sheets."""
+        wb = mock_empty_workbook
+        
+        # Mandatory comp_mapping sheet
+        ws = wb.active
+        ws.title = "comp_mapping"
+        ws.append(["Source", "Target", "Mapping_Rules"]) # Case insensitive header test
+        ws.append(["", "T1_FIXED", "fixed:A"])
+        ws.append(["SRC_2", "T2_IMPLICIT", "implicit"])
+        ws.append(["", "T3_REP", "T3_REP"])
+        ws.append(["SRC_4", "T4_REP", "T4_REP"]) # Rep map with explicit source
+        ws.append([None, None, None]) # Empty row
+        
+        # Referenced Rep Map sheets (T3 is empty, T4 has data)
+        ws_rep_3 = wb.create_sheet("T3_REP")
+        ws_rep_3.append(["source", "target", "valid_from", "valid_to"]) # Empty rows below header
+        
+        ws_rep_4 = wb.create_sheet("T4_REP")
+        ws_rep_4.append(["source", "target", "valid_from", "valid_to"])
+        ws_rep_4.append(["S1", "T1", "", ""])
+        
+        return wb
+
+
+    def test_read_comp_mapping_sheet_success(self, mock_populated_workbook: Workbook):
+        """Tests if the sheet is loaded, headers normalized, and empty values handled."""
+        df = _read_comp_mapping_sheet(mock_populated_workbook)
+        
+        assert isinstance(df, pd.DataFrame)
+        assert list(df.columns) == ["source", "target", "mapping_rules"]
+        assert len(df) == 4 # Empty row has been removed
+        assert df.iloc[0]["mapping_rules"] == "fixed:A"
+
+
+    def test_read_comp_mapping_sheet_key_error(self, mock_empty_workbook: Workbook):
+        """Tests KeyError when the sheet is missing."""
+        mock_empty_workbook.active.title = "WrongName"
+        with pytest.raises(KeyError, match="comp_mapping"):
+            _read_comp_mapping_sheet(mock_empty_workbook)
+
+
+    def test_create_fixed_definition_success(self):
+        """Tests successful creation of a FixedValueMap definition."""
+        definition = _create_fixed_definition(pd.Series(), "T_FIX", "fixed:MY_VALUE")
+        assert definition.map_type == "fixed"
+        assert definition.fixed_value == "MY_VALUE"
+        assert definition.target == "T_FIX"
+
+
+    def test_create_fixed_definition_empty_value_raises_value_error(self):
+        """Tests validation for empty fixed value."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            _create_fixed_definition(pd.Series(), "T_FIX", "fixed:")
+
+
+    def test_create_implicit_definition_success(self):
+        """Tests successful creation of an ImplicitComponentMap definition."""
+        definition = _create_implicit_definition(pd.Series(), "T_IMP", "S_IMP")
+        assert definition.map_type == "implicit"
+        assert definition.source == "S_IMP"
+        assert definition.target == "T_IMP"
+
+
+    def test_create_implicit_definition_missing_source_raises_value_error(self):
+        """Tests validation for missing source in implicit mapping."""
+        with pytest.raises(ValueError, match="requires a 'source'"):
+            _create_implicit_definition(pd.Series(), "T_IMP", "")
+
+
+    def test_create_representation_definition_success(self, mock_populated_workbook: Workbook):
+        """Tests successful creation of a RepresentationMap definition including sheet loading."""
+        definition = _create_representation_definition(mock_populated_workbook, "T4_REP", "SRC_4")
+        assert definition.map_type == "representation"
+        assert definition.source == "SRC_4"
+        assert definition.target == "T4_REP"
+        assert isinstance(definition.representation_df, pd.DataFrame)
+        assert len(definition.representation_df) == 1 # Check data rows exist
+
+    def test_create_representation_definition_source_inference(self, mock_populated_workbook: Workbook):
+        """Tests source inference when source is empty."""
+        definition = _create_representation_definition(mock_populated_workbook, "T3_REP", "")
+        assert definition.source == "T3_REP" # Inferred source is target
+        assert len(definition.representation_df) == 0 # Check empty sheet handling
+
+
+    def test_extract_mapping_definitions_integration(self, mock_populated_workbook: Workbook):
+        """Tests the main function's dispatch logic."""
+        definitions = extract_mapping_definitions(mock_populated_workbook)
+        
+        assert len(definitions) == 4 # Should ignore empty row and invalid rules if any
+        
+        # T1_FIXED (Fixed)
+        assert definitions[0].map_type == "fixed"
+        
+        # T2_IMPLICIT (Implicit)
+        assert definitions[1].map_type == "implicit"
+        
+        # T3_REP (Representation - empty DF)
+        assert definitions[2].map_type == "representation"
+        
+        # T4_REP (Representation - data DF)
+        assert definitions[3].map_type == "representation"
+        assert definitions[3].source == "SRC_4"
+
+    def test_extract_mapping_definitions_invalid_rule_raises_value_error(self, mock_populated_workbook: Workbook):
+        """Tests invalid rule check."""
+        ws = mock_populated_workbook["comp_mapping"]
+        ws.append(["", "T_BAD", "unknown_type"])
+        
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            extract_mapping_definitions(mock_populated_workbook)

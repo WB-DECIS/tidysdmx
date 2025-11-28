@@ -1,9 +1,13 @@
 from typeguard import typechecked
+from dataclasses import dataclass
 from typing import List, Tuple, Union, Optional, Literal, Sequence
 from itertools import combinations
 from datetime import datetime
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from pathlib import Path
 from pysdmx.model.map import (
     RepresentationMap, 
     FixedValueMap, 
@@ -12,7 +16,8 @@ from pysdmx.model.map import (
     ValueMap, 
     MultiValueMap,
     MultiRepresentationMap,
-    ComponentMap
+    ComponentMap,
+    StructureMap
     )
 import pandas as pd
 
@@ -731,3 +736,227 @@ def build_single_component_map(
 
 # endregion
 
+# region TESTING
+def _sheet_to_df(wb: Workbook, sheet_name: str) -> pd.DataFrame:
+    """Reads an openpyxl sheet into a pandas DataFrame."""
+    if sheet_name not in wb.sheetnames:
+        # Return empty DF with expected columns if sheet is missing to allow graceful failure handling
+        return pd.DataFrame(columns=["source", "target", "valid_from", "valid_to"])
+    
+    ws = wb[sheet_name]
+    data = list(ws.values)
+    
+    if not data:
+        return pd.DataFrame(columns=["source", "target", "valid_from", "valid_to"])
+        
+    cols = data[0]
+    rows = data[1:]
+    
+    return pd.DataFrame(rows, columns=cols)
+
+@dataclass
+class MappingDefinition:
+    """Intermediate representation of a mapping rule parsed from the Excel file.
+
+    It decouples the Excel parsing logic from the SDMX object construction.
+    """
+    target: str
+    map_type: Literal["fixed", "implicit", "representation"]
+    source: Optional[str] = None
+    fixed_value: Optional[str] = None
+    representation_df: Optional[pd.DataFrame] = None
+
+@typechecked
+def _read_comp_mapping_sheet(workbook: Workbook) -> pd.DataFrame:
+    """Loads and validates the structure of the mandatory 'comp_mapping' sheet.
+
+    Args:
+        workbook (Workbook): The openpyxl Workbook object.
+
+    Returns:
+        pd.DataFrame: The validated DataFrame with normalized headers.
+
+    Raises:
+        KeyError: If 'comp_mapping' sheet is missing.
+        ValueError: If the sheet is empty or headers are incorrect.
+    """
+    try:
+        ws_comp = workbook["comp_mapping"]
+    except KeyError:
+        raise KeyError("Mandatory sheet 'comp_mapping' not found in workbook.")
+
+    data = list(ws_comp.values)
+    if not data or len(data) < 2:
+        raise ValueError("The 'comp_mapping' sheet is empty or missing headers.")
+
+    df_comp = pd.DataFrame(data[1:], columns=data[0])
+    
+    # Normalize headers
+    df_comp.columns = [str(c).lower() for c in df_comp.columns]
+    required_cols = {"source", "target", "mapping_rules"}
+    if not required_cols.issubset(set(df_comp.columns)):
+        raise ValueError(f"The 'comp_mapping' sheet must have columns: {required_cols}")
+    
+    
+    # Remove rows where all values are NaN
+    df_comp = df_comp.dropna(how='all')
+
+    return df_comp.fillna("")
+
+
+@typechecked
+def _create_fixed_definition(row: pd.Series, target: str, mapping_rules: str) -> MappingDefinition:
+    """Creates a MappingDefinition for a FixedValueMap."""
+    fixed_val = mapping_rules[len("fixed:"):].strip()
+    if not fixed_val:
+        raise ValueError(f"Fixed value for target '{target}' cannot be empty.")
+    
+    return MappingDefinition(
+        target=target,
+        map_type="fixed",
+        fixed_value=fixed_val
+    )
+
+
+@typechecked
+def _create_implicit_definition(row: pd.Series, target: str, source: str) -> MappingDefinition:
+    """Creates a MappingDefinition for an ImplicitComponentMap."""
+    if not source:
+        raise ValueError(f"Implicit map rule requires a 'source' for target '{target}'.")
+    
+    return MappingDefinition(
+        target=target,
+        map_type="implicit",
+        source=source
+    )
+
+
+@typechecked
+def _create_representation_definition(
+    workbook: Workbook, target: str, source: str
+) -> MappingDefinition:
+    """Creates a MappingDefinition for a RepresentationMap by loading the dependent sheet."""
+    # Load the referenced sheet immediately
+    df_rep = _sheet_to_df(workbook, target)
+    
+    # Infer source if missing (Identity Map assumption: Source=Target)
+    final_source = source if source else target
+    
+    return MappingDefinition(
+        target=target,
+        map_type="representation",
+        source=final_source,
+        representation_df=df_rep
+    )
+
+@typechecked
+def extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
+    """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
+
+    Args:
+        workbook (Workbook): The openpyxl Workbook object.
+
+    Returns:
+        list[MappingDefinition]: A list of intermediate objects describing the maps.
+
+    Raises:
+        KeyError: If 'comp_mapping' sheet is missing (from helper).
+        ValueError: If sheet structure or rules are malformed (from helpers).
+    """
+    # 1. Load and Validate Main Mapping Sheet Structure
+    df_comp = _read_comp_mapping_sheet(workbook)
+    
+    definitions: list[MappingDefinition] = []
+    
+    # 2. Iterate and Dispatch Parsing
+    for _, row in df_comp.iterrows():
+        source: str = str(row["source"]).strip()
+        target: str = str(row["target"]).strip()
+        mapping_rules: str = str(row["mapping_rules"]).strip()
+        
+        if not target:
+            continue
+        if not mapping_rules and not source:
+            continue
+
+        if mapping_rules.startswith("fixed:"):
+            definitions.append(_create_fixed_definition(row, target, mapping_rules))
+            
+        elif mapping_rules == "implicit":
+            definitions.append(_create_implicit_definition(row, target, source))
+            
+        elif mapping_rules == target and mapping_rules:
+            definitions.append(_create_representation_definition(workbook, target, source))
+            
+        elif mapping_rules and not mapping_rules.startswith("=HYPERLINK"):
+             raise ValueError(
+                f"Unknown mapping rule for target '{target}': '{mapping_rules}'"
+            )
+
+    return definitions
+
+@typechecked
+def build_structure_map(
+    workbook: Workbook, 
+    default_agency: str = "DEFAULT_AGENCY"
+) -> StructureMap:
+    """Converts a populated Excel Workbook into a pysdmx StructureMap object.
+    
+    This function leverages `extract_mapping_definitions` to parse the Excel file
+    into intermediate definitions, and then converts those definitions into
+    pysdmx objects.
+    """
+    # 1. Parse Excel to Intermediate Definitions
+    definitions = extract_mapping_definitions(workbook)
+    
+    maps_list = []
+    
+    # 2. Convert Definitions to pysdmx Objects
+    for definition in definitions:
+        if definition.map_type == "fixed":
+            if definition.fixed_value is None:
+                raise ValueError(f"Fixed value missing for {definition.target}")
+            maps_list.append(
+                build_fixed_map(target=definition.target, value=definition.fixed_value)
+            )
+            
+        elif definition.map_type == "implicit":
+            if definition.source is None:
+                raise ValueError(f"Source missing for implicit map {definition.target}")
+            maps_list.append(
+                build_implicit_component_map(source=definition.source, target=definition.target)
+            )
+            
+        elif definition.map_type == "representation":
+            if definition.representation_df is None:
+                raise ValueError(f"DataFrame missing for representation map {definition.target}")
+            
+            # Safe unwrapping of optional source (logic in extractor ensures it's set, but typing needs check)
+            src = definition.source if definition.source else definition.target
+            
+            try:
+                comp_map = build_single_component_map(
+                    df=definition.representation_df,
+                    source_component=src,
+                    target_component=definition.target,
+                    agency=default_agency,
+                    id=f"REPMAP_{definition.target}",
+                    name=f"Mapping for {definition.target}",
+                    version="1.0"
+                )
+                maps_list.append(comp_map)
+            except ValueError as e:
+                # Log or handle empty DF errors if necessary
+                if "empty" in str(e):
+                    continue
+                raise e
+
+    # 3. Return Final Artifact
+    return StructureMap(
+        id="GENERATED_STRUCTURE_MAP",
+        agency=default_agency, 
+        version="1.0",
+        name="Auto-generated Structure Map",
+        maps=maps_list
+    )
+# endregion
