@@ -1,6 +1,11 @@
 from typeguard import TypeCheckError
 from datetime import datetime, timezone
 from openpyxl import Workbook
+from pysdmx.model import (
+    DataType,
+    Role,
+    Concept
+)
 from pysdmx.model.map import (
     FixedValueMap, 
     ImplicitComponentMap, 
@@ -28,7 +33,8 @@ from tidysdmx.structures import (
     _read_comp_mapping_sheet,
     _create_fixed_definition,
     _create_implicit_definition,
-    _create_representation_definition
+    _create_representation_definition,
+    create_schema_from_table
 
     )
 
@@ -818,3 +824,68 @@ class TestExtractMappingDefinitions:  # noqa: D101
         
         with pytest.raises(ValueError, match="Unknown mapping rule"):
             extract_mapping_definitions(mock_populated_workbook)
+
+class TestCreateSchemaFromTable:  # noqa: D101
+    def test_create_schema_time_period_standardization(self) -> None:
+        """Test that the time dimension is standardized to TIME_PERIOD."""
+        df = pd.DataFrame({
+            "REF_AREA": ["US"],
+            "my_date_col": ["2020"],
+            "VALUE": [100.0]
+        })
+        
+        schema = create_schema_from_table(
+            df,
+            dimensions=["REF_AREA"],
+            time_dimension="my_date_col",
+            measure="VALUE"
+        )
+        
+        # Verify the component is named TIME_PERIOD, not my_date_col
+        assert schema.components["TIME_PERIOD"] is not None
+        assert schema.components["my_date_col"] is None
+        
+        # Verify strict properties
+        time_comp = schema.components["TIME_PERIOD"]
+        assert time_comp.id == "TIME_PERIOD"
+        assert time_comp.role == Role.DIMENSION
+        assert time_comp.local_dtype == DataType.PERIOD
+        assert time_comp.description == "Timespan or point in time to which the observation actually refers."
+        
+        # Verify Concept properties
+        assert isinstance(time_comp.concept, Concept)
+        assert time_comp.concept.id == "TIME_PERIOD"
+        assert time_comp.concept.urn == "urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept=SDMX:CROSS_DOMAIN_CONCEPTS(2.0).TIME_PERIOD"
+        assert time_comp.concept.dtype == DataType.STRING
+
+
+    def test_create_schema_structure(self) -> None:
+        """Test general structure creation."""
+        df = pd.DataFrame({
+            "FREQ": ["A"],
+            "TIME_PERIOD": ["2020"],
+            "OBS": [1],
+            "STATUS": ["A"]
+        })
+        
+        schema = create_schema_from_table(
+            df,
+            dimensions=["FREQ"],
+            time_dimension="TIME_PERIOD",
+            measure="OBS",
+            attributes=["STATUS"]
+        )
+        
+        assert len(schema.components) == 4
+        assert schema.components["FREQ"].role == Role.DIMENSION
+        assert schema.components["TIME_PERIOD"].role == Role.DIMENSION
+        assert schema.components["OBS"].role == Role.MEASURE
+        assert schema.components["STATUS"].role == Role.ATTRIBUTE
+
+
+    def test_create_schema_missing_columns(self) -> None:
+        """Test validation of input columns."""
+        df = pd.DataFrame({"A": [1]})
+        with pytest.raises(ValueError) as exc:
+            create_schema_from_table(df, dimensions=[], measure="A", time_dimension="MISSING")
+        assert "Columns not found" in str(exc.value)

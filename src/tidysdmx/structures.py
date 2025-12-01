@@ -2,7 +2,7 @@ from typeguard import typechecked
 from dataclasses import dataclass
 from typing import List, Tuple, Union, Optional, Literal, Sequence
 from itertools import combinations
-from datetime import datetime
+from datetime import datetime, timezone
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
 from openpyxl import Workbook, load_workbook
@@ -958,5 +958,215 @@ def build_structure_map(
         version="1.0",
         name="Auto-generated Structure Map",
         maps=maps_list
+    )
+# endregion
+
+# region create_schema_from_table()
+@typechecked
+def _infer_sdmx_type(dtype: object) -> DataType:
+    """
+    Infer the SDMX DataType from a pandas/numpy dtype.
+
+    Args:
+        dtype (object): The pandas/numpy data type.
+
+    Returns:
+        DataType: The corresponding SDMX DataType.
+    """
+    dtype_str = str(dtype)
+
+    if "int" in dtype_str:
+        return DataType.INTEGER
+    elif "float" in dtype_str:
+        return DataType.DOUBLE
+    elif "bool" in dtype_str:
+        return DataType.BOOLEAN
+    elif "datetime" in dtype_str:
+        return DataType.DATE_TIME
+    else:
+        return DataType.STRING
+
+
+@typechecked
+def _create_concept(concept_id: str, dtype: DataType) -> Concept:
+    """
+    Create a simple SDMX Concept with a specific ID and data type.
+
+    Args:
+        concept_id (str): The unique identifier for the concept.
+        dtype (DataType): The data type of the concept.
+
+    Returns:
+        Concept: An immutable Concept object.
+    """
+    return Concept(
+        id=concept_id,
+        name=concept_id,
+        dtype=dtype,
+        description=f"Concept inferred from column {concept_id}",
+    )
+
+
+@typechecked
+def _create_component(
+    component_id: str,
+    role: Role,
+    concept: Concept,
+    required: bool = True,
+    attachment_level: Optional[str] = None,
+) -> Component:
+    """
+    Create an SDMX Component (Dimension, Measure, or Attribute).
+
+    Args:
+        component_id (str): The unique identifier for the component.
+        role (Role): The role the component plays.
+        concept (Concept): The Concept defining the component's semantics.
+        required (bool): Whether the component value is mandatory.
+        attachment_level (Optional[str]): Mandatory for Attributes.
+
+    Returns:
+        Component: The constructed Component object.
+    """
+    return Component(
+        id=component_id,
+        required=required,
+        role=role,
+        concept=concept,
+        attachment_level=attachment_level,
+    )
+
+
+@typechecked
+def _create_time_period_component() -> Component:
+    """
+    Create the standard SDMX Cross Domain Time Period component.
+
+    Returns:
+        Component: The strictly defined TIME_PERIOD component.
+    """
+    time_concept = Concept(
+        id="TIME_PERIOD",
+        urn="urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept=SDMX:CROSS_DOMAIN_CONCEPTS(2.0).TIME_PERIOD",
+        name="Time period",
+        description="Timespan or point in time to which the observation actually refers.",
+        dtype=DataType.STRING,
+    )
+    
+    return Component(
+        id="TIME_PERIOD",
+        required=True,
+        role=Role.DIMENSION,
+        concept=time_concept,
+        local_dtype=DataType.PERIOD,
+        name="Time period",
+        description="Timespan or point in time to which the observation actually refers.",
+    )
+
+
+@typechecked
+def create_schema_from_table(
+    dataframe: pd.DataFrame,
+    dimensions: list[str],
+    measure: str,
+    time_dimension: str,
+    attributes: Optional[list[str]] = None,
+    agency_id: str = "SDMX",
+    schema_id: str = "GENERATED_SCHEMA",
+    version: str = "1.0",
+) -> Schema:
+    """
+    Create a pysdmx Schema object from a pandas DataFrame and structural mapping.
+
+    This function automatically maps the provided `time_dimension` column to the 
+    standard SDMX `TIME_PERIOD` concept and component definition.
+
+    Args:
+        dataframe (pd.DataFrame): The source data.
+        dimensions (list[str]): List of column names to serve as Dimensions.
+        measure (str): The column name to serve as the Measure.
+        time_dimension (str): The column name to serve as the Time Dimension.
+            The resulting component will always be ID='TIME_PERIOD'.
+        attributes (Optional[list[str]]): List of column names to serve as Attributes.
+            Defaults to None.
+        agency_id (str): The Agency ID to assign to the Schema. Defaults to "SDMX".
+        schema_id (str): The ID to assign to the Schema. Defaults to "GENERATED_SCHEMA".
+        version (str): The version string. Defaults to "1.0".
+
+    Returns:
+        Schema: A pysdmx Schema object containing the generated Components.
+
+    Raises:
+        ValueError: If specified columns are missing from the dataframe.
+
+    Examples:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     "FREQ": ["A", "A"],
+        ...     "Year": ["2020", "2021"],
+        ...     "OBS_VALUE": [10.5, 20.0],
+        ...     "OBS_STATUS": ["A", "A"]
+        ... })
+        >>> schema = create_schema_from_table(
+        ...     df,
+        ...     dimensions=["FREQ"],
+        ...     time_dimension="Year",
+        ...     measure="OBS_VALUE",
+        ...     attributes=["OBS_STATUS"]
+        ... )
+        >>> schema.components["TIME_PERIOD"].id
+        'TIME_PERIOD'
+    """
+    if attributes is None:
+        attributes = []
+
+    # Validate that all columns exist in the dataframe
+    all_required_cols = dimensions + [measure] + [time_dimension] + attributes
+    missing_cols = [col for col in all_required_cols if col not in dataframe.columns]
+    
+    if missing_cols:
+        raise ValueError(f"Columns not found in dataframe: {missing_cols}")
+
+    component_list: list[Component] = []
+
+    # 1. Process Dimensions
+    for col in dimensions:
+        dtype = _infer_sdmx_type(dataframe[col].dtype)
+        concept = _create_concept(col, dtype)
+        comp = _create_component(col, Role.DIMENSION, concept, required=True)
+        component_list.append(comp)
+
+    # 2. Process Time Dimension (Standardized)
+    # We use the standard definition regardless of the input column's properties
+    time_comp = _create_time_period_component()
+    component_list.append(time_comp)
+
+    # 3. Process Measure (Single)
+    meas_dtype = _infer_sdmx_type(dataframe[measure].dtype)
+    meas_concept = _create_concept(measure, meas_dtype)
+    meas_comp = _create_component(measure, Role.MEASURE, meas_concept, required=True)
+    component_list.append(meas_comp)
+
+    # 4. Process Attributes
+    for col in attributes:
+        dtype = _infer_sdmx_type(dataframe[col].dtype)
+        concept = _create_concept(col, dtype)
+        # Attributes are often optional; defaulting attachment level to 'O' (Observation)
+        comp = _create_component(
+            col, Role.ATTRIBUTE, concept, required=False, attachment_level="O"
+        )
+        component_list.append(comp)
+
+    # Construct the Components container
+    components_obj = Components(component_list)
+
+    return Schema(
+        context="dataflow",
+        agency=agency_id,
+        id=schema_id,
+        version=version,
+        components=components_obj,
+        generated=datetime.now(timezone.utc),
+        name=f"Auto-generated schema for {schema_id}",
     )
 # endregion

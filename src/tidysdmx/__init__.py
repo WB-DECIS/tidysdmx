@@ -49,7 +49,8 @@ from .structures import (
     build_representation_map,
     build_multi_representation_map,
     build_single_component_map,
-    build_structure_map
+    build_structure_map,
+    create_schema_from_table
     )
 
 __all__ = [
@@ -100,5 +101,6 @@ __all__ = [
     "create_mapping_rules",
     "build_excel_workbook",
     "write_excel_mapping_template",
-    "build_structure_map"
+    "build_structure_map",
+    "create_schema_from_table"
     ]
