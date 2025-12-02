@@ -158,7 +158,7 @@ def validate_duplicates(df, dim_comp):
 
 	Args:
 		df (pd.DataFrame): The DataFrame to validate.
-		dim_columns (list): List of column names to check for duplicates.
+		dim_comp (list): List of column names to check for duplicates.
 
 	Raises:
 		ValueError: If duplicate rows are found for the given combination of columns.

@@ -8,8 +8,9 @@ import requests
 
 # Import fixtures define under .tests/fixtures
 pytest_plugins = [
-    "fixtures.schemas",
-    "fixtures.dummy_data"
+    "fixtures.fxtr_schemas",
+    "fixtures.fxtr_dummy_data",
+    "fixtures.fxtr_structures"
 ]
 
 
