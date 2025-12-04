@@ -21,7 +21,7 @@ import pytest
 import re
 # Import tidysdmx functions
 from tidysdmx.structures import (
-    infer_role_dimension, 
+    # infer_role_dimension, 
     build_fixed_map, 
     build_implicit_component_map, 
     build_date_pattern_map,
@@ -38,7 +38,8 @@ from tidysdmx.structures import (
     create_schema_from_table,
     _parse_info_sheet,
     _parse_comp_mapping_sheet,
-    _parse_rep_mapping_sheet
+    _parse_rep_mapping_sheet,
+    _match_column_name
 
     )
 
@@ -607,7 +608,6 @@ class TestBuildRepresentationMap:  # noqa: D101
             if vm.valid_to:
                 assert isinstance(vm.valid_to, datetime)
                 assert vm.valid_to.tzinfo == timezone.utc or vm.valid_to.tzinfo is None
-
 
 class TestBuildSingleComponentMap:  # noqa: D101
     def test_build_single_component_map_valid(self, value_map_df_mandatory_cols):
@@ -1197,3 +1197,97 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
         assert "Random" not in result["source"].columns
         assert "Random" not in result["target"].columns
         assert "Unnamed: 0" not in result["source"].columns
+
+class TestMatchColumnName: #noqa: D101
+    # Shared list of column names mimicking cleaned headers from REP_MAPPING sheet
+    AVAILABLE_COLUMNS = [
+        "INDICATOR_CODE", 
+        "Time Period", 
+        "REF AREA", 
+        "OBS_VALUE_CLEAN", 
+        "ShortName",
+        "LONG_NAME_TEST"
+    ]
+
+    def test_match_column_name_exact_match(self):
+        """Tests case-sensitive exact matching (Rule 1)."""
+        target = "REF AREA"
+        expected = "REF AREA"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+        assert result in self.AVAILABLE_COLUMNS
+
+    def test_match_column_name_normalized_match_case_insensitive(self):
+        """Tests case-insensitive match after normalization (Rule 2)."""
+        # Target is lowercase, column is uppercase with underscore
+        target = "indicatorcode"
+        expected = "INDICATOR_CODE"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_normalized_match_spacing(self):
+        """Tests match ignoring internal spaces and different spacing in target."""
+        # Target has different spacing and casing
+        target = "RefArea"
+        expected = "REF AREA"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_normalized_match_underscores(self):
+        """Tests match ignoring underscores vs spaces/no spaces."""
+        # Target has underscores, column has underscores
+        target = "obs_value_clean"
+        expected = "OBS_VALUE_CLEAN"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_fuzzy_match_short_in_long(self):
+        """Tests fuzzy match where the column name is contained in the target name (e.g., 'ShortName' in 'TheShortName')."""
+        # Target is longer/more descriptive, column is the core name
+        target = "The Short Name Field"
+        expected = "ShortName"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_fuzzy_match_long_in_short(self):
+        """Tests fuzzy match where the target name is contained in the column name (e.g., 'Long' in 'LONG_NAME_TEST')."""
+        # Target is the short name, column is longer
+        target = "Long"
+        expected = "LONG_NAME_TEST"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_with_leading_trailing_whitespace(self):
+        """Tests that leading/trailing whitespace in the target name is handled."""
+        target = "  Time Period  "
+        expected = "Time Period"
+        result = _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert result == expected
+
+    def test_match_column_name_no_match(self):
+        """Tests the failure case where no matching column is found."""
+        target = "Totally Different Name"
+        with pytest.raises(ValueError) as excinfo:
+            _match_column_name(target, self.AVAILABLE_COLUMNS)
+        assert "Could not find a column" in str(excinfo.value)
+
+    def test_match_column_name_empty_available_list(self):
+        """Tests the failure case when the available columns list is empty."""
+        target = "Any Name"
+        with pytest.raises(ValueError) as excinfo:
+            _match_column_name(target, [])
+        assert "Could not find a column" in str(excinfo.value)
+        
+    def test_match_column_name_invalid_types_for_typecheck(self):
+        """Tests that the @typechecked decorator catches incorrect argument types."""
+        # Note: Requires the real `typeguard.typechecked` to be active in the runtime
+        # environment to enforce the check before the ValueError might be raised.
+        # In this isolated mock, we check for a general TypeError/AttributeError if the code runs.
+        
+        # Passing None for target_name should raise a type error
+        with pytest.raises((TypeCheckError)):
+            _match_column_name(None, self.AVAILABLE_COLUMNS)
+
+        # Passing a non-list for available_columns should raise a type error
+        with pytest.raises((TypeCheckError, AttributeError)):
+            _match_column_name("Test", "NotAList")

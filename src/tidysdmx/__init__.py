@@ -50,9 +50,9 @@ from .structures import (
     build_multi_representation_map,
     build_single_component_map,
     build_structure_map,
-    create_schema_from_table
+    create_schema_from_table,
+    build_structure_map_from_template_wb
     )
-from .wbutils import (build_structure_map_from_template_wb)
 
 __all__ = [
     "fetch_dsd_schema",
