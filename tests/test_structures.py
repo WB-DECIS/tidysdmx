@@ -16,6 +16,7 @@ from pysdmx.model.map import (
     ComponentMap
     )
 import pandas as pd
+import numpy as np
 import pytest
 import re
 # Import tidysdmx functions
@@ -34,7 +35,10 @@ from tidysdmx.structures import (
     _create_fixed_definition,
     _create_implicit_definition,
     _create_representation_definition,
-    create_schema_from_table
+    create_schema_from_table,
+    _parse_info_sheet,
+    _parse_comp_mapping_sheet,
+    _parse_rep_mapping_sheet
 
     )
 
@@ -889,3 +893,307 @@ class TestCreateSchemaFromTable:  # noqa: D101
         with pytest.raises(ValueError) as exc:
             create_schema_from_table(df, dimensions=[], measure="A", time_dimension="MISSING")
         assert "Columns not found" in str(exc.value)
+
+class TestBuildSchemaFromWbTemplate:  # noqa: D101
+    def test_parse_info_sheet_basic_scenario(self):
+        """Test a standard scenario where the sheet contains simple Key-Value pairs.
+
+        Includes testing that the 'header' (first row) is treated as data.
+        """
+        # Create a DataFrame where the "header" is actually the first metadata pair
+        data = {
+            "Dataset_ID": ["Source", "Version"],
+            "WB_ASPIRE": ["World Bank", "1.0"]
+        }
+        df = pd.DataFrame(data)
+        # The dataframe looks like:
+        #    Dataset_ID  WB_ASPIRE  <-- Treated as Row 0
+        # 0  Source      World Bank
+        # 1  Version     1.0
+
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets, sheet_name="INFO")
+
+        assert len(result) == 3
+        # Check Row 0 (Headers)
+        assert result.iloc[0]["Key"] == "Dataset_ID"
+        assert result.iloc[0]["Value"] == "WB_ASPIRE"
+        # Check Row 1
+        assert result.iloc[1]["Key"] == "Source"
+        assert result.iloc[1]["Value"] == "World Bank"
+        # Check Row 2
+        assert result.iloc[2]["Key"] == "Version"
+        assert result.iloc[2]["Value"] == "1.0"
+
+
+    def test_parse_info_sheet_missing_sheet_raises_error(self):
+        """Test that a ValueError is raised if the requested sheet does not exist."""
+        sheets = {"DATA": pd.DataFrame({"A": [1]})}
+        
+        with pytest.raises(ValueError, match="Sheet 'INFO' not found"):
+            _parse_info_sheet(sheets, sheet_name="INFO")
+
+
+    def test_parse_info_sheet_ignore_section_header(self):
+        """Test that the specific 'DATA CURATION PROCESS' string causes the row to be ignored."""
+        df = pd.DataFrame([
+            ["DATA CURATION PROCESS", "Some Description"],  # Should be ignored
+            ["Valid_Key", "Valid_Value"],                   # Should be kept
+            [None, "DATA CURATION PROCESS"]                 # Should be ignored
+        ])
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert len(result) == 1
+        assert result.iloc[0]["Key"] == "Valid_Key"
+        assert result.iloc[0]["Value"] == "Valid_Value"
+
+
+    def test_parse_info_sheet_ignore_rows_with_wrong_count(self):
+        """Test that rows with 1 item or more than 2 items are excluded."""
+        df = pd.DataFrame([
+            ["OnlyOne"],                       # 1 valid cell -> Keep
+            ["Key", "Value", "Extra"],         # 3 valid cells -> Ignore
+            # [None, None, "SingleValid"],       # 1 valid cell (after nan filter) -> Ignore
+            ["Key2", "Value2", None]           # 2 valid cells -> Keep
+        ])
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert len(result) == 2
+        assert result.iloc[0]["Key"] == "OnlyOne"
+        assert result.iloc[1]["Key"] == "Key2"
+        assert result.iloc[1]["Value"] == "Value2"
+
+
+    def test_parse_info_sheet_empty_input(self):
+        """Test parsing an empty DataFrame results in an empty result with correct columns."""
+        df = pd.DataFrame()
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert result.empty
+        assert list(result.columns) == ["Key", "Value"]
+
+
+    def test_parse_info_sheet_nan_handling(self):
+        """Test that NaN, None, and string 'nan' are filtered out effectively."""
+        df = pd.DataFrame([
+            ["Key1", np.nan, "Value1"],    # 2 valid cells -> Keep
+            [None, "Key2", "Value2"],      # 2 valid cells -> Keep
+            ["nan", "Key3", "Value3"],     # 'nan' string ignored -> 2 valid -> Keep
+            ["Key4", "", "Value4"]         # Empty string ignored -> 2 valid -> Keep
+        ])
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert len(result) == 4
+        assert result.iloc[0]["Key"] == "Key1"
+        assert result.iloc[0]["Value"] == "Value1"
+        assert result.iloc[2]["Key"] == "Key3"
+        assert result.iloc[2]["Value"] == "Value3"
+
+
+    def test_parse_info_sheet_mixed_indentation(self):
+        """Test handling of data that is visually indented (starts in column 1 or 2)."""
+        # Simulate pandas reading excel where first cols are NaN
+        data = [
+            [np.nan, "Key1", "Value1"],
+            [np.nan, np.nan, np.nan],
+            [np.nan, "Key2", "Value2"]
+        ]
+        df = pd.DataFrame(data)
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert len(result) == 2
+        assert result.iloc[0]["Key"] == "Key1"
+        assert result.iloc[1]["Key"] == "Key2"
+
+
+    def test_parse_info_sheet_unnamed_columns(self):
+        """Test that pandas 'Unnamed: X' columns (common in headerless parsing) don't break logic."""
+        # pd.read_excel often produces 'Unnamed: 0', 'Unnamed: 1' if no header is found
+        # These will be automatically removed
+       
+        df = pd.DataFrame({"Unnamed: 0": ["Key"], "Unnamed: 1": ["Value"]})
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+        
+        assert len(result) == 1
+        assert result.iloc[0]["Key"] == "Key"
+        assert result.iloc[0]["Value"] == "Value"
+
+
+    def test_parse_info_sheet_whitespace_stripping(self):
+        """Test that whitespace surrounding keys and values is removed."""
+        df = pd.DataFrame([
+            ["  Key1  ", "Value1"],
+            ["Key2", "  Value2  \t"]
+        ])
+        sheets = {"INFO": df}
+        result = _parse_info_sheet(sheets)
+
+        assert result.iloc[0]["Key"] == "Key1"
+        assert result.iloc[1]["Value"] == "Value2"
+
+    def test_parse_comp_mapping_sheet_normal_case(self):
+        """Test parsing a valid COMP_MAPPING sheet with expected structure."""
+        data = {
+            "SOURCE": ["Series code", None, "year"],
+            "TARGET": ["INDICATOR", "FREQ", "TIME_PERIOD"],
+            "MAPPING_RULES": ["INDICATOR", "fixed:A", "TIME_PERIOD"],
+            "Unnamed: 3": [None, None, None]  # Artifact to ensure we filter it out
+        }
+        df = pd.DataFrame(data)
+        sheets = {"COMP_MAPPING": df}
+
+        result = _parse_comp_mapping_sheet(sheets)
+
+        # Check columns
+        assert list(result.columns) == ["SOURCE", "TARGET", "MAPPING_RULES"]
+        
+        # Check data integrity
+        assert len(result) == 3
+        assert result.iloc[0]["SOURCE"] == "Series code"
+        assert pd.isna(result.iloc[1]["SOURCE"])  # Ensure None/NaN is preserved
+        assert result.iloc[1]["TARGET"] == "FREQ"
+        assert result.iloc[1]["MAPPING_RULES"] == "fixed:A"
+
+
+    def test_parse_comp_mapping_sheet_missing_sheet(self):
+        """Test that ValueError is raised when the sheet is not present."""
+        sheets = {"INFO": pd.DataFrame()}
+        
+        with pytest.raises(ValueError, match="Sheet 'COMP_MAPPING' not found"):
+            _parse_comp_mapping_sheet(sheets)
+
+
+    def test_parse_comp_mapping_sheet_missing_columns(self):
+        """Test that ValueError is raised when required columns are missing."""
+        # MAPPING_RULES is missing
+        df = pd.DataFrame({
+            "SOURCE": ["A"],
+            "TARGET": ["B"]
+        })
+        sheets = {"COMP_MAPPING": df}
+
+        with pytest.raises(ValueError, match="missing required columns"):
+            _parse_comp_mapping_sheet(sheets)
+
+
+    def test_parse_comp_mapping_sheet_empty_rows(self):
+        """Test that completely empty rows are removed."""
+        df = pd.DataFrame({
+            "SOURCE": ["A", None, None],
+            "TARGET": ["B", None, "D"],
+            "MAPPING_RULES": ["C", None, "E"]
+        })
+        # Row 1 is fully empty -> should be dropped
+        # Row 2 has None in SOURCE but data in others -> should be kept
+        
+        sheets = {"COMP_MAPPING": df}
+        result = _parse_comp_mapping_sheet(sheets)
+
+        assert len(result) == 2
+        assert result.iloc[0]["SOURCE"] == "A"
+        assert result.iloc[1]["TARGET"] == "D"
+
+
+    def test_parse_comp_mapping_sheet_empty_input(self):
+        """Test parsing a sheet that has headers but no data."""
+        df = pd.DataFrame(columns=["SOURCE", "TARGET", "MAPPING_RULES"])
+        sheets = {"COMP_MAPPING": df}
+        
+        result = _parse_comp_mapping_sheet(sheets)
+        
+        assert result.empty
+        assert list(result.columns) == ["SOURCE", "TARGET", "MAPPING_RULES"]
+
+    def test_parse_rep_mapping_normal_case(self):
+        """Test standard separation of S: and T: columns into a dictionary."""
+        data = {
+            "S:Series": ["A", "B"],
+            "S:Name": ["Alpha", "Beta"],
+            "T:Indicator": ["IND_A", "IND_B"],
+            "T:Unit": ["USD", "EUR"],
+            "Notes": ["Ignore", "Ignore"]  # Should be ignored
+        }
+        df = pd.DataFrame(data)
+        sheets = {"REP_MAPPING": df}
+
+        result = _parse_rep_mapping_sheet(sheets)
+
+        assert isinstance(result, dict)
+        assert "source" in result
+        assert "target" in result
+
+        # Validate Source DF
+        source_df = result["source"]
+        assert list(source_df.columns) == ["Series", "Name"]
+        assert len(source_df) == 2
+        assert source_df.iloc[0]["Series"] == "A"
+
+        # Validate Target DF
+        target_df = result["target"]
+        assert list(target_df.columns) == ["Indicator", "Unit"]
+        assert len(target_df) == 2
+        assert target_df.iloc[1]["Unit"] == "EUR"
+
+
+    def test_parse_rep_mapping_missing_sheet(self):
+        """Test that ValueError is raised if sheet is missing."""
+        sheets = {"OTHER": pd.DataFrame()}
+        with pytest.raises(ValueError, match="Sheet 'REP_MAPPING' not found"):
+            _parse_rep_mapping_sheet(sheets)
+
+
+    def test_parse_rep_mapping_no_source_cols(self):
+        """Test that ValueError is raised if no S: columns exist."""
+        df = pd.DataFrame({"T:Indicator": [1], "Other": [2]})
+        sheets = {"REP_MAPPING": df}
+        
+        with pytest.raises(ValueError, match="No source columns"):
+            _parse_rep_mapping_sheet(sheets)
+
+
+    def test_parse_rep_mapping_no_target_cols(self):
+        """Test that ValueError is raised if no T: columns exist."""
+        df = pd.DataFrame({"S:Series": [1], "Other": [2]})
+        sheets = {"REP_MAPPING": df}
+        
+        with pytest.raises(ValueError, match="No target columns"):
+            _parse_rep_mapping_sheet(sheets)
+
+
+    def test_parse_rep_mapping_empty_data(self):
+        """Test parsing a sheet with correct headers but no rows."""
+        df = pd.DataFrame(columns=["S:Series", "T:Indicator"])
+        sheets = {"REP_MAPPING": df}
+
+        result = _parse_rep_mapping_sheet(sheets)
+        source_df = result["source"]
+        target_df = result["target"]
+
+        assert list(source_df.columns) == ["Series"]
+        assert list(target_df.columns) == ["Indicator"]
+        assert source_df.empty
+        assert target_df.empty
+
+
+    def test_parse_rep_mapping_ignore_unprefixed_cols(self):
+        """Test that columns without 'S:' or 'T:' prefixes are excluded."""
+        data = {
+            "S:Key": [1],
+            "T:Val": [2],
+            "Random": [3],
+            "Unnamed: 0": [4]
+        }
+        df = pd.DataFrame(data)
+        sheets = {"REP_MAPPING": df}
+
+        result = _parse_rep_mapping_sheet(sheets)
+        
+        assert "Random" not in result["source"].columns
+        assert "Random" not in result["target"].columns
+        assert "Unnamed: 0" not in result["source"].columns

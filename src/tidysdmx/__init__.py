@@ -52,6 +52,7 @@ from .structures import (
     build_structure_map,
     create_schema_from_table
     )
+from .wbutils import (build_structure_map_from_template_wb)
 
 __all__ = [
     "fetch_dsd_schema",
@@ -102,5 +103,6 @@ __all__ = [
     "build_excel_workbook",
     "write_excel_mapping_template",
     "build_structure_map",
-    "create_schema_from_table"
+    "create_schema_from_table",
+    "build_structure_map_from_template_wb"
     ]
