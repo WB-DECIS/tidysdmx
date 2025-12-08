@@ -1,6 +1,14 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.5.0 (8/12/2025)
+### Added
+
+- Added functions to the `structures` module
+- Added functions to the `utils` module
+- Added unit tests for these functions
+- Added `openpyxl` package as dependency to manipulate excel files
+
 ## v0.4.0 (21/11/2025)
 ### Changed
 
