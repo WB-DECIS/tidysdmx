@@ -739,7 +739,7 @@ def _create_representation_definition(
     )
 
 @typechecked
-def extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
+def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
     """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
 
     Args:
@@ -791,26 +791,28 @@ def build_structure_map(
 ) -> StructureMap:
     """Converts a populated Excel Workbook into a pysdmx StructureMap object.
     
-    This function leverages `extract_mapping_definitions` to parse the Excel file
+    This function leverages `_extract_mapping_definitions` to parse the Excel file
     into intermediate definitions, and then converts those definitions into
     pysdmx objects.
     """
     # 1. Parse Excel to Intermediate Definitions
-    definitions = extract_mapping_definitions(workbook)
+    definitions = _extract_mapping_definitions(workbook)
     
     maps_list = []
     
     # 2. Convert Definitions to pysdmx Objects
     for definition in definitions:
         if definition.map_type == "fixed":
-            if definition.fixed_value is None:
+            if not definition.target or not definition.target.strip():
+                raise ValueError(f"Fixed value missing for {definition.target}")
+            if not definition.fixed_value or not definition.fixed_value.strip():
                 raise ValueError(f"Fixed value missing for {definition.target}")
             maps_list.append(
                 build_fixed_map(target=definition.target, value=definition.fixed_value)
             )
             
         elif definition.map_type == "implicit":
-            if definition.source is None:
+            if not definition.source or not definition.source.strip():
                 raise ValueError(f"Source missing for implicit map {definition.target}")
             maps_list.append(
                 build_implicit_component_map(source=definition.source, target=definition.target)

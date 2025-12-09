@@ -32,7 +32,7 @@ from tidysdmx.structures import (
     build_multi_value_map_list,
     build_representation_map,
     build_single_component_map,
-    extract_mapping_definitions,
+    _extract_mapping_definitions,
     _read_comp_mapping_sheet,
     _create_fixed_definition,
     _create_implicit_definition,
@@ -42,7 +42,8 @@ from tidysdmx.structures import (
     _parse_comp_mapping_sheet,
     _parse_rep_mapping_sheet,
     _match_column_name,
-    build_multi_representation_map
+    build_multi_representation_map,
+    build_structure_map
 
     )
 
@@ -1030,7 +1031,7 @@ class TestExtractMappingDefinitions:  # noqa: D101
 
     def test_extract_mapping_definitions_integration(self, mock_populated_workbook: Workbook):
         """Tests the main function's dispatch logic."""
-        definitions = extract_mapping_definitions(mock_populated_workbook)
+        definitions = _extract_mapping_definitions(mock_populated_workbook)
         
         assert len(definitions) == 4 # Should ignore empty row and invalid rules if any
         
@@ -1053,7 +1054,7 @@ class TestExtractMappingDefinitions:  # noqa: D101
         ws.append(["", "T_BAD", "unknown_type"])
         
         with pytest.raises(ValueError, match="Unknown mapping rule"):
-            extract_mapping_definitions(mock_populated_workbook)
+            _extract_mapping_definitions(mock_populated_workbook)
 
 class TestCreateSchemaFromTable:  # noqa: D101
     def test_create_schema_time_period_standardization(self) -> None:
@@ -1517,3 +1518,87 @@ class TestMatchColumnName: #noqa: D101
         # Passing a non-list for available_columns should raise a type error
         with pytest.raises((TypeCheckError, AttributeError)):
             _match_column_name("Test", "NotAList")
+
+
+class TestBuildStructureMap:
+    """Tests for build_structure_map() converting Excel workbook to StructureMap."""
+    @pytest.fixture
+    def workbook_with_valid_data(self):
+        """Creates a valid workbook with comp_mapping and representation sheets."""
+        wb = Workbook()
+        # comp_mapping sheet
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC1", "TGT1", "fixed:VAL1"])
+        ws_comp.append(["SRC2", "TGT2", "implicit"])
+        ws_comp.append(["SRC3", "TGT3", "TGT3"])  # representation map
+        # representation sheet for TGT3
+        ws_rep = wb.create_sheet("TGT3")
+        ws_rep.append(["source", "target", "valid_from", "valid_to"])
+        ws_rep.append(["A", "B", "", ""])
+        return wb
+
+    @pytest.fixture
+    def workbook_missing_comp_mapping(self):
+        """Workbook without comp_mapping sheet."""
+        wb = Workbook()
+        wb.create_sheet("Sheet1")
+        return wb
+
+    @pytest.fixture
+    def workbook_with_invalid_rule(self):
+        """Workbook with an invalid mapping rule."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "unknown_rule"])
+        return wb
+
+    def test_valid_workbook_returns_structure_map(self, workbook_with_valid_data):
+        """Tests that a valid workbook returns a StructureMap with correct maps."""
+        structure_map = build_structure_map(workbook_with_valid_data)
+        assert structure_map.id == "GENERATED_STRUCTURE_MAP"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+        assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
+
+    def test_missing_comp_mapping_raises_keyerror(self, workbook_missing_comp_mapping):
+        """Tests that missing comp_mapping sheet raises KeyError."""
+        with pytest.raises(KeyError, match="Mandatory sheet 'comp_mapping' not found"):
+            build_structure_map(workbook_missing_comp_mapping)
+
+    def test_invalid_mapping_rule_raises_valueerror(self, workbook_with_invalid_rule):
+        """Tests that an unknown mapping rule raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            build_structure_map(workbook_with_invalid_rule)
+
+    def test_empty_representation_sheet_skips_map(self):
+        """Tests that empty representation sheet is skipped without error."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "TGT"])
+        wb.create_sheet("TGT")  # empty representation sheet
+        structure_map = build_structure_map(wb)
+        assert len(structure_map.maps) == 0  # skipped due to empty DF
+
+    def test_fixed_value_missing_raises_valueerror(self):
+        """Tests that missing fixed value raises ValueError."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "fixed:"])
+        with pytest.raises(ValueError, match="Fixed value for target 'TGT' cannot be empty"):
+            build_structure_map(wb)
+    
+    
+    def test_implicit_missing_source_raises_valueerror(self):
+        """Tests that implicit mapping without source raises ValueError."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["", "TGT", "implicit"])  # Missing source for implicit map
+
+        # Act & Assert
+        with pytest.raises(ValueError):
+            build_structure_map(wb)
+
