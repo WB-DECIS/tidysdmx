@@ -95,8 +95,6 @@ def extract_component_ids(schema: Schema) -> list[str]:
         >>> get_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """
-    if not isinstance(schema, Schema):
-        raise TypeError("Input must be a pysdmx Schema instance.")
     if not schema.components or len(schema.components) == 0:
         raise ValueError("Schema contains no components.")
     return [component.id for component in schema.components]
