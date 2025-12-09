@@ -44,7 +44,8 @@ from tidysdmx.structures import (
     _match_column_name,
     build_multi_representation_map,
     build_structure_map,
-    _extract_artefact_id
+    _extract_artefact_id,
+    build_structure_map_from_template_wb
 
     )
 
@@ -1653,5 +1654,101 @@ class TestExtractArtefactId: #noqa: D101
         df_case = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
         result = _extract_artefact_id(df_case, "dataflow")
         assert result == "AGENCY:DF_ID(1.0)"
+
+
+class TestBuildStructureMapFromTemplateWb:
+    """Tests for build_structure_map_from_template_wb() which builds a StructureMap from WB-format Excel template."""
+
+    @pytest.fixture
+    def valid_mappings(self):
+        """Fixture: Valid mappings dictionary with INFO, COMP_MAPPING, and REP_MAPPING sheets."""
+        info_df = pd.DataFrame({"Key": ["dataflow"], "Value": ["AGENCY:DF_ID(1.0)"]})
+        comp_df = pd.DataFrame({
+            "SOURCE": ["SRC1", "SRC2", "SRC3"],
+            "TARGET": ["TGT1", "TGT2", "TGT3"],
+            "MAPPING_RULES": ["fixed:VAL1", "implicit", "TGT3"]
+        })
+        rep_df = pd.DataFrame({
+            "S:SRC3": ["A", "B"],
+            "T:TGT3": ["X", "Y"]
+        })
+        return {"INFO": info_df, "COMP_MAPPING": comp_df, "REP_MAPPING": rep_df}
+
+    def test_valid_mappings_returns_structure_map(self, valid_mappings):
+        """Tests that valid mappings return a StructureMap with correct maps."""
+        structure_map = build_structure_map_from_template_wb(valid_mappings)
+        assert structure_map.id == "WB_STRUCTURE_MAP"
+        assert structure_map.agency == "AGENCY"
+        assert structure_map.version == "1.0"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+        assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
+
+    def test_missing_info_sheet_uses_defaults(self, valid_mappings):
+        """Tests that missing INFO sheet falls back to default agency and version."""
+        mappings = valid_mappings.copy()
+        mappings.pop("INFO")
+        structure_map = build_structure_map_from_template_wb(mappings)
+        assert structure_map.agency == "SDMX"
+        assert structure_map.version == "1.0"
+
+    def test_missing_comp_mapping_sheet_raises_valueerror(self, valid_mappings):
+        """Tests that missing COMP_MAPPING sheet raises ValueError."""
+        mappings = {"INFO": valid_mappings["INFO"]}
+        with pytest.raises(ValueError, match="Sheet 'COMP_MAPPING' not found"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_invalid_fixed_rule_format_raises_valueerror(self, valid_mappings):
+        """Tests that invalid fixed rule format raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[0, "MAPPING_RULES"] = "fixed:"  # Missing value
+        with pytest.raises(ValueError, match="Invalid fixed rule format"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_implicit_missing_source_raises_valueerror(self, valid_mappings):
+        """Tests that implicit mapping without source raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[1, "SOURCE"] = ""  # Remove source for implicit
+        with pytest.raises(ValueError, match="Implicit map rule requires a non-empty 'SOURCE'"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_representation_missing_rep_mapping_sheet_raises_valueerror(self, valid_mappings):
+        """Tests that representation rule without REP_MAPPING sheet raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings.pop("REP_MAPPING")
+        with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING' sheet"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_representation_empty_combined_df_raises_valueerror(self, valid_mappings):
+        """Tests that representation rule with empty combined DataFrame raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["REP_MAPPING"] = pd.DataFrame({"S:SRC3": [], "T:TGT3": []})  # Empty sheet
+        with pytest.raises(ValueError):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_unknown_mapping_rule_raises_valueerror(self, valid_mappings):
+        """Tests that unknown mapping rule raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[0, "MAPPING_RULES"] = "unknown_rule"
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            build_structure_map_from_template_wb(mappings)
+    
+    
+    def test_case_insensitive_info_key_match(self, valid_mappings):
+        """Tests that INFO sheet key matching is case-insensitive and correctly extracts agency and version."""
+        mappings = valid_mappings.copy()
+        mappings["INFO"] = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
+
+        # Act
+        structure_map = build_structure_map_from_template_wb(mappings)
+
+        # Assert
+        assert structure_map.agency == "AGENCY"
+        assert structure_map.version == "1.0"
+        assert structure_map.name.startswith("Structure Map generated for")
+        assert structure_map.id == "WB_STRUCTURE_MAP"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+
+
+
 
 
