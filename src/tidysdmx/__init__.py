@@ -38,8 +38,6 @@ from .validation import (
     validate_no_missing_values
     ) 
 from .structures import (
-    # infer_role_dimension, 
-    # infer_schema, 
     build_fixed_map, 
     build_implicit_component_map, 
     build_date_pattern_map, 
