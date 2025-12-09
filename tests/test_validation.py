@@ -235,6 +235,74 @@ class TestGetCodelistIds:
         assert get_codelist_ids(comp, coded_comp) == expected
 
 
+class TestValidateCodelistIds:
+    """Tests for validate_codelist_ids function."""
+    
+    @pytest.fixture
+    def sample_codelist_ids(self):
+        """Fixture that returns a dictionary of allowed IDs for columns."""
+        return {
+            "col1": ["A1", "A2"],
+            "col2": ["B1", "B2"]
+        }
+
+    def test_valid_values_pass(self, sample_codelist_ids):
+        """Tests that DataFrame with valid values passes without error."""
+        df = pd.DataFrame({
+            "col1": ["A1", "A2"],
+            "col2": ["B1", "B2"]
+        })
+        # Should not raise any error
+        validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_invalid_value_raises_error(self, sample_codelist_ids):
+        """Tests that invalid values raise ValueError."""
+        df = pd.DataFrame({
+            "col1": ["A1", "INVALID"],
+            "col2": ["B1", "B2"]
+        })
+        with pytest.raises(ValueError) as excinfo:
+            validate_codelist_ids(df, sample_codelist_ids)
+        assert "Invalid values found in column 'col1'" in str(excinfo.value)
+
+    def test_multiple_invalid_values(self, sample_codelist_ids):
+        """Tests that multiple invalid values are reported."""
+        df = pd.DataFrame({
+            "col1": ["INVALID1", "INVALID2"],
+            "col2": ["INVALID3", "B2"]
+        })
+        with pytest.raises(ValueError) as excinfo:
+            validate_codelist_ids(df, sample_codelist_ids)
+        msg = str(excinfo.value)
+        assert "Invalid values found in column 'col1'" in msg or "Invalid values found in column 'col2'" in msg
+
+    def test_column_not_in_dataframe_is_ignored(self, sample_codelist_ids):
+        """Tests that columns not present in DataFrame are ignored."""
+        df = pd.DataFrame({
+            "col1": ["A1", "A2"]
+        })
+        # col2 is missing, should not raise error
+        validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_empty_dataframe_passes(self, sample_codelist_ids):
+        """Tests that an empty DataFrame passes without error."""
+        df = pd.DataFrame(columns=["col1", "col2"])
+        validate_codelist_ids(df, sample_codelist_ids)
+
+    @pytest.mark.parametrize(
+        "df_values,expected_error",
+        [
+            ({"col1": ["A1", "WRONG"], "col2": ["B1", "B2"]}, "col1"),
+            ({"col1": ["A1", "A2"], "col2": ["WRONG", "B2"]}, "col2"),
+        ]
+    )
+    def test_parametrized_invalid_values(self, df_values, expected_error, sample_codelist_ids):
+        """Tests invalid values in different columns using parametrization."""
+        df = pd.DataFrame(df_values)
+        with pytest.raises(ValueError) as excinfo:
+            validate_codelist_ids(df, sample_codelist_ids)
+        assert expected_error in str(excinfo.value)
+
 
 
 
