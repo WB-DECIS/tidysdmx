@@ -8,11 +8,11 @@ from tidysdmx.validation import (
     validate_codelist_ids, 
     validate_mandatory_columns, 
     validate_columns,
-    get_codelist_ids
+    get_codelist_ids,
+    validate_dataset_local
 )
 
-# Test validate_no_missing_values()
-class TestValidateNoMissingValues:
+class TestValidateNoMissingValues: # noqa: D101
     def test_validate_no_missing_values_no_missing(self):
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
         mandatory_columns = ["col1", "col2"]
@@ -46,8 +46,7 @@ class TestValidateNoMissingValues:
         except ValueError:
             pytest.fail("Unexpected ValueError raised")
 
-# Test validate_duplicates()
-class TestValidateDuplicates:
+class TestValidateDuplicates: # noqa: D101
     def test_validate_duplicates_no_duplicates(self):
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
         dim_columns = ["col1", "col2"]
@@ -63,8 +62,7 @@ class TestValidateDuplicates:
         with pytest.raises(ValueError, match="Duplicate rows found"):
             validate_duplicates(df, dim_columns)
 
-# Test validate_codelist_ids()
-class TestValidateCodelistIds:
+class TestValidateCodelistIds: # noqa: D101
     @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
     def test_validate_codelist_ids_valid():
         df = pd.DataFrame({"col1": ["A", "B", "C"]})
@@ -82,8 +80,7 @@ class TestValidateCodelistIds:
         with pytest.raises(ValueError, match="Invalid codelist IDs found"):
             validate_codelist_ids(df, codelist_ids)
 
-# Test validate_mandatory_columns()
-class TestValidateMandatoryColumns:
+class TestValidateMandatoryColumns: # noqa: D101
     def test_validate_mandatory_columns_all_present(self):
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
         mandatory_columns = ["col1", "col2"]
@@ -99,8 +96,7 @@ class TestValidateMandatoryColumns:
         with pytest.raises(ValueError, match="Missing mandatory columns"):
             validate_mandatory_columns(df, mandatory_columns, sdmx_cols=[])
 
-# Test validate_columns()
-class ValidateColumns:
+class ValidateColumns: # noqa: D101
     def test_validate_columns_all_valid(self):
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
         valid_columns = ["col1", "col2", "col3"]
@@ -115,7 +111,6 @@ class ValidateColumns:
         valid_columns = ["col1", "col2", "col3"]
         with pytest.raises(ValueError, match="Found unexpected column: col4"):
             validate_columns(df, valid_columns, sdmx_cols=[])
-
 
 class TestValidateColumns:
     """Tests for the validate_columns function which ensures all DataFrame columns are valid."""
@@ -157,7 +152,6 @@ class TestValidateColumns:
         """Tests that DataFrame with only SDMX columns passes validation."""
         df = pd.DataFrame(columns=["STRUCTURE", "STRUCTURE_ID"])
         validate_columns(df, valid_columns=[], sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"])
-
 
 class TestGetCodelistIds:
     """Tests for get_codelist_ids using real pysdmx Component and Codelist objects."""
@@ -234,7 +228,6 @@ class TestGetCodelistIds:
         }
         assert get_codelist_ids(comp, coded_comp) == expected
 
-
 class TestValidateCodelistIds:
     """Tests for validate_codelist_ids function."""
     
@@ -302,6 +295,120 @@ class TestValidateCodelistIds:
         with pytest.raises(ValueError) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         assert expected_error in str(excinfo.value)
+
+
+class TestValidateDatasetLocal:
+    """Tests for validate_dataset_local function."""
+
+    @pytest.fixture
+    def valid_info(self):
+        """Fixture providing a mock valid dictionary for validation."""
+        return {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA", "INDICATOR"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {
+                "AREA": ["COL", "SWZ"],
+                "INDICATOR": ["RES_FEMALE_TOT_FTE", "RES_MALE_TOT_FTE"]
+            },
+            "dim_comp": ["TIME_PERIOD", "AREA"]
+        }
+
+    def test_valid_dataset_returns_empty_df(self, valid_info):
+        """Tests that a fully valid dataset returns an empty DataFrame (no errors)."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020", "2021"],
+            "OBS_VALUE": [100, 200],
+            "AREA": ["COL", "SWZ"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE", "RES_MALE_TOT_FTE"],
+            "STRUCTURE": ["X", "X"],
+            "STRUCTURE_ID": ["Y", "Y"],
+            "ACTION": ["A", "A"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_unexpected_column_error(self, valid_info):
+        """Tests that unexpected columns produce an error record."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020"],
+            "OBS_VALUE": [100],
+            "AREA": ["COL"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE"],
+            "EXTRA_COL": ["oops"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert "columns" in result["Validation"].values
+        assert "Found unexpected column" in result["Error"].iloc[0]
+
+    def test_missing_mandatory_columns_error(self, valid_info):
+        """Tests that missing mandatory columns produce an error record."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020"],
+            "OBS_VALUE": [100]
+            # Missing AREA
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert "mandatory_columns" in result["Validation"].values
+        assert "Missing mandatory columns" in result["Error"].iloc[0]
+
+    def test_invalid_codelist_values_error(self, valid_info):
+        """Tests that invalid codelist values produce an error record."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020"],
+            "OBS_VALUE": [100],
+            "AREA": ["INVALID"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE"],
+            "STRUCTURE": ["X"],
+            "STRUCTURE_ID": ["Y"],
+            "ACTION": ["A"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert "codelist_ids" in result["Validation"].values
+        assert "Invalid values found" in result["Error"].iloc[0]
+
+    def test_duplicate_rows_error(self, valid_info):
+        """Tests that duplicate rows produce an error record."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020", "2020"],
+            "OBS_VALUE": [100, 200],
+            "AREA": ["COL", "COL"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE", "RES_FEMALE_TOT_FTE"],
+            "STRUCTURE": ["X", "X"],
+            "STRUCTURE_ID": ["Y", "Y"],
+            "ACTION": ["A", "A"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert "duplicates" in result["Validation"].values
+        assert "Duplicate rows found" in result["Error"].iloc[0]
+
+    def test_missing_values_error(self, valid_info):
+        """Tests that missing values in mandatory columns produce an error record."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020", None],
+            "OBS_VALUE": [100, 200],
+            "AREA": ["COL", "SWZ"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE", "RES_MALE_TOT_FTE"],
+            "STRUCTURE": ["X", "X"],
+            "STRUCTURE_ID": ["Y", "Y"],
+            "ACTION": ["A", "A"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        assert "missing_values" in result["Validation"].values
+        assert "Missing values found" in result["Error"].iloc[0]
+
+    def test_raises_error_if_no_schema_or_valid(self):
+        """Tests that ValueError is raised if neither schema nor valid is provided."""
+        df = pd.DataFrame({"TIME_PERIOD": ["2020"]})
+        with pytest.raises(ValueError):
+            validate_dataset_local(df)
+
 
 
 
