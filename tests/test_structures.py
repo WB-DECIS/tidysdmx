@@ -1521,7 +1521,6 @@ class TestMatchColumnName: #noqa: D101
         with pytest.raises((TypeCheckError, AttributeError)):
             _match_column_name("Test", "NotAList")
 
-
 class TestBuildStructureMap: #noqa: D101
     """Tests for build_structure_map() converting Excel workbook to StructureMap."""
     @pytest.fixture
@@ -1604,7 +1603,6 @@ class TestBuildStructureMap: #noqa: D101
         with pytest.raises(ValueError):
             build_structure_map(wb)
 
-
 class TestExtractArtefactId: #noqa: D101
     """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO sheet DataFrame."""
 
@@ -1654,7 +1652,6 @@ class TestExtractArtefactId: #noqa: D101
         df_case = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
         result = _extract_artefact_id(df_case, "dataflow")
         assert result == "AGENCY:DF_ID(1.0)"
-
 
 class TestBuildStructureMapFromTemplateWb:
     """Tests for build_structure_map_from_template_wb() which builds a StructureMap from WB-format Excel template."""
