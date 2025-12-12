@@ -24,159 +24,6 @@ import re
 # Import tidysdmx functions
 from .tidysdmx import parse_artefact_id
 
-# region infer dataset structure
-# def infer_role_dimension(
-#     df: pd.DataFrame, 
-#     value_col: str
-# ) -> List[Union[str, Tuple[str, ...]]]:
-#     """Infers the minimal set of unique keys (dimension columns) for an observation column.
-
-#     This function identifies the smallest combination of columns that uniquely 
-#     identifies each record's observation value. It starts by checking single 
-#     columns and progressively checks larger combinations until a key is found.
-
-#     Args:
-#         df (pd.DataFrame): The input DataFrame containing the data.
-#         value_col (str): The name of the column containing the 
-#                                   observation values to be identified.
-
-#     Returns:
-#         List[Union[str, Tuple[str, ...]]]: 
-#             A list of the minimal unique keys found.
-#             - For single-column keys, returns a list of strings (e.g., ['col1', 'col2']).
-#             - For composite keys, returns a list of tuples (e.g., [('col1', 'col2')]).
-#             Returns an empty list if no key is found.
-#     """
-#     if value_col not in df.columns:
-#         raise ValueError(f"Observation column '{value_col}' not found in DataFrame.")
-
-#     dimension_columns = [col for col in df.columns if col != value_col]
-#     df_cleaned = df.dropna(subset=dimension_columns, how='all')
-    
-#     if len(df_cleaned) == 0:
-#         return []
-
-#     for combination_size in range(1, len(dimension_columns) + 1):
-#         unique_keys_found = []
-        
-#         for column_combination in combinations(dimension_columns, combination_size):
-#             key_candidate = list(column_combination)
-            
-#             if not df_cleaned.duplicated(subset=key_candidate).any():
-#                 # --- FIX IS HERE ---
-#                 # If the key has only one column, store it as a string.
-#                 # Otherwise, store it as a sorted tuple.
-#                 if len(key_candidate) == 1:
-#                     unique_keys_found.append(key_candidate[0])
-#                 else:
-#                     unique_keys_found.append(tuple(sorted(key_candidate)))
-
-#         if unique_keys_found:
-#             # Sort the final list for consistent output
-#             # This handles cases where multiple keys of the same size are found
-#             return sorted(unique_keys_found, key=lambda k: str(k))
-            
-#     return []
-
-def infer_role(
-        col_name: str, 
-        series, 
-        dimension_cols: set
-    ) -> Role:
-    """Infer SDMX role for a column based on dimension detection and data characteristics.
-
-    Args:
-        col_name (str): The name of the column.
-        series (pd.Series): The data series for the column.
-        dimension_cols (set): A set of dimension column names.
-
-    Returns:
-        Role: The inferred role for the column.
-    """
-    if col_name in dimension_cols:
-        return Role.DIMENSION
-    if series.dtype.kind in ["i", "f"]:  # numeric
-        return Role.MEASURE
-    # Heuristic for remaining columns
-    unique_ratio = series.nunique() / len(series)
-    return Role.DIMENSION if unique_ratio < 0.5 else Role.ATTRIBUTE
-
-def infer_dtype(series) -> DataType:
-    """Map pandas dtype to SDMX DataType.
-    
-    Args:
-        series (pd.Series): The data series for the column.
-    
-    Returns:
-        DataType: The inferred SDMX data type.
-    """
-    if series.dtype.kind in ["i", "f"]:
-        return DataType.FLOAT
-    if "datetime" in str(series.dtype):
-        return DataType.PERIOD
-    return DataType.STRING
-
-def infer_schema(
-        df: pd.DataFrame, 
-        agency: str = "WB", 
-        id: str = "INFERRED_SCHEMA", 
-        value_col: str = "OBS_VALUE"
-    ) -> Schema:
-    """Infer a pysdmx Schema from a pandas DataFrame.
-    
-    Args:
-        df (pd.DataFrame): The input DataFrame.
-        agency (str, optional): The agency ID for the schema. Defaults to "WB".
-        id (str, optional): The schema ID. Defaults to "INFERRED_SCHEMA".
-        value_col (str, optional): The name of the observation value column. Defaults to "OBS_VALUE".
-    
-    Returns:
-        Schema: The inferred pysdmx Schema object.
-    """
-    # Infer dimension columns
-    dim_cols = infer_role_dimension(df = df, value_col = value_col)
-    
-    components = []
-
-    for col in df.columns:
-        role = infer_role(col_name = col, series = df[col], 
-                          dimension_cols = dim_cols)
-        dtype = infer_dtype(df[col])
-        concept = Concept(id=col, name=col.title(), dtype=dtype)
-
-        # Build local codes for categorical dimensions
-        local_codes = None
-        if role == Role.DIMENSION and dtype == DataType.STRING:
-            unique_vals = sorted(df[col].dropna().unique())
-            if len(unique_vals) <= 500:  # avoid huge codelists
-                code_items = [Code(id=str(v), name=str(v)) for v in unique_vals]
-                local_codes = Codelist(
-                    id=f"CL_{col}",
-                    name=f"{col} Codes",
-                    agency=agency,  # ✅ Required for maintainable artefacts
-                    items=code_items
-                )
-
-        component = Component(
-            id=col,
-            required=(role != Role.ATTRIBUTE),
-            role=role,
-            concept=concept,
-            name=col.title(),
-            local_dtype=dtype,
-            local_codes=local_codes
-        )
-        components.append(component)
-
-    return Schema(
-        context="datastructure",
-        agency=agency,
-        id=id,
-        components=Components(components),
-        version="1.0"
-    )
-# endregion
-
 # region structure map
 @typechecked
 def build_fixed_map(target: str, value: str, located_in: Optional[str] = "target") -> FixedValueMap:
@@ -418,18 +265,23 @@ def build_value_map_list(
 def build_multi_value_map_list(
     df: pd.DataFrame,
     source_cols: Sequence[str],
-    target_col: str,
+    target_cols: Sequence[str],
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
 ) -> list[MultiValueMap]:
-    """Build a list of MultiValueMap objects from a pandas DataFrame, optionally including validity periods.
+    """Build a list of MultiValueMap objects from a pandas DataFrame.
+
+    Iterates through the DataFrame rows to create mapping objects that map
+    values from multiple source columns to multiple target columns.
 
     Args:
         df (pd.DataFrame): DataFrame where each row represents a mapping.
-        source_cols (Sequence[str]): Column names for source values (multiple allowed).
-        target_col (str): Column name for target value (single column).
-        valid_from_col (str): Optional column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Optional column name for validity end date. Defaults to "valid_to".
+        source_cols (Sequence[str]): Column names for source values.
+        target_cols (Sequence[str]): Column names for target values.
+        valid_from_col (str): Optional column name for validity start date.
+            Defaults to "valid_from".
+        valid_to_col (str): Optional column name for validity end date.
+            Defaults to "valid_to".
 
     Returns:
         list[MultiValueMap]: List of MultiValueMap objects created from the DataFrame.
@@ -442,45 +294,83 @@ def build_multi_value_map_list(
         >>> import pandas as pd
         >>> data = {
         ...     'country': ['DE', 'CH'],
-        ...     'currency': ['LC', 'LC'],
-        ...     'iso_code': ['EUR', 'CHF']
+        ...     'currency_src': ['LC', 'LC'],
+        ...     'currency_tgt': ['EUR', 'CHF'],
+        ...     'region_tgt': ['EU', 'Non-EU']
         ... }
         >>> df = pd.DataFrame(data)
-        >>> multi_maps = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
-        >>> isinstance(multi_maps[0], MultiValueMap)
-        True
+        >>> maps = build_multi_value_map_list(
+        ...     df,
+        ...     ['country', 'currency_src'],
+        ...     ['currency_tgt', 'region_tgt']
+        ... )
+        >>> len(maps)
+        2
+        >>> maps[0].source
+        ('DE', 'LC')
+        >>> maps[0].target
+        ('EUR', 'EU')
     """
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
-    for col in source_cols:
-        if col not in df.columns:
-            raise ValueError(f"Source column '{col}' must exist in DataFrame.")
-    if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' must exist in DataFrame.")
 
-    # Validate data types
+    # 1. Validate Column Existence
+    missing_source = [col for col in source_cols if col not in df.columns]
+    if missing_source:
+        raise ValueError(f"Source columns missing in DataFrame: {missing_source}")
+
+    missing_target = [col for col in target_cols if col not in df.columns]
+    if missing_target:
+        raise ValueError(f"Target columns missing in DataFrame: {missing_target}")
+
+    # 2. Validate Data Types (Must be strings for SDMX mappings)
     for col in source_cols:
-        if not df[col].map(lambda x: isinstance(x, str)).all():
+        # Check if any value in the column is NOT a string
+        if not df[col].apply(lambda x: isinstance(x, str)).all():
             raise TypeError(f"Source column '{col}' must contain only string values.")
-    if not df[target_col].map(lambda x: isinstance(x, str)).all():
-        raise TypeError(f"Target column '{target_col}' must contain only string values.")
+
+    for col in target_cols:
+        if not df[col].apply(lambda x: isinstance(x, str)).all():
+            raise TypeError(f"Target column '{col}' must contain only string values.")
 
     has_valid_from = valid_from_col in df.columns
     has_valid_to = valid_to_col in df.columns
 
     multi_value_maps: list[MultiValueMap] = []
-    for _, row in df.iterrows():
-        source_values = [row[col] for col in source_cols]
-        target_value = row[target_col]
 
+    # 3. Iterate and Build
+    for _, row in df.iterrows():
+        # Correctly extract source AND target using their respective lists
+        source_values = [row[col] for col in source_cols]
+        target_values = [row[col] for col in target_cols]
+
+        # MultiValueMap expects sequences for source/target, keyword-only args
         kwargs = {
             "source": source_values,
-            "target": [target_value]  # Wrap in list for consistency with MultiValueMap
+            "target": target_values,
         }
-        if has_valid_from and pd.notna(row.get(valid_from_col)):
-            kwargs["valid_from"] = datetime.fromisoformat(str(row[valid_from_col]))
-        if has_valid_to and pd.notna(row.get(valid_to_col)):
-            kwargs["valid_to"] = datetime.fromisoformat(str(row[valid_to_col]))
+
+        # Handle Validity Dates
+        if has_valid_from:
+            val = row[valid_from_col]
+            if pd.notna(val):
+                # Handle pandas Timestamp or string format
+                if isinstance(val, str):
+                    kwargs["valid_from"] = datetime.fromisoformat(val)
+                elif hasattr(val, "to_pydatetime"):
+                    kwargs["valid_from"] = val.to_pydatetime()
+                elif isinstance(val, datetime):
+                    kwargs["valid_from"] = val
+
+        if has_valid_to:
+            val = row[valid_to_col]
+            if pd.notna(val):
+                if isinstance(val, str):
+                    kwargs["valid_to"] = datetime.fromisoformat(val)
+                elif hasattr(val, "to_pydatetime"):
+                    kwargs["valid_to"] = val.to_pydatetime()
+                elif isinstance(val, datetime):
+                    kwargs["valid_to"] = val
 
         multi_value_maps.append(MultiValueMap(**kwargs))
 
@@ -569,75 +459,71 @@ def build_multi_representation_map(
     target_cls: Optional[list[str]] = None,
     version: str = "1.0",
     description: Optional[str] = None,
-    source_cols: list[str] = ["source"],
-    target_cols: list[str] = ["target"],
+    source_cols: Optional[list[str]] = None,  # Changed to Optional
+    target_cols: Optional[list[str]] = None,  # Changed to Optional
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to"
 ) -> MultiRepresentationMap:
-    """Build a MultiRepresentationMap object from a pandas DataFrame using build_multi_value_map_list.
+    """Build a MultiRepresentationMap object from a pandas DataFrame.
+
+    Wraps the creation of individual MultiValueMap objects and bundles them
+    into a MultiRepresentationMap container.
 
     Args:
         df (pd.DataFrame): DataFrame where each row represents a multi-mapping.
-        agency (str): Agency maintaining the multi-representation map.
-        id (Optional[str]): Identifier for the multi-representation map.
-        name (Optional[str]): Name of the multi-representation map.
-        source_cls (Optional[list[str]]): List of URNs or identifiers for source codelists or data types.
-        target_cls (Optional[list[str]]): List of URNs or identifiers for target codelists or data types.
-        version (str): Version of the multi-representation map. Defaults to "1.0".
-        description (Optional[str]): Optional description of the multi-representation map.
-        source_cols (list[str]): Column names for source values. Defaults to ["source"].
-        target_cols (list[str]): Column names for target values. Defaults to ["target"].
-        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+        agency (str): Agency maintaining the map. Defaults to "FAKE_AGENCY".
+        id (Optional[str]): Identifier for the map.
+        name (Optional[str]): Name of the map.
+        source_cls (Optional[list[str]]): URNs/IDs for source codelists/types.
+        target_cls (Optional[list[str]]): URNs/IDs for target codelists/types.
+        version (str): Version of the map. Defaults to "1.0".
+        description (Optional[str]): Description of the map.
+        source_cols (Optional[list[str]]): Source columns. Defaults to ["source"].
+        target_cols (Optional[list[str]]): Target columns. Defaults to ["target"].
+        valid_from_col (str): Validity start column. Defaults to "valid_from".
+        valid_to_col (str): Validity end column. Defaults to "valid_to".
 
     Returns:
-        MultiRepresentationMap: A MultiRepresentationMap object containing the mappings.
+        MultiRepresentationMap: The constructed mapping object.
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
-        TypeError: If source or target columns contain non-string values.
-
-    Examples:
-        >>> import pandas as pd
-        >>> data = {
-        ...     'source': ['BE', 'FR'],
-        ...     'target': ['BEL', 'FRA'],
-        ...     'valid_from': ['2020-01-01', None],
-        ...     'valid_to': ['2025-12-31', None]
-        ... }
-        >>> df = pd.DataFrame(data)
-        >>> mrm = build_multi_representation_map(df, id="MRM1", name="Country Multi Map", agency="ECB")
-        >>> isinstance(mrm, MultiRepresentationMap)
-        True
+        ValueError: If DataFrame is empty or columns are missing.
+        TypeError: If non-string data is found in source/target columns.
     """
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
 
-    # Validate required columns
-    required_cols = set(source_cols + target_cols)
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
+    # Handle mutable defaults
+    _source_cols = source_cols if source_cols is not None else ["source"]
+    _target_cols = target_cols if target_cols is not None else ["target"]
 
-    # Validate data types
-    for col in source_cols + target_cols:
-        if not all(isinstance(val, str) for val in df[col].dropna()):
+    # Validate required columns
+    required_cols = set(_source_cols + _target_cols)
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Validate data types (String check)
+    for col in _source_cols + _target_cols:
+        if not df[col].dropna().apply(lambda x: isinstance(x, str)).all():
             raise TypeError(f"Column '{col}' contains non-string values.")
 
-    # Build multi-value maps
+    # Build list of maps (Using the new target_cols signature)
     multi_value_maps = build_multi_value_map_list(
         df,
-        source_cols=source_cols,
-        target_cols=target_cols,
+        source_cols=_source_cols,
+        target_cols=_target_cols,  # Correct: passes list[str]
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col
     )
 
+    # Instantiate MultiRepresentationMap with CORRECT arguments
     return MultiRepresentationMap(
         id=id,
         name=name,
         agency=agency,
-        sources=source_cls,
-        targets=target_cls,
+        source=source_cls if source_cls else [], # Fix 1: 'source' not 'sources' + None handling
+        target=target_cls if target_cls else [], # Fix 2: 'target' not 'targets' + None handling
         maps=multi_value_maps,
         description=description,
         version=version
@@ -853,7 +739,7 @@ def _create_representation_definition(
     )
 
 @typechecked
-def extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
+def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
     """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
 
     Args:
@@ -905,26 +791,28 @@ def build_structure_map(
 ) -> StructureMap:
     """Converts a populated Excel Workbook into a pysdmx StructureMap object.
     
-    This function leverages `extract_mapping_definitions` to parse the Excel file
+    This function leverages `_extract_mapping_definitions` to parse the Excel file
     into intermediate definitions, and then converts those definitions into
     pysdmx objects.
     """
     # 1. Parse Excel to Intermediate Definitions
-    definitions = extract_mapping_definitions(workbook)
+    definitions = _extract_mapping_definitions(workbook)
     
     maps_list = []
     
     # 2. Convert Definitions to pysdmx Objects
     for definition in definitions:
         if definition.map_type == "fixed":
-            if definition.fixed_value is None:
+            if not definition.target or not definition.target.strip():
+                raise ValueError(f"Fixed value missing for {definition.target}")
+            if not definition.fixed_value or not definition.fixed_value.strip():
                 raise ValueError(f"Fixed value missing for {definition.target}")
             maps_list.append(
                 build_fixed_map(target=definition.target, value=definition.fixed_value)
             )
             
         elif definition.map_type == "implicit":
-            if definition.source is None:
+            if not definition.source or not definition.source.strip():
                 raise ValueError(f"Source missing for implicit map {definition.target}")
             maps_list.append(
                 build_implicit_component_map(source=definition.source, target=definition.target)

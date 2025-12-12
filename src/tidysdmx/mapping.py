@@ -154,7 +154,6 @@ def apply_component_map(
     Returns:
         pd.DataFrame: DataFrame with the target column added or overwritten.
     """
-
     if not isinstance(df, pd.DataFrame):
         raise TypeError("df must be a pandas DataFrame.")
     if not isinstance(component_map, px.model.map.ComponentMap):

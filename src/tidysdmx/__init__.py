@@ -16,6 +16,7 @@ from .tidysdmx import (
     standardize_indicator_id,
     standardize_data_for_upload,
     read_mapping,
+    standardize_output
 )
 from .qa_utils import qa_coerce_numeric, qa_remove_duplicates
 from .kedro import kd_read_mappings, kd_standardize_sdmx, kd_validate_dataset_local, kd_validate_datasets_local
@@ -28,7 +29,7 @@ from .utils import (
     build_excel_workbook,
     write_excel_mapping_template
 )
-from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps
+from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps, apply_multi_component_map
 from .validation import (
     validate_dataset_local, 
     validate_columns, 
@@ -38,8 +39,6 @@ from .validation import (
     validate_no_missing_values
     ) 
 from .structures import (
-    # infer_role_dimension, 
-    infer_schema, 
     build_fixed_map, 
     build_implicit_component_map, 
     build_date_pattern_map, 
@@ -104,5 +103,7 @@ __all__ = [
     "write_excel_mapping_template",
     "build_structure_map",
     "create_schema_from_table",
-    "build_structure_map_from_template_wb"
+    "build_structure_map_from_template_wb",
+    "apply_multi_component_map",
+    "standardize_output"
     ]

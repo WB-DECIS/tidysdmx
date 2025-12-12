@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pysdmx as px
+from typeguard import typechecked
 import json
 
 from .qa_utils import *
@@ -10,6 +11,9 @@ from pysdmx.io.format import StructureFormat # To extract json format
 from pysdmx.api import fmr # CLient to connect to FMR
 from urllib.parse import urljoin
 from typing import Literal
+from pysdmx.model import Schema
+
+from .utils import extract_component_ids
 
 def check_dict_keys(dict1, dict2):
 	"""Checks whether the sorted keys of two dictionaries are the same.
@@ -36,7 +40,6 @@ def check_dict_keys(dict1, dict2):
 		f"Keys only in the first dictionary: {diff1}\n"
 		f"Keys only in the second dictionary: {diff2}"
 	)
-
 
 def remove_extension(key):
 	"""Removes the file extension from a key by removing the last period and everything after it.
@@ -211,7 +214,6 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
 	except Exception:
 		raise ValueError("Invalid artefact_id format. Expected format: 'agency:id(version)'")
 	
-
 def standardize_sdmx(
 		data: pd.DataFrame, 
 		mapping: dict
@@ -465,6 +467,12 @@ def add_sdmx_reference_cols(df, dsd, structure="datastructure", action="I"):
 	Returns:
 		pd.DataFrame: The DataFrame with the added SDMX reference columns.
 	"""
+	warnings.warn(
+		"add_sdmx_reference_cols is deprecated and will be removed in a future release. "
+		"Please use _add_sdmx_reference_cols instead.",
+		FutureWarning,
+		stacklevel=2,
+	)
 	df["STRUCTURE"] = structure
 	df["STRUCTURE_ID"] = dsd
 	df["ACTION"] = action
@@ -547,7 +555,12 @@ def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
 	Returns:
 		pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values, added reference columns, and reordered columns.
 	"""
-
+	warnings.warn(
+		"standardize_data_for_upload is deprecated and will be removed in a future release. "
+		"Please use standardize_output instead.",
+		FutureWarning,
+		stacklevel=2,
+	)
 	# QUALITY ASSURANCE OPERATION
 	# WILL BE MOVED INTO THERE OWN NODES
 	df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
@@ -565,7 +578,160 @@ def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
 
 	# Reindex the DataFrame to the new column order
 	df = df[new_order]
+
+
 	return df
+
+
+@typechecked
+def standardize_output(
+    df: pd.DataFrame,
+    artefact_id: str,
+    schema: Schema,
+    action: Literal["I", "U", "D"] = "I"
+) -> pd.DataFrame:
+    """Standardize the output DataFrame by adding SDMX reference columns and reordering columns.
+
+    This function enriches the given DataFrame with SDMX-related metadata columns
+    (`STRUCTURE`, `STRUCTURE_ID`, `ACTION`) based on the provided artefact ID and schema.
+    It then ensures that these columns appear first in the DataFrame.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing SDMX data.
+        artefact_id (str): Unique identifier of the SDMX artefact (e.g., Dataflow ID).
+        schema (str): SDMX schema or structure type used to determine artefact type.
+        action (Literal["I", "U", "D"], optional): Action indicator for SDMX operations.
+            Defaults to "I". Allowed values:
+            - "I": Insert
+            - "U": Update
+            - "D": Delete
+
+    Returns:
+        pd.DataFrame: A new DataFrame with SDMX reference columns added and reordered.
+
+    Raises:
+        ValueError: If `df` is empty.
+        ValueError: If `artefact_id` or `schema` is empty.
+        TypeError: If `df` is not a pandas DataFrame.
+
+    Examples:
+        >>> import pandas as pd
+        >>> data = {"OBS_VALUE": [100, 200], "TIME_PERIOD": ["2020", "2021"]}
+        >>> df = pd.DataFrame(data)
+        >>> result = standardize_output(df, artefact_id="DF_EXAMPLE", schema="DataStructure")
+        >>> list(result.columns[:3])
+        ['STRUCTURE', 'STRUCTURE_ID', 'ACTION']
+    """
+    # Validate inputs
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input `df` must be a pandas DataFrame.")
+    if df.empty:
+        raise ValueError("Input DataFrame `df` cannot be empty.")
+    if not artefact_id or not schema:
+        raise ValueError("Parameters `artefact_id` and `schema` cannot be empty.")
+
+    # Extract artefact type from schema
+    artefact_type = _extract_artefact_type(schema)
+
+	# Remove columns that are not part of the schema's components
+    components_to_keep=extract_component_ids(schema)
+    df = df[[col for col in components_to_keep if col in df.columns]]
+
+    # Add SDMX reference columns
+    df = _add_sdmx_reference_cols(
+        df=df,
+        artefact_id=artefact_id,
+        artefact_type=artefact_type,
+        action=action
+    )
+
+    # Reorder columns: STRUCTURE, STRUCTURE_ID, ACTION should be first
+    cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+    new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
+    df = df[new_order]
+
+    return df
+
+
+@typechecked
+def _extract_artefact_type(schema: Schema) -> Literal["dataflow", "datastructure", "provisionagreement"]:
+    """Extract the SDMX artefact type from a pysdmx Schema instance.
+
+    Args:
+        schema (Schema): A pysdmx Schema object representing allowed content within a context.
+
+    Returns:
+        Literal["dataflow", "datastructure", "provisionagreement"]: The artefact type for which the schema applies.
+
+    Raises:
+        ValueError: If the schema context is not one of the expected values.
+
+    Examples:
+        >>> from pysdmx.model.dataflow import Schema, Components
+        >>> from datetime import datetime, timezone
+        >>> comps = Components([])
+        >>> s = Schema("dataflow", "ECB", "EXR", comps, "1.0", [], generated=datetime.now(timezone.utc))
+        >>> extract_artefact(s)
+        'dataflow'
+    """
+    valid_contexts = {"dataflow", "datastructure", "provisionagreement"}
+    if schema.context not in valid_contexts:
+        raise ValueError(f"Invalid schema context '{schema.context}'. Must be one of {valid_contexts}.")
+    return schema.context
+
+
+
+@typechecked
+def _add_sdmx_reference_cols(
+    df: pd.DataFrame,
+    artefact_id: str,
+    artefact_type: Literal["dataflow", "datastructure", "provisionagreement"],
+    action: Literal["I", "U", "D"] = "I"
+) -> pd.DataFrame:
+    """Add SDMX reference columns to a DataFrame based on artefact type and action.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        artefact_id (str): Identifier for the SDMX artefact.
+        artefact_type (Literal["dataflow", "datastructure", "provisionagreement"]): Artefact type.
+        action (Literal["I", "U", "D"], optional): Action type. Defaults to "I".
+
+    Returns:
+        pd.DataFrame: DataFrame with added SDMX reference columns.
+
+    Raises:
+        ValueError: If artefact_type or action is invalid, or artefact_id is empty.
+        TypeError: If df is not a pandas DataFrame.
+
+    Examples:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
+        >>> result = add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
+        >>> print(result.columns)
+        Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
+    """
+    # Work on a copy to avoid SettingWithCopyWarning
+    df = df.copy()
+
+    # Determine column names
+    if artefact_type == "dataflow":
+        structure_col = "DATAFLOW"
+        structure_id_col = "DATAFLOW_ID"
+    elif artefact_type == "datastructure":
+        structure_col = "STRUCTURE"
+        structure_id_col = "STRUCTURE_ID"
+    else:
+        structure_col = "PROVISIONAGREEMENT"
+        structure_id_col = "PROVISION_AGREEMENT_ID"
+
+    # Use .loc for assignment
+    df.loc[:, structure_col] = artefact_type
+    df.loc[:, structure_id_col] = artefact_id
+    df.loc[:, "ACTION"] = action
+
+    return df
+
+
 
 # region Funtions to handle mapping files
 def read_mapping(path):

@@ -1,5 +1,12 @@
 from typeguard import TypeCheckError
-from pysdmx.model import Component, Components, Schema
+from pysdmx.model import (
+    Schema, 
+    Component, 
+    Components, 
+    Codelist, 
+    Code, 
+    Role
+    )
 from openpyxl import load_workbook
 from pathlib import Path
 import pytest
@@ -15,6 +22,64 @@ from tidysdmx.utils import (
 )
 
 # Define fixtures
+# --- Fixtures using real pysdmx structures ---
+
+@pytest.fixture
+def sample_codelist() -> Codelist:
+    """Creates a real pysdmx Codelist object."""
+    return Codelist(
+        id="CL_TEST",
+        agency="AGENCY",
+        version="1.0",
+        name={"en": "Test Codelist"},
+        codes=[
+            Code(id="CODE_A", name={"en": "Code A"}),
+            Code(id="CODE_B", name={"en": "Code B"})
+        ]
+    )
+
+@pytest.fixture
+def sample_components(sample_codelist: Codelist) -> Components:
+    """Creates a real pysdmx Components collection containing components with various roles and constraints."""
+    # 1. Mandatory Dimension
+    # Note: Using explicit args based on typical pysdmx Component structure
+    comp_dim = Component(
+        id="DIM_MANDATORY",
+        required=True,
+        role=Role.DIMENSION
+    )
+
+    # 2. Coded Attribute (Optional)
+    # The 'local_codes' attribute links to a Codelist
+    comp_coded = Component(
+        id="CODED",
+        required=False,
+        role=Role.ATTRIBUTE,
+        local_codes=sample_codelist
+    )
+
+    # 3. Simple Measure (Optional, no codes)
+    comp_simple = Component(
+        id="SIMPLE",
+        required=False,
+        role=Role.MEASURE
+    )
+
+    # Wrap in the official Components container
+    return Components([comp_dim, comp_coded, comp_simple])
+
+@pytest.fixture
+def sample_schema(sample_components: Components) -> Schema:
+    """Creates a real pysdmx Schema object fully populated with components."""
+    return Schema(
+        id_="TEST_SCHEMA",
+        agency="AGENCY",
+        version="1.0",
+        name={"en": "Test Schema"},
+        context="dataflow",
+        components=sample_components
+    )
+
 @pytest.fixture
 def test_workbook_data() -> tuple[list[str], list[str]]:
     """Common test data for components and rep_maps."""
@@ -22,7 +87,28 @@ def test_workbook_data() -> tuple[list[str], list[str]]:
     rep_maps = ["C_REF_AREA", "C_UNIT", "C_REF_AREA"] # Duplicate to test deduplication
     return components, rep_maps
 
-# region Testing extract_validation_info()
+class TestExtractComponentIds: # noqa: D101
+    def test_extract_component_ids_empty(self):
+        """Raise ValueError if Schema has no components.
+
+        Uses a real Schema initialized with an empty Components list.
+        """
+        empty_schema = Schema(
+            id="EMPTY",
+            agency="TEST",
+            version="1.0",
+            context="dataflow",
+            components=Components([])
+        )
+
+        with pytest.raises(ValueError, match="Schema contains no components"):
+            extract_component_ids(empty_schema)
+
+    def test_extract_component_ids_invalid_type(self):
+        """Raise TypeCheckError if input is not a Schema."""
+        with pytest.raises(TypeCheckError):
+            extract_component_ids("Not a Schema Object")
+
 class TestExtractValidationInfo:
     @pytest.mark.parametrize("invalid_input", [
         None,
@@ -60,7 +146,6 @@ class TestExtractValidationInfo:
         assert all(isinstance(item, list) for key, item in result.items() 
                    if key != "codelist_ids")
         assert isinstance(result["codelist_ids"], dict)
-# endregion
 
 # region Testing get_codelist_ids()
 class TestGetCodelistIds:
