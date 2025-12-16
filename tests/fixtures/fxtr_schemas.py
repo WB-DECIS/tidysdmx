@@ -23,7 +23,7 @@ CACHE_DIR = Path(__file__).parent / "cassettes"
 CACHE_DIR.mkdir(exist_ok=True)
 
 @pytest.fixture(scope="session")
-def api_params():
+def api_params_schema():
     """Fixture for API parameters."""
     return {
         "fmr_url": "https://fmrqa.worldbank.org/FMR/sdmx/v2",
@@ -33,7 +33,7 @@ def api_params():
     }
 
 @pytest.fixture(scope="session")
-def ifpri_asti_schema(api_params):
+def ifpri_asti_schema(api_params_schema):
     """Fixture that records the FMR response for a DSD schema on first run and reuses it later."""
     cache_file = CACHE_DIR / "ifpri_asti_schema.pkl"
 
@@ -45,12 +45,12 @@ def ifpri_asti_schema(api_params):
 
     else:
         # Make real API call using pysdmx
-        client = px.api.fmr.RegistryClient(api_params["fmr_url"])
+        client = px.api.fmr.RegistryClient(api_params_schema["fmr_url"])
         schema = client.get_schema(
             "datastructure",
-            agency=api_params["raw_structure_agency"],
-            id=api_params["raw_structure_id"],
-            version=api_params["raw_structure_version"]
+            agency=api_params_schema["raw_structure_agency"],
+            id=api_params_schema["raw_structure_id"],
+            version=api_params_schema["raw_structure_version"]
         )
 
         # Cache the response

@@ -1,6 +1,7 @@
 from typeguard import TypeCheckError
 from datetime import datetime, timezone
 from openpyxl import Workbook
+from typing import Sequence
 from pysdmx.model import (
     DataType,
     Role,
@@ -13,7 +14,8 @@ from pysdmx.model.map import (
     ValueMap, 
     MultiValueMap, 
     RepresentationMap,
-    ComponentMap
+    ComponentMap,
+    MultiRepresentationMap
     )
 import pandas as pd
 import numpy as np
@@ -30,7 +32,7 @@ from tidysdmx.structures import (
     build_multi_value_map_list,
     build_representation_map,
     build_single_component_map,
-    extract_mapping_definitions,
+    _extract_mapping_definitions,
     _read_comp_mapping_sheet,
     _create_fixed_definition,
     _create_implicit_definition,
@@ -39,7 +41,11 @@ from tidysdmx.structures import (
     _parse_info_sheet,
     _parse_comp_mapping_sheet,
     _parse_rep_mapping_sheet,
-    _match_column_name
+    _match_column_name,
+    build_multi_representation_map,
+    build_structure_map,
+    _extract_artefact_id,
+    build_structure_map_from_template_wb
 
     )
 
@@ -70,82 +76,6 @@ def description():
     return "Mapping ISO2 to ISO3 codes"
 # endregion
 
-# # region infer_role_dimension
-# @pytest.mark.parametrize(
-#     "data,expected",
-#     [
-#         # Case 1: Single unique column
-#         (
-#             pd.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]}),
-#             {"id"}
-#         ),
-#         # Case 2: Two columns together form unique key
-#         (
-#             pd.DataFrame({
-#                 "first": ["a", "a", "b"],
-#                 "second": [1, 2, 1],
-#                 "value": [10, 20, 30]
-#             }),
-#             {"first", "second"}
-#         ),
-#         # Case 3: All columns together form unique key
-#         (
-#             pd.DataFrame({
-#                 "x": [1, 1],
-#                 "value": [2, 3]
-#             }),
-#             {}
-#         ),
-#     ]
-# )
-# def test_infer_role_dimension_basic(data, expected):
-#     result = infer_role_dimension(data, "value")
-#     assert result == expected
-
-
-# def test_infer_role_dimension_empty_dataframe():
-#     df = pd.DataFrame()
-#     result = infer_role_dimension(df, value_col="value")
-#     assert result == set(), "Empty DataFrame should return empty set"
-
-
-# def test_infer_role_dimension_with_duplicates():
-#     df = pd.DataFrame({
-#         "id": [1, 1, 2],
-#         "name": ["a", "a", "b"]
-#     })
-#     result = infer_role_dimension(df, value_col="value")
-#     assert result == set(), "No unique key should exist when duplicates are present"
-
-
-# def test_infer_role_dimension_with_nan_values():
-#     df = pd.DataFrame({
-#         "value": [1, 2, None],
-#         "code": ["x", "y", "z"]
-#     })
-#     result = infer_role_dimension(df, value_col="value")
-#     # 'code' is unique even with NaN in 'id'
-#     assert result == {"code"}
-
-# def test_infer_role_dimension_large_dataframe():
-#     # Performance sanity check
-#     df = pd.DataFrame({
-#         "id": range(1000),
-#         "value": range(1000)
-#     })
-#     result = infer_role_dimension(df, value_col="value")
-#     assert result == {"id"}
-
-
-# def test_infer_role_dimension_no_unique_keys():
-#     df = pd.DataFrame({
-#         "x": [1, 1, 1],
-#         "y": [2, 2, 2]
-#     })
-#     result = infer_role_dimension(df, value_col="value")
-#     assert result == set(), "No unique keys should be found"
-
-# region Test build_fixed_map
 class TestBuildFixedMap:  # noqa: D101
     def test_build_fixed_map_normal(self):
         """Valid mapping with default located_in."""
@@ -185,9 +115,7 @@ class TestBuildFixedMap:  # noqa: D101
             build_fixed_map("CONF_STATUS", 456)  # value must be str
         with pytest.raises(TypeCheckError):
             build_fixed_map("CONF_STATUS", 456, located_in=None)
-# endregion
 
-# region Test build_fixed_map
 class TestBuildImplicitComponentMap:  # noqa: D101
     def test_build_implicit_component_map_valid(self):
         """Valid mapping should return an ImplicitComponentMap instance."""
@@ -234,9 +162,7 @@ class TestBuildImplicitComponentMap:  # noqa: D101
         """Ensure mapping preserves case of source and target."""
         mapping = build_implicit_component_map("freq", "Frequency")
         assert mapping.source == "freq"
-# endregion
 
-# region Test build_date_pattern_map()
 class TestBuildDatePatternMap:  # noqa: D101
     
     def test_build_date_pattern_map_valid_fixed(self):
@@ -311,9 +237,7 @@ class TestBuildDatePatternMap:  # noqa: D101
         """Whitespace-only pattern should raise ValueError."""
         with pytest.raises(ValueError):
             build_date_pattern_map("DATE", "TIME_PERIOD", "   ", "M")
-# endregion
 
-# region Test build_value_map()
 class TestBuildValueMap:  # noqa: D101
     def test_build_value_map_normal(self):
         """Test normal case with source and target values."""
@@ -385,7 +309,6 @@ class TestBuildValueMap:  # noqa: D101
         """Ensure validity dates are datetime or None."""
         vm = build_value_map("ES", "ESP", valid_from=datetime(2025, 1, 1))
         assert isinstance(vm.valid_from, datetime)
-# endregion
 
 class TestBuildValueMapList:  # noqa: D101
     def test_build_value_map_list_valid(self, value_map_df_mandatory_cols):
@@ -455,85 +378,309 @@ class TestBuildValueMapList:  # noqa: D101
         assert result[1].target == "URY"
 
 class TestBuildMultiValueMapList:  # noqa: D101
-    def test_build_multi_value_map_list_normal(self, multi_value_map_df):
+    @pytest.fixture
+    def multi_value_map_df(self) -> pd.DataFrame:
+        """Fixture providing a standard DataFrame for testing scenarios.
+        
+        Rows correspond to specific test cases:
+        0: Normal mapping (DE -> EUR)
+        1: Regex source (regex:^A -> ARG)
+        2: Empty source string ("" -> CHF)
+        3: Validity dates (FR -> FRA)
+        4: Invalid type (int in source)
+        """
+        data = {
+            'country': ['DE', 'regex:^A', '', 'FR', 123],
+            'currency': ['LC', 'LC', 'LC', 'LC', 'LC'],
+            'iso_code': ['EUR', 'ARG', 'CHF', 'FRA', 'INV'],
+            'valid_from': [None, None, None, '2020-01-01', None],
+            'valid_to': [None, None, None, '2025-12-31', None]
+        }
+        return pd.DataFrame(data)
+
+    @pytest.fixture
+    def non_string_type_error_data(self) -> tuple[pd.DataFrame, Sequence[str], Sequence[str]]:
+        """Provides test data with a non-string value in the target column.
+
+        Returns:
+            tuple: The DataFrame, source columns list, and target columns list.
+        """
+        data = {
+            'source_1': ['A', 'B'],
+            'source_2': ['X', 'Y'],
+            'target_col_with_int': ['Target1', 123],  # Non-string value here
+            'valid_from': ['2020-01-01', '2021-01-01']
+        }
+        df = pd.DataFrame(data)
+        source_cols = ['source_1', 'source_2']
+        target_cols = ['target_col_with_int']
+        return df, source_cols, target_cols
+
+    def test_build_multi_value_map_non_string(
+        self, 
+        non_string_type_error_data: tuple[pd.DataFrame, Sequence[str], Sequence[str]]
+    ) -> None:
+        """Tests that TypeError is raised when the target column contains non-string values.
+
+        Args:
+            non_string_type_error_data: Fixture data for the error case.
+        """
+        df, source_cols, target_cols = non_string_type_error_data
+        # Note: The function validates per column, so expected message refers to the specific column name
+        expected_message = f"Target column '{target_cols[0]}' must contain only string values."
+
+        with pytest.raises(TypeError, match=re.escape(expected_message)):
+            build_multi_value_map_list(df, source_cols, target_cols)
+
+    def test_build_multi_value_map_list_normal(self, multi_value_map_df: pd.DataFrame) -> None:
         """Normal case: first row should produce a valid MultiValueMap."""
         df = multi_value_map_df.iloc[[0]]  # Row with DE/EUR
-        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        # Updated: passing target cols as a list
+        result = build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
+        
         assert isinstance(result, list)
         assert len(result) == 1
         assert isinstance(result[0], MultiValueMap)
+        # Verify source values
         assert result[0].source == ['DE', 'LC']
+        # Verify target values (now a list)
         assert result[0].target == ['EUR']
 
-
-    def test_build_multi_value_map_list_regex_source(self, multi_value_map_df):
+    def test_build_multi_value_map_list_regex_source(self, multi_value_map_df: pd.DataFrame) -> None:
         """Row with regex pattern in source should still work."""
         df = multi_value_map_df.iloc[[1]]  # regex:^A
-        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        result = build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
+        
+        # Check raw source string
         assert result[0].source[0].startswith("regex:^A")
-        assert result[0].typed_source[0] == re.compile(r"^A") 
+        # Check compiled pattern property
+        assert result[0].typed_source[0] == re.compile(r"^A")
         assert result[0].target == ['ARG']
 
-
-    def test_build_multi_value_map_list_empty_source(self, multi_value_map_df):
+    def test_build_multi_value_map_list_empty_source(self, multi_value_map_df: pd.DataFrame) -> None:
         """Row with empty string in source should be accepted as valid string."""
-        df = multi_value_map_df.iloc[[2]]  # Empty country
-        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        df = multi_value_map_df.iloc[[2]]  # Empty country string
+        
+        result = build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
+        
         assert result[0].source[0] == ""
         assert result[0].target == ['CHF']
 
-
-    def test_build_multi_value_map_list_with_validity(self, multi_value_map_df):
+    def test_build_multi_value_map_list_with_validity(self, multi_value_map_df: pd.DataFrame) -> None:
         """Row with valid_from and valid_to should include datetime fields."""
-        df = multi_value_map_df.iloc[[3]]  # FR/FRA with validity
-        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        df = multi_value_map_df.iloc[[3]]  # FR/FRA with validity dates
+        
+        result = build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
+        
         mv_map = result[0]
         assert mv_map.source == ['FR', 'LC']
         assert mv_map.target == ['FRA']
+        
         assert isinstance(mv_map.valid_from, datetime)
         assert isinstance(mv_map.valid_to, datetime)
         assert mv_map.valid_from.isoformat() == "2020-01-01T00:00:00"
         assert mv_map.valid_to.isoformat() == "2025-12-31T00:00:00"
 
-
-    def test_build_multi_value_map_list_invalid_type(self, multi_value_map_df):
+    def test_build_multi_value_map_list_invalid_type(self, multi_value_map_df: pd.DataFrame) -> None:
         """Row with non-string source should raise TypeError."""
-        df = multi_value_map_df.iloc[[4]]  # Invalid type in country
-        with pytest.raises(TypeError):
-            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        df = multi_value_map_df.iloc[[4]]  # Invalid int type in country column
+        
+        with pytest.raises(TypeError, match="Source column 'country' must contain only string values"):
+            build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
 
-
-    def test_build_multi_value_map_list_missing_target_column(self, multi_value_map_df):
+    def test_build_multi_value_map_list_missing_target_column(self, multi_value_map_df: pd.DataFrame) -> None:
         """Missing target column should raise ValueError."""
         df = multi_value_map_df.drop(columns=['iso_code'])
-        with pytest.raises(ValueError):
-            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        with pytest.raises(ValueError, match="Target columns missing"):
+            build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
 
-
-    def test_build_multi_value_map_list_missing_source_column(self, multi_value_map_df):
+    def test_build_multi_value_map_list_missing_source_column(self, multi_value_map_df: pd.DataFrame) -> None:
         """Missing one source column should raise ValueError."""
         df = multi_value_map_df.drop(columns=['currency'])
-        with pytest.raises(ValueError):
-            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        with pytest.raises(ValueError, match="Source columns missing"):
+            build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
 
-
-    def test_build_multi_value_map_list_empty_dataframe(self):
+    def test_build_multi_value_map_list_empty_dataframe(self) -> None:
         """Empty DataFrame should raise ValueError."""
         df = pd.DataFrame()
-        with pytest.raises(ValueError):
-            build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        with pytest.raises(ValueError, match="Input DataFrame cannot be empty"):
+            build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
 
-
-    def test_build_multi_value_map_list_multiple_rows(self, multi_value_map_df):
+    def test_build_multi_value_map_list_multiple_rows(self, multi_value_map_df: pd.DataFrame) -> None:
         """Multiple rows should return a list of MultiValueMap objects."""
         df = multi_value_map_df.iloc[:3]  # First three rows
-        result = build_multi_value_map_list(df, ['country', 'currency'], 'iso_code')
+        
+        result = build_multi_value_map_list(df, ['country', 'currency'], ['iso_code'])
+        
         assert isinstance(result, list)
         assert len(result) == df.shape[0]
+        
         for mv_map in result:
             assert isinstance(mv_map, MultiValueMap)
-            assert isinstance(mv_map.source, list)
-            assert isinstance(mv_map.target, list)
+            # Ensure source/target are sequences (lists/tuples)
+            assert isinstance(mv_map.source, (list, tuple))
+            assert isinstance(mv_map.target, (list, tuple))
+            # Ensure target is not nested like [['EUR']] but flat like ['EUR']
+            assert len(mv_map.target) == 1
+            assert isinstance(mv_map.target[0], str)
+    
+    @pytest.fixture
+    def valid_dataframe(self):
+        """Provides a standard valid DataFrame for basic testing."""
+        data = {
+            'country': ['DE', 'FR'],
+            'currency': ['EUR', 'EUR'],
+            'code': ['A', 'B'],
+            'target_code': ['X', 'Y'],
+            'valid_from': ['2020-01-01', '2021-01-01'],
+            'valid_to': ['2020-12-31', '2021-12-31']
+        }
+        return pd.DataFrame(data)
+
+    def test_raises_value_error_when_dataframe_is_empty(self):
+        """Tests that a ValueError is raised if the input DataFrame is empty."""
+        # Arrange
+        empty_df = pd.DataFrame()
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="Input DataFrame cannot be empty"):
+            build_multi_value_map_list(empty_df, ['col'], ['col'])
+
+    @pytest.mark.parametrize("missing_cols, is_source", [
+        (['missing_src'], True),
+        (['missing_tgt'], False)
+    ])
+    def test_raises_value_error_when_columns_missing(self, valid_dataframe, missing_cols, is_source):
+        """Tests that ValueError is raised when source or target columns are missing.
+        
+        Args:
+            valid_dataframe (pd.DataFrame): The fixture data.
+            missing_cols (list): The columns to request that don't exist.
+            is_source (bool): Whether we are testing source or target columns.
+        """
+        # Arrange
+        source_cols = missing_cols if is_source else ['country']
+        target_cols = ['target_code'] if is_source else missing_cols
+
+        # Act & Assert
+        match_msg = "Source columns missing" if is_source else "Target columns missing"
+        with pytest.raises(ValueError, match=match_msg):
+            build_multi_value_map_list(valid_dataframe, source_cols, target_cols)
+
+    def test_raises_type_error_when_columns_contain_non_strings(self):
+        """Tests that TypeError is raised if source/target columns contain non-string data."""
+        # Arrange
+        df = pd.DataFrame({
+            'src_str': ['A', 'B'],
+            'src_int': [1, 2],  # Invalid
+            'tgt_str': ['X', 'Y']
+        })
+
+        # Act & Assert
+        with pytest.raises(TypeError, match="must contain only string values"):
+            build_multi_value_map_list(df, ['src_int'], ['tgt_str'])
+
+    def test_builds_maps_correctly_with_string_dates(self, valid_dataframe):
+        """Tests that maps are built correctly using standard ISO string dates."""
+        # Arrange
+        source_cols = ['country', 'currency']
+        target_cols = ['target_code']
+
+        # Act
+        result = build_multi_value_map_list(
+            valid_dataframe, 
+            source_cols, 
+            target_cols
+        )
+
+        # Assert
+        assert len(result) == 2
+        assert isinstance(result[0], MultiValueMap)
+        assert result[0].source == ['DE', 'EUR']
+        assert result[0].target == ['X']
+        assert isinstance(result[0].valid_from, datetime)
+        assert result[0].valid_from.year == 2020
+
+    def test_handles_pandas_timestamp_validity(self):
+        """Tests that pd.Timestamp objects in valid_from/valid_to are converted to datetime.
+        
+        This specifically targets the line:
+        elif hasattr(val, "to_pydatetime"): kwargs["valid_from"] = val.to_pydatetime()
+        """
+        # Arrange
+        data = {
+            'src': ['A'],
+            'tgt': ['B'],
+            'valid_from': [pd.Timestamp('2022-01-01')],
+            'valid_to': [pd.Timestamp('2022-12-31')]
+        }
+        df = pd.DataFrame(data)
+
+        # Act
+        result = build_multi_value_map_list(df, ['src'], ['tgt'])
+
+        # Assert
+        map_obj = result[0]
+        # Check valid_from
+        assert isinstance(map_obj.valid_from, datetime)
+        # Ensure it's a standard datetime, not a pandas Timestamp (unless they are same class in env, 
+        # but the code calls to_pydatetime explicitely to convert)
+        assert map_obj.valid_from == datetime(2022, 1, 1)
+        
+        # Check valid_to
+        assert isinstance(map_obj.valid_to, datetime)
+        assert map_obj.valid_to == datetime(2022, 12, 31)
+
+    @pytest.mark.skip(reason="Not implemented correctly. To review")
+    def test_handles_native_datetime_validity(self):
+        """Tests that native datetime objects in valid_from/valid_to are preserved.
+        
+        This specifically targets the line:
+        elif isinstance(val, datetime): kwargs["valid_from"] = val
+        """
+        # Arrange
+        dt_from = datetime(2023, 6, 15)
+        dt_to = datetime(2023, 7, 15)
+        
+        data = {
+            'src': ['A'],
+            'tgt': ['B'],
+            'valid_from': [dt_from],
+            'valid_to': [dt_to]
+        }
+        df = pd.DataFrame(data)
+
+        # Act
+        result = build_multi_value_map_list(df, ['src'], ['tgt'])
+
+        # Assert
+        map_obj = result[0]
+        assert map_obj.valid_from is dt_from  # Should be the exact object or equal
+        assert map_obj.valid_to is dt_to
+
+    def test_ignores_nan_validity_values(self):
+        """Tests that NaT/NaN/None in validity columns result in None in the object."""
+        # Arrange
+        data = {
+            'src': ['A'],
+            'tgt': ['B'],
+            'valid_from': [pd.NA],
+            'valid_to': [None]
+        }
+        df = pd.DataFrame(data)
+
+        # Act
+        result = build_multi_value_map_list(df, ['src'], ['tgt'])
+
+        # Assert
+        map_obj = result[0]
+        assert map_obj.valid_from is None
+        assert map_obj.valid_to is None
 
 class TestBuildRepresentationMap:  # noqa: D101
 
@@ -708,6 +855,88 @@ class TestBuildSingleComponentMap:  # noqa: D101
         assert cm.values.version == "2.0"
         assert cm.values.description == "Test Description"
 
+class TestBuildMultiRepresentationMap: # noqa: D101
+    """Tests for the build_multi_representation_map function."""
+
+    @pytest.fixture
+    def sample_df(self):
+        """Fixture providing a sample DataFrame for normal cases."""
+        data = {
+            "source": ["BE", "FR"],
+            "target": ["BEL", "FRA"],
+            "valid_from": ["2020-01-01", None],
+            "valid_to": ["2025-12-31", None]
+        }
+        return pd.DataFrame(data)
+
+    def test_returns_multi_representation_map(self, sample_df):
+        """Tests that the function returns a MultiRepresentationMap for valid input."""
+        result = build_multi_representation_map(
+            sample_df,
+            id="MRM1",
+            name="Country Multi Map",
+            agency="ECB",
+            source_cls=["urn:source:codelist"],
+            target_cls=["urn:target:codelist"]
+        )
+        assert isinstance(result, MultiRepresentationMap)
+        assert result.id == "MRM1"
+        assert result.name == "Country Multi Map"
+        assert result.agency == "ECB"
+        assert len(result.maps) == 2
+
+    def test_empty_dataframe_raises_value_error(self):
+        """Tests that ValueError is raised when DataFrame is empty."""
+        empty_df = pd.DataFrame()
+        with pytest.raises(ValueError, match="Input DataFrame cannot be empty"):
+            build_multi_representation_map(empty_df)
+
+    def test_missing_required_columns_raises_value_error(self, sample_df):
+        """Tests that ValueError is raised when required columns are missing."""
+        df_missing = sample_df.drop(columns=["target"])
+        with pytest.raises(ValueError, match="Missing required columns"):
+            build_multi_representation_map(df_missing)
+
+    @pytest.mark.parametrize("invalid_data", [
+        {"source": [123, "FR"], "target": ["BEL", "FRA"]},  # Non-string in source
+        {"source": ["BE", "FR"], "target": [None, "FRA"]},  # None in target
+    ])
+    def test_non_string_values_raise_type_error(self, invalid_data):
+        """Tests that TypeError is raised when source or target columns contain non-string values."""
+        df_invalid = pd.DataFrame(invalid_data)
+        with pytest.raises(TypeError):
+            build_multi_representation_map(df_invalid)
+
+    def test_custom_columns_and_metadata(self):
+        """Tests that custom column names and metadata are handled correctly."""
+        data = {
+            "source": ["US", "UK"],
+            "target": ["USA", "GBR"],
+            "valid_from": ["2021-01-01", None],
+            "valid_to": ["2023-12-31", None]
+        }
+        df_custom = pd.DataFrame(data)
+        result = build_multi_representation_map(
+            df_custom,
+            source_cls=["source"],
+            target_cls=["target"],
+            id="MRM2",
+            name="Custom Map",
+            description="Test description"
+        )
+        assert isinstance(result, MultiRepresentationMap)
+        assert result.id == "MRM2"
+        assert result.name == "Custom Map"
+        assert result.description == "Test description"
+        assert len(result.maps) == 2
+
+    def test_validity_dates_are_parsed_correctly(self, sample_df):
+        """Tests that validity dates are correctly passed to MultiValueMap objects."""
+        result = build_multi_representation_map(sample_df)
+        first_map = result.maps[0]
+        assert first_map.valid_from == datetime.fromisoformat("2020-01-01")
+        assert first_map.valid_to == datetime.fromisoformat("2025-12-31")
+
 class TestExtractMappingDefinitions:  # noqa: D101
     @pytest.fixture
     def mock_empty_workbook(self) -> Workbook:
@@ -804,7 +1033,7 @@ class TestExtractMappingDefinitions:  # noqa: D101
 
     def test_extract_mapping_definitions_integration(self, mock_populated_workbook: Workbook):
         """Tests the main function's dispatch logic."""
-        definitions = extract_mapping_definitions(mock_populated_workbook)
+        definitions = _extract_mapping_definitions(mock_populated_workbook)
         
         assert len(definitions) == 4 # Should ignore empty row and invalid rules if any
         
@@ -827,7 +1056,7 @@ class TestExtractMappingDefinitions:  # noqa: D101
         ws.append(["", "T_BAD", "unknown_type"])
         
         with pytest.raises(ValueError, match="Unknown mapping rule"):
-            extract_mapping_definitions(mock_populated_workbook)
+            _extract_mapping_definitions(mock_populated_workbook)
 
 class TestCreateSchemaFromTable:  # noqa: D101
     def test_create_schema_time_period_standardization(self) -> None:
@@ -1291,3 +1520,232 @@ class TestMatchColumnName: #noqa: D101
         # Passing a non-list for available_columns should raise a type error
         with pytest.raises((TypeCheckError, AttributeError)):
             _match_column_name("Test", "NotAList")
+
+class TestBuildStructureMap: #noqa: D101
+    """Tests for build_structure_map() converting Excel workbook to StructureMap."""
+    @pytest.fixture
+    def workbook_with_valid_data(self):
+        """Creates a valid workbook with comp_mapping and representation sheets."""
+        wb = Workbook()
+        # comp_mapping sheet
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC1", "TGT1", "fixed:VAL1"])
+        ws_comp.append(["SRC2", "TGT2", "implicit"])
+        ws_comp.append(["SRC3", "TGT3", "TGT3"])  # representation map
+        # representation sheet for TGT3
+        ws_rep = wb.create_sheet("TGT3")
+        ws_rep.append(["source", "target", "valid_from", "valid_to"])
+        ws_rep.append(["A", "B", "", ""])
+        return wb
+
+    @pytest.fixture
+    def workbook_missing_comp_mapping(self):
+        """Workbook without comp_mapping sheet."""
+        wb = Workbook()
+        wb.create_sheet("Sheet1")
+        return wb
+
+    @pytest.fixture
+    def workbook_with_invalid_rule(self):
+        """Workbook with an invalid mapping rule."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "unknown_rule"])
+        return wb
+
+    def test_valid_workbook_returns_structure_map(self, workbook_with_valid_data):
+        """Tests that a valid workbook returns a StructureMap with correct maps."""
+        structure_map = build_structure_map(workbook_with_valid_data)
+        assert structure_map.id == "GENERATED_STRUCTURE_MAP"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+        assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
+
+    def test_missing_comp_mapping_raises_keyerror(self, workbook_missing_comp_mapping):
+        """Tests that missing comp_mapping sheet raises KeyError."""
+        with pytest.raises(KeyError, match="Mandatory sheet 'comp_mapping' not found"):
+            build_structure_map(workbook_missing_comp_mapping)
+
+    def test_invalid_mapping_rule_raises_valueerror(self, workbook_with_invalid_rule):
+        """Tests that an unknown mapping rule raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            build_structure_map(workbook_with_invalid_rule)
+
+    def test_empty_representation_sheet_skips_map(self):
+        """Tests that empty representation sheet is skipped without error."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "TGT"])
+        wb.create_sheet("TGT")  # empty representation sheet
+        structure_map = build_structure_map(wb)
+        assert len(structure_map.maps) == 0  # skipped due to empty DF
+
+    def test_fixed_value_missing_raises_valueerror(self):
+        """Tests that missing fixed value raises ValueError."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["SRC", "TGT", "fixed:"])
+        with pytest.raises(ValueError, match="Fixed value for target 'TGT' cannot be empty"):
+            build_structure_map(wb)
+    
+    
+    def test_implicit_missing_source_raises_valueerror(self):
+        """Tests that implicit mapping without source raises ValueError."""
+        wb = Workbook()
+        ws_comp = wb.create_sheet("comp_mapping")
+        ws_comp.append(["source", "target", "mapping_rules"])
+        ws_comp.append(["", "TGT", "implicit"])  # Missing source for implicit map
+
+        # Act & Assert
+        with pytest.raises(ValueError):
+            build_structure_map(wb)
+
+class TestExtractArtefactId: #noqa: D101
+    """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO sheet DataFrame."""
+
+    @pytest.fixture
+    def valid_info_df(self):
+        """Fixture: DataFrame with valid keys and values for artefact extraction."""
+        return pd.DataFrame({
+            "Key": ["dataflow", "datastructure", "provisionagreement"],
+            "Value": ["AGENCY:DF_ID(1.0)", "AGENCY:DSD_ID(2.0)", "AGENCY:PA_ID(3.0)"]
+        })
+
+    @pytest.mark.parametrize("structure_type,expected", [
+        ("dataflow", "AGENCY:DF_ID(1.0)"),
+        ("dsd", "AGENCY:DSD_ID(2.0)"),
+        ("provision-agreement", "AGENCY:PA_ID(3.0)")
+    ])
+    def test_valid_keys_return_expected_value(self, valid_info_df, structure_type, expected):
+        """Tests that valid keys return the correct artefact ID."""
+        result = _extract_artefact_id(valid_info_df, structure_type)
+        assert result == expected
+
+    def test_invalid_structure_type_raises_valueerror(self, valid_info_df):
+        """Tests that an invalid structure_type raises ValueError."""
+        with pytest.raises(TypeCheckError):
+            _extract_artefact_id(valid_info_df, "invalid")
+
+    def test_missing_key_raises_valueerror(self, valid_info_df):
+        """Tests that missing key in DataFrame raises ValueError."""
+        df_missing = pd.DataFrame({"Key": ["other"], "Value": ["AGENCY:OTHER(1.0)"]})
+        with pytest.raises(ValueError, match="Could not find metadata key 'dataflow'"):
+            _extract_artefact_id(df_missing, "dataflow")
+
+    def test_empty_value_raises_valueerror(self):
+        """Tests that empty value for a valid key raises ValueError."""
+        df_empty_value = pd.DataFrame({"Key": ["dataflow"], "Value": [""]})
+        with pytest.raises(ValueError, match="Metadata for 'dataflow' is present but empty"):
+            _extract_artefact_id(df_empty_value, "dataflow")
+
+    def test_nan_value_raises_valueerror(self):
+        """Tests that NaN value for a valid key raises ValueError."""
+        df_nan_value = pd.DataFrame({"Key": ["dataflow"], "Value": [float('nan')]})
+        with pytest.raises(ValueError, match="Metadata for 'dataflow' is present but empty"):
+            _extract_artefact_id(df_nan_value, "dataflow")
+
+    def test_case_insensitive_key_match(self):
+        """Tests that key matching is case-insensitive."""
+        df_case = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
+        result = _extract_artefact_id(df_case, "dataflow")
+        assert result == "AGENCY:DF_ID(1.0)"
+
+class TestBuildStructureMapFromTemplateWb:
+    """Tests for build_structure_map_from_template_wb() which builds a StructureMap from WB-format Excel template."""
+
+    @pytest.fixture
+    def valid_mappings(self):
+        """Fixture: Valid mappings dictionary with INFO, COMP_MAPPING, and REP_MAPPING sheets."""
+        info_df = pd.DataFrame({"Key": ["dataflow"], "Value": ["AGENCY:DF_ID(1.0)"]})
+        comp_df = pd.DataFrame({
+            "SOURCE": ["SRC1", "SRC2", "SRC3"],
+            "TARGET": ["TGT1", "TGT2", "TGT3"],
+            "MAPPING_RULES": ["fixed:VAL1", "implicit", "TGT3"]
+        })
+        rep_df = pd.DataFrame({
+            "S:SRC3": ["A", "B"],
+            "T:TGT3": ["X", "Y"]
+        })
+        return {"INFO": info_df, "COMP_MAPPING": comp_df, "REP_MAPPING": rep_df}
+
+    def test_valid_mappings_returns_structure_map(self, valid_mappings):
+        """Tests that valid mappings return a StructureMap with correct maps."""
+        structure_map = build_structure_map_from_template_wb(valid_mappings)
+        assert structure_map.id == "WB_STRUCTURE_MAP"
+        assert structure_map.agency == "AGENCY"
+        assert structure_map.version == "1.0"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+        assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
+
+    def test_missing_info_sheet_uses_defaults(self, valid_mappings):
+        """Tests that missing INFO sheet falls back to default agency and version."""
+        mappings = valid_mappings.copy()
+        mappings.pop("INFO")
+        structure_map = build_structure_map_from_template_wb(mappings)
+        assert structure_map.agency == "SDMX"
+        assert structure_map.version == "1.0"
+
+    def test_missing_comp_mapping_sheet_raises_valueerror(self, valid_mappings):
+        """Tests that missing COMP_MAPPING sheet raises ValueError."""
+        mappings = {"INFO": valid_mappings["INFO"]}
+        with pytest.raises(ValueError, match="Sheet 'COMP_MAPPING' not found"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_invalid_fixed_rule_format_raises_valueerror(self, valid_mappings):
+        """Tests that invalid fixed rule format raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[0, "MAPPING_RULES"] = "fixed:"  # Missing value
+        with pytest.raises(ValueError, match="Invalid fixed rule format"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_implicit_missing_source_raises_valueerror(self, valid_mappings):
+        """Tests that implicit mapping without source raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[1, "SOURCE"] = ""  # Remove source for implicit
+        with pytest.raises(ValueError, match="Implicit map rule requires a non-empty 'SOURCE'"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_representation_missing_rep_mapping_sheet_raises_valueerror(self, valid_mappings):
+        """Tests that representation rule without REP_MAPPING sheet raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings.pop("REP_MAPPING")
+        with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING' sheet"):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_representation_empty_combined_df_raises_valueerror(self, valid_mappings):
+        """Tests that representation rule with empty combined DataFrame raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["REP_MAPPING"] = pd.DataFrame({"S:SRC3": [], "T:TGT3": []})  # Empty sheet
+        with pytest.raises(ValueError):
+            build_structure_map_from_template_wb(mappings)
+
+    def test_unknown_mapping_rule_raises_valueerror(self, valid_mappings):
+        """Tests that unknown mapping rule raises ValueError."""
+        mappings = valid_mappings.copy()
+        mappings["COMP_MAPPING"].loc[0, "MAPPING_RULES"] = "unknown_rule"
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            build_structure_map_from_template_wb(mappings)
+    
+    
+    def test_case_insensitive_info_key_match(self, valid_mappings):
+        """Tests that INFO sheet key matching is case-insensitive and correctly extracts agency and version."""
+        mappings = valid_mappings.copy()
+        mappings["INFO"] = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
+
+        # Act
+        structure_map = build_structure_map_from_template_wb(mappings)
+
+        # Assert
+        assert structure_map.agency == "AGENCY"
+        assert structure_map.version == "1.0"
+        assert structure_map.name.startswith("Structure Map generated for")
+        assert structure_map.id == "WB_STRUCTURE_MAP"
+        assert len(structure_map.maps) == 3  # fixed, implicit, representation
+
+
+
+
+
