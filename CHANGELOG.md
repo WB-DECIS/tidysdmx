@@ -1,6 +1,17 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.6.0 (16/12/2025)
+### Added
+
+- Added more tests
+- Added `standardize_output` function
+
+### Changed
+
+- Cleaned up some functions and tests, no impacts for the final user.
+
+
 ## v0.5.0 (8/12/2025)
 ### Added
 
