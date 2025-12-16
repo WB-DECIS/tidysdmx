@@ -148,3 +148,6 @@ dmypy.json
 
 # PEM files
 *.pem
+
+# Custom
+notebooks/TMP/

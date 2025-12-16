@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: nbstripout-local
+        name: Strip Jupyter notebook outputs (local)
+        entry: python -m nbstripout
+        language: system
+        files: "\\.ipynb$"
+        # Optional: keep some metadata; uncomment and adjust as needed
+        # args: ["--keep-count", "--keep-id"]
