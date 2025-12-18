@@ -1,6 +1,12 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.7.0 (16/12/2025)
+### Added
+
+- Added `parse_mapping_template_wb` function
+
+
 ## v0.6.0 (16/12/2025)
 ### Added
 
