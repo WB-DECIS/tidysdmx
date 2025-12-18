@@ -10,6 +10,7 @@ from pysdmx.model import (
 from openpyxl import load_workbook
 from pathlib import Path
 import pytest
+import pandas as pd
 import os
 # Import tidysdmx functions
 from tidysdmx.utils import (
@@ -18,11 +19,27 @@ from tidysdmx.utils import (
     extract_component_ids, 
     create_mapping_rules,
     build_excel_workbook,
-    write_excel_mapping_template
+    write_excel_mapping_template,
+    parse_mapping_template_wb
 )
 
-# Define fixtures
-# --- Fixtures using real pysdmx structures ---
+# region Fixtures
+
+@pytest.fixture
+def mapping_template_path() -> Path:
+    """Returns path to Excel mapping template file stored under `tests/fixtures/data`."""
+    file_path = Path(__file__).parent / "fixtures" / "data" / "wb_mapping_template.xlsx"
+    if not file_path.exists():
+        raise FileNotFoundError(f"Expected fixture file not found: {file_path}")
+    return file_path
+
+@pytest.fixture
+def invalid_mapping_template_path() -> Path:
+    """Returns path to Excel invalid mapping template file stored under `tests/fixtures/data`."""
+    file_path = Path(__file__).parent / "fixtures" / "data" / "wb_mapping_template_invalid.txt"
+    if not file_path.exists():
+        raise FileNotFoundError(f"Expected fixture file not found: {file_path}")
+    return file_path
 
 @pytest.fixture
 def sample_codelist() -> Codelist:
@@ -86,6 +103,8 @@ def test_workbook_data() -> tuple[list[str], list[str]]:
     components = ["C_FREQ", "C_REF_AREA", "C_UNIT", "C_OBS_VALUE"]
     rep_maps = ["C_REF_AREA", "C_UNIT", "C_REF_AREA"] # Duplicate to test deduplication
     return components, rep_maps
+
+# endregion
 
 class TestExtractComponentIds: # noqa: D101
     def test_extract_component_ids_empty(self):
@@ -407,3 +426,21 @@ class TestWriteExcelMappingTemplate:  # noqa: D101
         # Row 3, Column C should be the 'C_UNIT' hyperlink
         cell_value = main_sheet["C3"].value 
         assert cell_value == '=HYPERLINK("#C_REF_AREA!A1","C_REF_AREA")'
+
+class TestParseMappingTemplateWb:  # noqa: D101
+    def test_parse_mapping_template_wb_valid(self, mapping_template_path):
+        result = parse_mapping_template_wb(mapping_template_path)
+        assert isinstance(result, dict)
+        assert "REP_MAPPING" in result and "COMP_MAPPING" in result
+        assert isinstance(result["REP_MAPPING"], pd.DataFrame)
+        assert isinstance(result["COMP_MAPPING"], pd.DataFrame)
+
+    def test_parse_mapping_template_wb_file_not_found(self):
+        """Test that FileNotFoundError is raised for non-existent file."""
+        with pytest.raises(FileNotFoundError):
+            parse_mapping_template_wb("non_existent.xlsx")
+
+    def test_parse_mapping_template_wb_invalid_file_type(self, invalid_mapping_template_path):
+        """Test that ValueError is raised for invalid file type."""
+        with pytest.raises(ValueError):
+            parse_mapping_template_wb(invalid_mapping_template_path)

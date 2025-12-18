@@ -151,3 +151,9 @@ dmypy.json
 
 # Custom
 notebooks/TMP/
+# Ignore everything under scripts/
+scripts/*
+#But keep the scripts directory itself
+!scripts/ 
+# And keep this specific debug script
+!scripts/debug-config-checks.py

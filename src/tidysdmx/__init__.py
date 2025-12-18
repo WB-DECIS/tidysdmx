@@ -27,7 +27,8 @@ from .utils import (
     extract_component_ids, 
     create_mapping_rules,
     build_excel_workbook,
-    write_excel_mapping_template
+    write_excel_mapping_template,
+    parse_mapping_template_wb
 )
 from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps, apply_multi_component_map
 from .validation import (
@@ -105,5 +106,6 @@ __all__ = [
     "create_schema_from_table",
     "build_structure_map_from_template_wb",
     "apply_multi_component_map",
-    "standardize_output"
+    "standardize_output",
+    "parse_mapping_template_wb"
     ]
