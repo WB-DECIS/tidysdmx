@@ -1,0 +1,67 @@
+{
+    // VS Code debug configuration schema version
+    "version": "0.2.0",
+
+    // List of debug configurations available in the Run & Debug panel
+    "configurations": [
+
+        {
+            // Human-readable name shown in the debug dropdown
+            "name": "Debug Script",
+
+            // Tells VS Code to use the Python debugger (debugpy)
+            "type": "python",
+
+            // "launch" means VS Code starts a new Python process
+            "request": "launch",
+
+            // The Python file currently open in the editor
+            // This is why you can press F5 on any script
+            "program": "${file}",
+
+            // Working directory for the Python process
+            // CRITICAL for package development and relative imports
+            "cwd": "${workspaceFolder}",
+
+            // Where stdin/stdout appear
+            // integratedTerminal = VS Code terminal with environment activation
+            "console": "integratedTerminal"
+        },
+
+        {
+            // Debug a Python *module* using: python -m your_package
+            "name": "Debug Module",
+
+            "type": "python",
+            "request": "launch",
+
+            // Equivalent to running:
+            // python -m your_package
+            "module": "tidysdmx",
+
+            "console": "integratedTerminal"
+        },
+
+        {
+            // Attach VS Code to an already running Python process
+            "name": "Attach to debugpy (port 5678)",
+
+            "type": "python",
+
+            // "attach" means VS Code does NOT start Python
+            // It connects to a process that already called debugpy.listen()
+            "request": "attach",
+
+            // Where the debugpy server is listening
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+
+            // If true, VS Code steps over library code by default
+            // Good for focusing on your own package
+            "justMyCode": true
+        }
+    ]
+}
+

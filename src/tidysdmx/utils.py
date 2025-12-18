@@ -1,10 +1,9 @@
-from typing import Dict, List, Optional, Sequence, AbstractSet, Literal, Any
+from typing import Dict, List, Sequence, AbstractSet, Union
 from typeguard import typechecked
 from pathlib import Path
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from pathlib import Path
-from datetime import datetime
 from dateutil.parser import parse as parse_date
 import pysdmx as px
 import pandas as pd
@@ -280,3 +279,40 @@ def build_excel_workbook(
 
     return wb
 
+
+@typechecked
+def parse_mapping_template_wb(path: Union[str, Path]) -> dict[str, pd.DataFrame]:
+    """Read an Excel workbook containing mapping templates and return all sheets as DataFrames.
+
+    Args:
+        path (Union[str, Path]): Path to the Excel file.
+
+    Returns:
+        dict[str, pd.DataFrame]: A dictionary where keys are sheet names and values are DataFrames.
+
+    Raises:
+        FileNotFoundError: If the provided file path does not exist.
+        ValueError: If the file is not an Excel file (.xlsx or .xls).
+        RuntimeError: If reading the Excel file fails for any reason.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> result = parse_mapping_template_wb(Path("mapping_template.xlsx"))
+        >>> isinstance(result, dict)
+        True
+        >>> all(isinstance(df, pd.DataFrame) for df in result.values())
+        True
+    """
+    # Validate file path
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    if path.suffix.lower() not in [".xlsx", ".xls"]:
+        raise ValueError(f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx or .xls).")
+
+    try:
+        # Read all sheets into a dictionary of DataFrames
+        workbook = pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
+        return workbook
+    except Exception as e:
+        raise RuntimeError(f"Failed to read Excel file: {e}")

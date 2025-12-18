@@ -1507,7 +1507,7 @@ def build_structure_map_from_template_wb(
         rule = str(row["MAPPING_RULES"]).strip()
 
         # Skip empty rules or pandas artifacts
-        if not target_id or not rule or rule.lower() == "nan":
+        if not target_id or not rule or rule.lower() == "nan" or rule.lower() == '<na>':
             continue
 
         try:
