@@ -45,6 +45,7 @@ from tidysdmx.structures import (
     build_multi_representation_map,
     build_structure_map,
     _extract_artefact_id,
+    _validate_mappings,
     build_structure_map_from_template_wb
 
     )
@@ -1680,18 +1681,10 @@ class TestBuildStructureMapFromTemplateWb:
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
         assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
 
-    def test_missing_info_sheet_uses_defaults(self, valid_mappings):
-        """Tests that missing INFO sheet falls back to default agency and version."""
-        mappings = valid_mappings.copy()
-        mappings.pop("INFO")
-        structure_map = build_structure_map_from_template_wb(mappings)
-        assert structure_map.agency == "SDMX"
-        assert structure_map.version == "1.0"
-
     def test_missing_comp_mapping_sheet_raises_valueerror(self, valid_mappings):
         """Tests that missing COMP_MAPPING sheet raises ValueError."""
         mappings = {"INFO": valid_mappings["INFO"]}
-        with pytest.raises(ValueError, match="Sheet 'COMP_MAPPING' not found"):
+        with pytest.raises(ValueError, match="Missing required sheet 'COMP_MAPPING'."):
             build_structure_map_from_template_wb(mappings)
 
     def test_invalid_fixed_rule_format_raises_valueerror(self, valid_mappings):
@@ -1712,7 +1705,7 @@ class TestBuildStructureMapFromTemplateWb:
         """Tests that representation rule without REP_MAPPING sheet raises ValueError."""
         mappings = valid_mappings.copy()
         mappings.pop("REP_MAPPING")
-        with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING' sheet"):
+        with pytest.raises(ValueError, match="Missing required sheet 'REP_MAPPING'."):
             build_structure_map_from_template_wb(mappings)
 
     def test_representation_empty_combined_df_raises_valueerror(self, valid_mappings):
@@ -1744,6 +1737,62 @@ class TestBuildStructureMapFromTemplateWb:
         assert structure_map.name.startswith("Structure Map generated for")
         assert structure_map.id == "WB_STRUCTURE_MAP"
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
+
+class TestValidateMappings: #noqa: D101
+    def test_validate_mappings_valid_input(self):
+        """Valid input with all required keys and DataFrames should pass without error."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame(),
+            "REP_MAPPING": pd.DataFrame()
+        }
+        # Should not raise any exception
+        _validate_mappings(mappings)
+
+
+    def test_validate_mappings_missing_key(self):
+        """Missing one required key should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame()
+            # REP_MAPPING is missing
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "Missing required sheet 'REP_MAPPING'" in str(exc_info.value)
+
+
+    def test_validate_mappings_invalid_type(self):
+        """Invalid type for one of the keys should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": "not_a_dataframe",  # Invalid type
+            "REP_MAPPING": pd.DataFrame()
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "must be a pandas DataFrame" in str(exc_info.value)
+
+
+    def test_validate_mappings_empty_dict(self):
+        """Empty dictionary should raise ValueError for missing keys."""
+        mappings = {}
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "Missing required sheet 'INFO'" in str(exc_info.value)
+
+
+    def test_validate_mappings_partial_invalid_type(self):
+        """One valid key and one invalid type should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame(),
+            "REP_MAPPING": 123  # Invalid type
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "must be a pandas DataFrame" in str(exc_info.value)
+
 
 
 
