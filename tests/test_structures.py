@@ -46,7 +46,9 @@ from tidysdmx.structures import (
     build_structure_map,
     _extract_artefact_id,
     _validate_mappings,
-    build_structure_map_from_template_wb
+    build_structure_map_from_template_wb,
+    _extract_all_artefact_ids,
+    _extract_metadata_from_info_sheet
 
     )
 
@@ -1793,8 +1795,115 @@ class TestValidateMappings: #noqa: D101
             _validate_mappings(mappings)
         assert "must be a pandas DataFrame" in str(exc_info.value)
 
+class TestExtractAllArtefactIds: #noqa: D101
+    
+    def test_extract_all_artefact_ids_normal(self):
+        """Test normal case with valid artefact keys and values."""
+        df = pd.DataFrame({
+            'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+            'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
+        })
+        result = _extract_all_artefact_ids(df)
+        assert result == {'dataflow': 'AGENCY:DF1(1.0)', 'datastructure': 'AGENCY:DSD1(1.0)', 'provisionagreement': 'AGENCY:PA1(1.0)'}
+        assert isinstance(result, dict)
+    
+    def test_extract_all_artefact_ids_with_missing_values(self):
+        """Test normal case with valid artefact keys and missing values."""
+        df = pd.DataFrame({
+            'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+            'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', '']
+        })
+        result = _extract_all_artefact_ids(df)
+        assert result == {'dataflow': 'AGENCY:DF1(1.0)', 'datastructure': 'AGENCY:DSD1(1.0)'}
+        assert isinstance(result, dict)
+
+    def test_extract_all_artefact_ids_empty_df(self):
+        """Test empty DataFrame raises ValueError."""
+        df = pd.DataFrame(columns=['Key', 'Value'])
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_missing_columns(self):
+        """Test missing columns raises ValueError."""
+        df = pd.DataFrame({'Key': ['dataflow']})
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_no_matching_keys(self):
+        """Test DataFrame with no matching keys raises ValueError."""
+        df = pd.DataFrame({'Key': ['other'], 'Value': ['AGENCY:XYZ(1.0)']})
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_invalid_type(self):
+        """Test invalid input type raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
+            _extract_all_artefact_ids("not a dataframe")
 
 
+class TestExtractMetadataFromInfoSheet:
+    """Tests for `_extract_metadata_from_info_sheet` function."""
+	
+    @pytest.fixture
+    def info_df_with_all(self):
+        """Fixture: DataFrame with datastructure, dataflow, and FMR_AGENCY keys."""
+        return pd.DataFrame({
+            "Key": ["datastructure", "dataflow", "FMR_AGENCY"],
+            "Value": ["AGENCY:DSD(1.0)", "AGENCY:DF(2.0)", "ALT_AGENCY"]
+        })
+
+    @pytest.fixture
+    def info_df_only_dataflow(self):
+        """Fixture: DataFrame with only dataflow key."""
+        return pd.DataFrame({
+            "Key": ["dataflow"],
+            "Value": ["AGENCY:DF(2.0)"]
+        })
 
 
+    @pytest.fixture
+    def empty_info_df(self):
+        """Fixture: Empty DataFrame."""
+        return pd.DataFrame(columns=["Key", "Value"])
 
+    def test_preferred_structure_type_present(self, info_df_with_all):
+        """Tests that datastructure is selected when present."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            info_df_with_all,
+            agency = "default_agency",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "AGENCY"
+        assert version == "1.0"
+        assert artefact_ref == "AGENCY:DSD(1.0)"
+
+    def test_fallback_to_dataflow(self, info_df_only_dataflow):
+        """Tests fallback when datastructure is missing but dataflow exists."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            info_df_only_dataflow, 
+            agency = "default_agency",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "AGENCY"
+        assert version == "2.0"
+        assert artefact_ref == "AGENCY:DF(2.0)"
+
+    def test_empty_dataframe_returns_defaults(self, empty_info_df):
+        """Tests that defaults are returned when DataFrame is empty."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            empty_info_df,
+            agency = "SDMX",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "SDMX"
+        assert version == "1.0"
+        assert artefact_ref is None
+
+    def test_invalid_structure_type_still_falls_back(self, info_df_with_all):
+        """Tests that invalid structure_type raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
+            _extract_metadata_from_info_sheet(
+                info_df_with_all,
+                agency = "default_agency",
+            version = "1.0",
+            structure_type =  "invalid_type")

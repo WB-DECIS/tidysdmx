@@ -787,7 +787,7 @@ def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
 @typechecked
 def build_structure_map(
     workbook: Workbook, 
-    default_agency: str = "DEFAULT_AGENCY"
+    agency: str = "DEFAULT_AGENCY"
 ) -> StructureMap:
     """Converts a populated Excel Workbook into a pysdmx StructureMap object.
     
@@ -830,7 +830,7 @@ def build_structure_map(
                     df=definition.representation_df,
                     source_component=src,
                     target_component=definition.target,
-                    agency=default_agency,
+                    agency=agency,
                     id=f"REPMAP_{definition.target}",
                     name=f"Mapping for {definition.target}",
                     version="1.0"
@@ -845,7 +845,7 @@ def build_structure_map(
     # 3. Return Final Artifact
     return StructureMap(
         id="GENERATED_STRUCTURE_MAP",
-        agency=default_agency, 
+        agency=agency, 
         version="1.0",
         name="Auto-generated Structure Map",
         maps=maps_list
@@ -1455,15 +1455,17 @@ def _validate_mappings(mappings: Dict[str, pd.DataFrame]) -> None:
 @typechecked
 def build_structure_map_from_template_wb(
     mappings: Dict[str, pd.DataFrame],
-    default_agency: str = "SDMX",
-    default_structure_map_id: str = "WB_STRUCTURE_MAP"
+    agency: str = "SDMX",
+    structure_map_id: str = "WB_STRUCTURE_MAP",
+    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
+    version: str = "1.0",
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
     Args:
         mappings (Dict[str, pd.DataFrame]): Dictionary of DataFrames containing all sheets.
-        default_agency (str): Fallback agency ID if not found in INFO.
-        default_structure_map_id (str): ID for the resulting StructureMap.
+        agency (str): Fallback agency ID if not found in INFO.
+        structure_map_id (str): ID for the resulting StructureMap.
 
     Returns:
         StructureMap: A valid pysdmx StructureMap object.
@@ -1485,30 +1487,12 @@ def build_structure_map_from_template_wb(
     _validate_mappings(mappings)
 
     # 1. Extract Metadata (Agency & Version)
-    current_agency = default_agency
-    current_version = "1.0"
-    artefact_ref = None
-
-    try:
-        info_df = _parse_info_sheet(mappings)
-        for type_key in ["dataflow", "dsd"]:
-            try:
-                artefact_ref = _extract_artefact_id(info_df, type_key)
-                break
-            except ValueError:
-                continue
-
-        if artefact_ref:
-            parsed_agency, _, parsed_version = parse_artefact_id(artefact_ref)
-            current_agency = parsed_agency
-            current_version = parsed_version
-        elif "FMR_AGENCY" in info_df["Key"].values:
-            val = info_df.loc[info_df["Key"] == "FMR_AGENCY", "Value"].iloc[0]
-            if val:
-                current_agency = str(val).strip()
-    except Exception:
-        # Metadata parsing failed, proceeding with defaults.
-        pass
+    info_df = _parse_info_sheet(mappings)
+    current_agency, current_version, artefact_ref = _extract_metadata_from_info_sheet(
+        info_df = info_df, 
+        agency = agency,
+        version = version,
+        structure_type = structure_type)
 
     # 2. Parse Component Mappings Rules
     comp_df = _parse_comp_mapping_sheet(mappings)
@@ -1585,9 +1569,9 @@ def build_structure_map_from_template_wb(
             raise ValueError(f"Error processing mapping for Target '{target_id}': {str(e)}") from e
 
     # 5. Construct Final Object
-    name_suffix = artefact_ref if artefact_ref else default_structure_map_id
+    name_suffix = artefact_ref if artefact_ref else structure_map_id
     return StructureMap(
-        id=default_structure_map_id,
+        id=structure_map_id,
         agency=current_agency,
         version=current_version,
         name=f"Structure Map generated for {name_suffix}",
@@ -1595,3 +1579,128 @@ def build_structure_map_from_template_wb(
     )
 
 # endregion
+
+
+
+@typechecked
+def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
+    """Extract artefact IDs from the provided DataFrame and return them as a dictionary mapping structure types to their corresponding IDs.
+
+    This function scans the DataFrame for keys corresponding to SDMX artefacts
+    such as 'dataflow', 'datastructure', and 'provisionagreement', and returns
+    a dictionary where each structure type is linked to its parsed ID.
+    It parses standard SDMX reference formats like 'Agency:ID(Version)' by
+    extracting only the 'ID' component.
+
+    Args:
+        info_df (pd.DataFrame): DataFrame containing metadata with 'Key' and 'Value' columns.
+
+    Returns:
+        Dict[str, str]: Dictionary mapping structure types to artefact IDs.
+
+    Raises:
+        ValueError: If the DataFrame is empty, lacks required columns, or no artefacts are found.
+        TypeError: If info_df is not a pandas DataFrame.
+
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+        ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
+        ... })
+        >>> extract_artefact_ids_by_structure(df)
+        {'dataflow': 'DF1', 'datastructure': 'DSD1', 'provisionagreement': 'PA1'}
+    """
+    if not isinstance(info_df, pd.DataFrame):
+        raise TypeError("info_df must be a pandas DataFrame.")
+    if info_df.empty:
+        raise ValueError("info_df is empty.")
+    if not {'Key', 'Value'}.issubset(info_df.columns):
+        raise ValueError("info_df must contain 'Key' and 'Value' columns.")
+
+    # Define structure types to look for
+    structure_types = {"dataflow", "datastructure", "provisionagreement"}
+
+    # Normalize keys for case-insensitive matching
+    info_df["Key"] = info_df["Key"].astype(str).str.strip().str.lower()
+
+    # Filter rows matching structure types
+    filtered_df = info_df[info_df["Key"].isin(structure_types)]
+
+    if filtered_df.empty:
+        raise ValueError("No artefact keys found in info_df.")
+
+    artefact_dict: Dict[str, str] = {}
+    for _, row in filtered_df.iterrows():
+        raw_value = row["Value"]
+        if pd.isna(raw_value) or str(raw_value).strip() == "":
+            continue
+        # Extract ID from 'Agency:ID(Version)' format
+        value_str = str(raw_value).strip()
+        artefact_dict[row["Key"]] = value_str
+
+    if not artefact_dict:
+        raise ValueError("Artefact keys found but all values are empty or invalid.")
+
+    return artefact_dict
+
+@typechecked
+def _extract_metadata_from_info_sheet(
+    info_df: pd.DataFrame,
+    agency: str,
+    version: str,
+    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
+) -> Tuple[str, str, Optional[str]]:
+    """Extract (agency, version, artefact_ref) from INFO sheet using structure_type preference, falling back to other artefacts and FMR_AGENCY when needed.
+
+    This function:
+      - normalizes the requested structure_type (supports 'dsd' alias),
+      - uses _extract_all_artefact_ids(info_df) to get available artefacts,
+      - selects the artefact reference per the preferred structure_type or fallback order,
+      - parses (agency, version) from artefact_ref via parse_artefact_id,
+      - falls back to FMR_AGENCY for agency if present,
+      - returns defaults if any step fails.
+
+    Args:
+        info_df (pd.DataFrame): INFO sheet with 'Key'/'Value' columns.
+        structure_type (str): preferred structure type ('datastructure', 'dataflow', 'provisionagreement', alias 'dsd').
+        agency (str): default agency used when extraction fails.
+        version (str): default version used when extraction fails.
+
+    Returns:
+        Tuple[str, str, Optional[str]]: (agency, version, artefact_ref)
+            - agency: derived agency or default
+            - version: derived version or default
+            - artefact_ref: the raw artefact reference string (e.g., 'AGENCY:ID(1.0)'), or None if not found
+    """
+    current_agency = agency
+    current_version = version
+    artefact_ref: Optional[str] = None
+
+    try:
+        # Extract artefacts; the helper lower-cases info_df["Key"] in place
+        artefact_dict: Dict[str, str] = _extract_all_artefact_ids(info_df)
+    except Exception:
+        artefact_dict = {}
+
+    # Preferred artefact by requested structure_type, otherwise fallback order
+    if structure_type in artefact_dict:
+        artefact_ref = artefact_dict[structure_type]
+    else:
+        for fallback_type in ("datastructure", "dataflow", "provisionagreement"):
+            if fallback_type in artefact_dict:
+                artefact_ref = artefact_dict[fallback_type]
+                break
+
+    # Parse agency/version from artefact_ref if available
+    if artefact_ref:
+        try:
+            parsed_agency, _, parsed_version = parse_artefact_id(artefact_ref)
+            if parsed_agency:
+                current_agency = parsed_agency
+            if parsed_version:
+                current_version = parsed_version
+        except Exception:
+            # Keep defaults if parsing fails
+            pass 
+
+    return current_agency, current_version, artefact_ref
