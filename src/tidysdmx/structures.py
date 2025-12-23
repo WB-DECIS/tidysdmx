@@ -787,7 +787,7 @@ def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
 @typechecked
 def build_structure_map(
     workbook: Workbook, 
-    default_agency: str = "DEFAULT_AGENCY"
+    agency: str = "DEFAULT_AGENCY"
 ) -> StructureMap:
     """Converts a populated Excel Workbook into a pysdmx StructureMap object.
     
@@ -830,7 +830,7 @@ def build_structure_map(
                     df=definition.representation_df,
                     source_component=src,
                     target_component=definition.target,
-                    agency=default_agency,
+                    agency=agency,
                     id=f"REPMAP_{definition.target}",
                     name=f"Mapping for {definition.target}",
                     version="1.0"
@@ -845,7 +845,7 @@ def build_structure_map(
     # 3. Return Final Artifact
     return StructureMap(
         id="GENERATED_STRUCTURE_MAP",
-        agency=default_agency, 
+        agency=agency, 
         version="1.0",
         name="Auto-generated Structure Map",
         maps=maps_list
@@ -1426,133 +1426,116 @@ def _match_column_name(target_name: str, available_columns: List[str]) -> str:
 
     raise ValueError(f"Could not find a column in REP_MAPPING matching '{target_name}'. Available: {available_columns}")
 
+
+@typechecked
+def _validate_mappings(mappings: Dict[str, pd.DataFrame]) -> None:
+    """Validate that mappings contain required sheets and each is a DataFrame.
+
+    Args:
+        mappings (Dict[str, pd.DataFrame]): Dictionary of sheet names to DataFrames.
+
+    Raises:
+        ValueError: If required keys are missing or values are not DataFrames.
+
+    Examples:
+        >>> _validate_mappings({"INFO": pd.DataFrame(), "COMP_MAPPING": pd.DataFrame(), "REP_MAPPING": pd.DataFrame()})
+        # No exception raised
+    """
+    required_keys = ["INFO", "COMP_MAPPING", "REP_MAPPING"]
+    for key in required_keys:
+        if key not in mappings:
+            raise ValueError(f"Missing required sheet '{key}'.")
+        if not isinstance(mappings[key], pd.DataFrame):
+            raise ValueError(f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}.")
+
+
 # Region: Main Function
+
 
 @typechecked
 def build_structure_map_from_template_wb(
     mappings: Dict[str, pd.DataFrame],
-    default_agency: str = "SDMX",
-    default_structure_map_id: str = "WB_STRUCTURE_MAP"
+    agency: str = "SDMX",
+    structure_map_id: str = "WB_STRUCTURE_MAP",
+    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
+    version: str = "1.0",
 ) -> StructureMap:
-    """Builds a complete StructureMap object by parsing a WB-format Excel template.
-    
-    Process:
-    1.  Parses `INFO` sheet to extract Agency and Version context using `_extract_artefact_id`.
-    2.  Parses `COMP_MAPPING` to determine mapping rules.
-    3.  Parses `REP_MAPPING` using `_parse_rep_mapping_sheet` to get source/target data.
-    4.  Constructs the specific SDMX Map objects (Fixed, Implicit, Component).
+    """Build a complete StructureMap object by parsing a WB-format Excel template.
 
     Args:
-        mappings (Dict[str, pd.DataFrame]): The dictionary of DataFrames containing all sheets.
-        default_agency (str): Fallback agency ID if not found in INFO.
-        default_structure_map_id (str): ID for the resulting StructureMap.
+        mappings (Dict[str, pd.DataFrame]): Dictionary of DataFrames containing all sheets.
+        agency (str): Fallback agency ID if not found in INFO.
+        structure_map_id (str): ID for the resulting StructureMap.
 
     Returns:
         StructureMap: A valid pysdmx StructureMap object.
 
     Raises:
         ValueError: If mandatory sheets/columns are missing or mapping rules are invalid.
+
+    Examples:
+        >>> mappings = {
+        ...     "INFO": pd.DataFrame({"Key": ["FMR_AGENCY"], "Value": ["TEST_AGENCY"]}),
+        ...     "COMP_MAPPING": pd.DataFrame({"SOURCE": ["src"], "TARGET": ["tgt"], "MAPPING_RULES": ["fixed:VAL"]}),
+        ...     "REP_MAPPING": pd.DataFrame({"source": ["a"], "target": ["b"]})
+        ... }
+        >>> smap = build_structure_map_from_template_wb(mappings)
+        >>> isinstance(smap, StructureMap)
+        True
     """
+    # Validate mappings upfront
+    _validate_mappings(mappings)
+
     # 1. Extract Metadata (Agency & Version)
-    current_agency = default_agency
-    current_version = "1.0"
-    artefact_ref = None
-    
-    if "INFO" in mappings:
-        try:
-            info_df = _parse_info_sheet(mappings)
-            
-            # Try to find a defining artefact ID (Dataflow takes precedence)
-            for type_key in ["dataflow", "dsd"]:
-                try:
-                    artefact_ref = _extract_artefact_id(info_df, type_key)
-                    break 
-                except ValueError:
-                    continue
-            
-            if artefact_ref:
-                # Use the helper to parse "Agency:ID(Version)"
-                parsed_agency, _, parsed_version = parse_artefact_id(artefact_ref)
-                current_agency = parsed_agency
-                current_version = parsed_version
-            elif "FMR_AGENCY" in info_df["Key"].values:
-                 # Fallback to specific key if standard artefact not found
-                 val = info_df.loc[info_df["Key"] == "FMR_AGENCY", "Value"].iloc[0]
-                 if val:
-                     current_agency = str(val).strip()
+    info_df = _parse_info_sheet(mappings)
+    current_agency, current_version, artefact_ref = _extract_metadata_from_info_sheet(
+        info_df = info_df, 
+        agency = agency,
+        version = version,
+        structure_type = structure_type)
 
-        except Exception:
-            # Metadata parsing failed, proceeding with defaults.
-            pass
-
-    # 3. Parse Component Mappings Rules
+    # 2. Parse Component Mappings Rules
     comp_df = _parse_comp_mapping_sheet(mappings)
-    
-    # 4. Prepare Representation Data
+
+    # 3. Prepare Representation Data
     rep_data: Dict[str, pd.DataFrame] = {}
-    if "REP_MAPPING" in mappings:
-        try:
-            rep_data = _parse_rep_mapping_sheet(mappings)
-        except ValueError:
-             # Ignore if REP_MAPPING is present but structurally invalid, validation will fail 
-             # only if a component actually attempts to use it.
-             pass
+    try:
+        rep_data = _parse_rep_mapping_sheet(mappings)
+    except ValueError:
+        # Ignore invalid REP_MAPPING; validation will fail only if used.
+        pass
 
     generated_maps: List[Union[FixedValueMap, ImplicitComponentMap, ComponentMap]] = []
 
-    # 5. Iterate Logic
+    # 4. Generate structure map elements
     for _, row in comp_df.iterrows():
-        source_id = str(row["SOURCE"]).strip()
-        target_id = str(row["TARGET"]).strip()
-        rule = str(row["MAPPING_RULES"]).strip()
-
-        # Skip empty rules or pandas artifacts
-        if not target_id or not rule or rule.lower() == "nan" or rule.lower() == '<na>':
-            continue
-
         try:
-            # --- Rule 1: Fixed Value (MAPPING_RULES starts with "fixed:") ---
-            if rule.lower().startswith("fixed:"):
-                parts = rule.split(":", 1)
-                if len(parts) < 2 or not parts[1].strip():
-                    raise ValueError(f"Invalid fixed rule format: {rule}")
-                fixed_val = parts[1].strip()
-                generated_maps.append(build_fixed_map(target_id, fixed_val))
+            parsed = _extract_mapping_rule(row)
+            mapping_rule = parsed["mapping_rule"]
+            source_id = parsed["source_id"] or ""   # normalize to str
+            target_id = parsed["target_id"] or ""   # normalize to str
 
-            # --- Rule 2: Implicit (MAPPING_RULES is "implicit") ---
-            elif rule.lower() == "implicit":
-                if not source_id:
-                     raise ValueError("Implicit map rule requires a non-empty 'SOURCE' component ID.")
+            if mapping_rule == "skip":
+                continue
+
+            if mapping_rule == "fixed":
+                fixed_val = parsed["fixed_value"]  # guaranteed non-empty by parser
+                generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
+
+            elif mapping_rule == "implicit":
                 generated_maps.append(build_implicit_component_map(source_id, target_id))
 
-            # --- Rule 3: Representation Map (MAPPING_RULES matches TARGET ID) ---
-            elif rule == target_id:
-                if not rep_data or rep_data["source"].empty or rep_data["target"].empty:
-                    raise ValueError("Mapping rule requires 'REP_MAPPING' sheet with data, but it was invalid or empty.")
-                if not source_id:
-                     raise ValueError("Representation map rule requires a non-empty 'SOURCE' component ID.")
+            elif mapping_rule == "representation":
                 
-                source_dfs_map = rep_data["source"]
-                target_dfs_map = rep_data["target"]
+                rep_mapping_df = _extract_representation_map(
+                        rep_data=rep_data,
+                        source_id=source_id,
+                        target_id=target_id
+                    )
 
-                # Resolve columns using fuzzy matching on the stripped headers
-                actual_source_col = _match_column_name(source_id, source_dfs_map.columns.tolist())
-                actual_target_col = _match_column_name(target_id, target_dfs_map.columns.tolist())
-
-                # Combine into a single DF for the builder function, aligning on index
-                combined_df = pd.DataFrame({
-                    "source": source_dfs_map[actual_source_col],
-                    "target": target_dfs_map[actual_target_col]
-                })
-
-                combined_df.dropna(subset=["source", "target"], how='any', inplace=True)
-                combined_df.drop_duplicates(inplace=True)
-
-                if combined_df.empty:
-                    raise ValueError(f"No valid mapping rows found between source column '{actual_source_col}' and target column '{actual_target_col}'.")
 
                 comp_map = build_single_component_map(
-                    df=combined_df,
+                    df=rep_mapping_df,
                     source_component=source_id,
                     target_component=target_id,
                     agency=current_agency,
@@ -1563,22 +1546,295 @@ def build_structure_map_from_template_wb(
                     version=current_version
                 )
                 generated_maps.append(comp_map)
-            
+
             else:
-                 # Catch-all for non-matching strings
-                 raise ValueError(f"Unknown mapping rule: '{rule}'")
+                # Defensive guard; parser guarantees mapping_rule is one of the known values
+                raise ValueError(f"Unhandled mapping rule: {mapping_rule}")
 
         except ValueError as e:
-            # Propagate detailed error
-            raise ValueError(f"Error processing mapping for Target '{target_id}': {str(e)}") from e
+            # Keep your contextual error wrapping
+            target_for_msg = str(row.get("TARGET", "")).strip()
+            raise ValueError(f"Error processing mapping for Target '{target_for_msg}': {str(e)}") from e
 
-    # 6. Construct Final Object
-    name_suffix = artefact_ref if artefact_ref else default_structure_map_id
+    # 5. Construct Final Object
+    name_suffix = artefact_ref if artefact_ref else structure_map_id
     return StructureMap(
-        id=default_structure_map_id,
+        id=structure_map_id,
         agency=current_agency,
         version=current_version,
         name=f"Structure Map generated for {name_suffix}",
         maps=generated_maps
     )
+
 # endregion
+
+
+
+@typechecked
+def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
+    """Extract artefact IDs from the provided DataFrame and return them as a dictionary mapping structure types to their corresponding IDs.
+
+    This function scans the DataFrame for keys corresponding to SDMX artefacts
+    such as 'dataflow', 'datastructure', and 'provisionagreement', and returns
+    a dictionary where each structure type is linked to its parsed ID.
+    It parses standard SDMX reference formats like 'Agency:ID(Version)' by
+    extracting only the 'ID' component.
+
+    Args:
+        info_df (pd.DataFrame): DataFrame containing metadata with 'Key' and 'Value' columns.
+
+    Returns:
+        Dict[str, str]: Dictionary mapping structure types to artefact IDs.
+
+    Raises:
+        ValueError: If the DataFrame is empty, lacks required columns, or no artefacts are found.
+        TypeError: If info_df is not a pandas DataFrame.
+
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+        ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
+        ... })
+        >>> extract_artefact_ids_by_structure(df)
+        {'dataflow': 'DF1', 'datastructure': 'DSD1', 'provisionagreement': 'PA1'}
+    """
+    if not isinstance(info_df, pd.DataFrame):
+        raise TypeError("info_df must be a pandas DataFrame.")
+    if info_df.empty:
+        raise ValueError("info_df is empty.")
+    if not {'Key', 'Value'}.issubset(info_df.columns):
+        raise ValueError("info_df must contain 'Key' and 'Value' columns.")
+
+    # Define structure types to look for
+    structure_types = {"dataflow", "datastructure", "provisionagreement"}
+
+    # Normalize keys for case-insensitive matching
+    info_df["Key"] = info_df["Key"].astype(str).str.strip().str.lower()
+
+    # Filter rows matching structure types
+    filtered_df = info_df[info_df["Key"].isin(structure_types)]
+
+    if filtered_df.empty:
+        raise ValueError("No artefact keys found in info_df.")
+
+    artefact_dict: Dict[str, str] = {}
+    for _, row in filtered_df.iterrows():
+        raw_value = row["Value"]
+        if pd.isna(raw_value) or str(raw_value).strip() == "":
+            continue
+        # Extract ID from 'Agency:ID(Version)' format
+        value_str = str(raw_value).strip()
+        artefact_dict[row["Key"]] = value_str
+
+    if not artefact_dict:
+        raise ValueError("Artefact keys found but all values are empty or invalid.")
+
+    return artefact_dict
+
+@typechecked
+def _extract_metadata_from_info_sheet(
+    info_df: pd.DataFrame,
+    agency: str,
+    version: str,
+    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
+) -> Tuple[str, str, Optional[str]]:
+    """Extract (agency, version, artefact_ref) from INFO sheet using structure_type preference, falling back to other artefacts and FMR_AGENCY when needed.
+
+    This function:
+      - normalizes the requested structure_type (supports 'dsd' alias),
+      - uses _extract_all_artefact_ids(info_df) to get available artefacts,
+      - selects the artefact reference per the preferred structure_type or fallback order,
+      - parses (agency, version) from artefact_ref via parse_artefact_id,
+      - falls back to FMR_AGENCY for agency if present,
+      - returns defaults if any step fails.
+
+    Args:
+        info_df (pd.DataFrame): INFO sheet with 'Key'/'Value' columns.
+        structure_type (str): preferred structure type ('datastructure', 'dataflow', 'provisionagreement', alias 'dsd').
+        agency (str): default agency used when extraction fails.
+        version (str): default version used when extraction fails.
+
+    Returns:
+        Tuple[str, str, Optional[str]]: (agency, version, artefact_ref)
+            - agency: derived agency or default
+            - version: derived version or default
+            - artefact_ref: the raw artefact reference string (e.g., 'AGENCY:ID(1.0)'), or None if not found
+    """
+    current_agency = agency
+    current_version = version
+    artefact_ref: Optional[str] = None
+
+    try:
+        # Extract artefacts; the helper lower-cases info_df["Key"] in place
+        artefact_dict: Dict[str, str] = _extract_all_artefact_ids(info_df)
+    except Exception:
+        artefact_dict = {}
+
+    # Preferred artefact by requested structure_type, otherwise fallback order
+    if structure_type in artefact_dict:
+        artefact_ref = artefact_dict[structure_type]
+    else:
+        for fallback_type in ("datastructure", "dataflow", "provisionagreement"):
+            if fallback_type in artefact_dict:
+                artefact_ref = artefact_dict[fallback_type]
+                break
+
+    # Parse agency/version from artefact_ref if available
+    if artefact_ref:
+        try:
+            parsed_agency, _, parsed_version = parse_artefact_id(artefact_ref)
+            if parsed_agency:
+                current_agency = parsed_agency
+            if parsed_version:
+                current_version = parsed_version
+        except Exception:
+            # Keep defaults if parsing fails
+            pass 
+
+    return current_agency, current_version, artefact_ref
+
+# tokens that mean "missing" for MAPPING_RULES
+_MISSING_RULE_TOKENS = {"nan", "<na>", ""}
+
+def _is_missing_token(s: str) -> bool:
+    """Return True if s is a case-insensitive missing token."""
+    return s.strip().lower() in _MISSING_RULE_TOKENS
+
+@typechecked
+def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
+    """Parse a COMP_MAPPING row and return a dict of mapping rules. This function performs *syntax-level* validation only and never touches external data.
+
+    Returns a dict with the following keys:
+      - mapping_rule: one of {"skip", "fixed", "implicit", "representation"}
+      - source_id: normalized SOURCE (may be empty for fixed)
+      - target_id: normalized TARGET (empty only if mapping_rule == "skip")
+      - fixed_value: present only for mapping_rule == "fixed", else None
+
+    Raises:
+      - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
+                    or for implicit/representation if SOURCE is missing,
+                    or for unknown rule strings.
+    """
+    source_id = str(row.get("SOURCE", "")).strip()
+    target_id = str(row.get("TARGET", "")).strip()
+    raw_rule  = str(row.get("MAPPING_RULES", "")).strip()
+
+    # Skip when TARGET is empty or rule is missing-ish
+    if not target_id or _is_missing_token(raw_rule):
+        return {
+            "mapping_rule": "skip",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    rule_lower = raw_rule.lower()
+
+    # fixed:<VALUE>
+    if rule_lower.startswith("fixed:"):
+        parts = raw_rule.split(":", 1)
+        if len(parts) < 2 or not parts[1].strip():
+            raise ValueError(f"Invalid fixed rule format: {raw_rule}")
+        fixed_val = parts[1].strip()
+        return {
+            "mapping_rule": "fixed",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": fixed_val,
+        }
+
+    # implicit
+    if rule_lower == "implicit":
+        if not source_id:
+            raise ValueError("Implicit map rule requires a non-empty 'SOURCE' component ID.")
+        return {
+            "mapping_rule": "implicit",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    # representation (exact equality: rule == target_id)
+    if raw_rule == target_id:
+        if not source_id:
+            raise ValueError("Representation map rule requires a non-empty 'SOURCE' component ID.")
+        return {
+            "mapping_rule": "representation",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    # unknown
+    raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
+
+@typechecked
+def _extract_representation_map(
+    rep_data: Dict[str, pd.DataFrame],
+    source_id: str,
+    target_id: str
+) -> pd.DataFrame:
+    """Build the (source, target) mapping pairs DataFrame for a representation-based rule, resolving column names and performing sanitization.
+
+    Parameters
+    ----------
+    rep_data : Dict[str, pd.DataFrame]
+        Dictionary containing 'source' and 'target' DataFrames derived from REP_MAPPING.
+        Expected keys:
+          - 'source': DataFrame of source representations (columns for different components)
+          - 'target': DataFrame of target representations (columns for different components)
+
+    source_id : str
+        Component identifier to be matched to a column in rep_data['source'].
+
+    target_id : str
+        Component identifier to be matched to a column in rep_data['target'].
+
+    Returns
+    -------
+    rep_mapping_df : pd.DataFrame
+        - rep_mapping_df: Two-column DataFrame with columns ['source', 'target'],
+                       NA rows dropped and duplicate row pairs removed.
+
+    Raises
+    ------
+    ValueError
+        - If rep_data is missing, or either DataFrame is empty
+        - If column resolution fails via match_column_name
+        - If no valid mapping pairs remain after sanitization
+    """
+    # 1) Validate presence and non-empty REP_MAPPING inputs
+    if (
+        not rep_data
+        or "source" not in rep_data
+        or "target" not in rep_data
+        or rep_data["source"] is None
+        or rep_data["target"] is None
+        or rep_data["source"].empty
+        or rep_data["target"].empty
+    ):
+        raise ValueError(
+            "Mapping rule requires 'REP_MAPPING' sheet with data, but it was invalid or empty."
+        )
+
+    source_df = rep_data["source"]
+    target_df = rep_data["target"]
+
+    # 2) Resolve actual column names (can raise if not found)
+    actual_source_col = _match_column_name(source_id, source_df.columns.tolist())
+    actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
+
+    # 3) Build, sanitize, and deduplicate pairs
+    rep_mapping_df = pd.DataFrame({
+        "source": source_df[actual_source_col],
+        "target": target_df[actual_target_col],
+    }).dropna(subset=["source", "target"], how="any").drop_duplicates()
+
+    # 4) Enforce non-empty result
+    if rep_mapping_df.empty:
+        raise ValueError(
+            f"No valid mapping rows found between source column '{actual_source_col}' "
+            f"and target column '{actual_target_col}'."
+        )
+
+    return rep_mapping_df
