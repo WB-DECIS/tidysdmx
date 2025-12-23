@@ -1509,48 +1509,33 @@ def build_structure_map_from_template_wb(
 
     # 4. Iterate Logic
     for _, row in comp_df.iterrows():
-        source_id = str(row["SOURCE"]).strip()
-        target_id = str(row["TARGET"]).strip()
-        rule = str(row["MAPPING_RULES"]).strip()
-
-        if not target_id or not rule or rule.lower() in {"nan", "<na>"}:
-            continue
-
         try:
-            if rule.lower().startswith("fixed:"):
-                parts = rule.split(":", 1)
-                if len(parts) < 2 or not parts[1].strip():
-                    raise ValueError(f"Invalid fixed rule format: {rule}")
-                fixed_val = parts[1].strip()
-                generated_maps.append(build_fixed_map(target_id, fixed_val))
+            parsed = _extract_mapping_rule(row)
+            mapping_rule = parsed["mapping_rule"]
+            source_id = parsed["source_id"] or ""   # normalize to str
+            target_id = parsed["target_id"] or ""   # normalize to str
 
-            elif rule.lower() == "implicit":
-                if not source_id:
-                    raise ValueError("Implicit map rule requires a non-empty 'SOURCE' component ID.")
+            if mapping_rule == "skip":
+                continue
+
+            if mapping_rule == "fixed":
+                fixed_val = parsed["fixed_value"]  # guaranteed non-empty by parser
+                generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
+
+            elif mapping_rule == "implicit":
                 generated_maps.append(build_implicit_component_map(source_id, target_id))
 
-            elif rule == target_id:
-                if not rep_data or rep_data["source"].empty or rep_data["target"].empty:
-                    raise ValueError("Mapping rule requires 'REP_MAPPING' sheet with data, but it was invalid or empty.")
-                if not source_id:
-                    raise ValueError("Representation map rule requires a non-empty 'SOURCE' component ID.")
+            elif mapping_rule == "representation":
+                
+                rep_mapping_df = _extract_representation_map(
+                        rep_data=rep_data,
+                        source_id=source_id,
+                        target_id=target_id
+                    )
 
-                source_dfs_map = rep_data["source"]
-                target_dfs_map = rep_data["target"]
-
-                actual_source_col = _match_column_name(source_id, source_dfs_map.columns.tolist())
-                actual_target_col = _match_column_name(target_id, target_dfs_map.columns.tolist())
-
-                combined_df = pd.DataFrame({
-                    "source": source_dfs_map[actual_source_col],
-                    "target": target_dfs_map[actual_target_col]
-                }).dropna(subset=["source", "target"], how="any").drop_duplicates()
-
-                if combined_df.empty:
-                    raise ValueError(f"No valid mapping rows found between source column '{actual_source_col}' and target column '{actual_target_col}'.")
 
                 comp_map = build_single_component_map(
-                    df=combined_df,
+                    df=rep_mapping_df,
                     source_component=source_id,
                     target_component=target_id,
                     agency=current_agency,
@@ -1563,10 +1548,13 @@ def build_structure_map_from_template_wb(
                 generated_maps.append(comp_map)
 
             else:
-                raise ValueError(f"Unknown mapping rule: '{rule}'")
+                # Defensive guard; parser guarantees mapping_rule is one of the known values
+                raise ValueError(f"Unhandled mapping rule: {mapping_rule}")
 
         except ValueError as e:
-            raise ValueError(f"Error processing mapping for Target '{target_id}': {str(e)}") from e
+            # Keep your contextual error wrapping
+            target_for_msg = str(row.get("TARGET", "")).strip()
+            raise ValueError(f"Error processing mapping for Target '{target_for_msg}': {str(e)}") from e
 
     # 5. Construct Final Object
     name_suffix = artefact_ref if artefact_ref else structure_map_id
@@ -1712,6 +1700,7 @@ def _is_missing_token(s: str) -> bool:
     """Return True if s is a case-insensitive missing token."""
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
+@typechecked
 def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
     """Parse a COMP_MAPPING row and return a dict of mapping rules. This function performs *syntax-level* validation only and never touches external data.
 
@@ -1778,3 +1767,74 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
 
     # unknown
     raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
+
+@typechecked
+def _extract_representation_map(
+    rep_data: Dict[str, pd.DataFrame],
+    source_id: str,
+    target_id: str
+) -> pd.DataFrame:
+    """Build the (source, target) mapping pairs DataFrame for a representation-based rule, resolving column names and performing sanitization.
+
+    Parameters
+    ----------
+    rep_data : Dict[str, pd.DataFrame]
+        Dictionary containing 'source' and 'target' DataFrames derived from REP_MAPPING.
+        Expected keys:
+          - 'source': DataFrame of source representations (columns for different components)
+          - 'target': DataFrame of target representations (columns for different components)
+
+    source_id : str
+        Component identifier to be matched to a column in rep_data['source'].
+
+    target_id : str
+        Component identifier to be matched to a column in rep_data['target'].
+
+    Returns
+    -------
+    rep_mapping_df : pd.DataFrame
+        - rep_mapping_df: Two-column DataFrame with columns ['source', 'target'],
+                       NA rows dropped and duplicate row pairs removed.
+
+    Raises
+    ------
+    ValueError
+        - If rep_data is missing, or either DataFrame is empty
+        - If column resolution fails via match_column_name
+        - If no valid mapping pairs remain after sanitization
+    """
+    # 1) Validate presence and non-empty REP_MAPPING inputs
+    if (
+        not rep_data
+        or "source" not in rep_data
+        or "target" not in rep_data
+        or rep_data["source"] is None
+        or rep_data["target"] is None
+        or rep_data["source"].empty
+        or rep_data["target"].empty
+    ):
+        raise ValueError(
+            "Mapping rule requires 'REP_MAPPING' sheet with data, but it was invalid or empty."
+        )
+
+    source_df = rep_data["source"]
+    target_df = rep_data["target"]
+
+    # 2) Resolve actual column names (can raise if not found)
+    actual_source_col = _match_column_name(source_id, source_df.columns.tolist())
+    actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
+
+    # 3) Build, sanitize, and deduplicate pairs
+    rep_mapping_df = pd.DataFrame({
+        "source": source_df[actual_source_col],
+        "target": target_df[actual_target_col],
+    }).dropna(subset=["source", "target"], how="any").drop_duplicates()
+
+    # 4) Enforce non-empty result
+    if rep_mapping_df.empty:
+        raise ValueError(
+            f"No valid mapping rows found between source column '{actual_source_col}' "
+            f"and target column '{actual_target_col}'."
+        )
+
+    return rep_mapping_df

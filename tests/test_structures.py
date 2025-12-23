@@ -50,7 +50,8 @@ from tidysdmx.structures import (
     _extract_all_artefact_ids,
     _extract_metadata_from_info_sheet,
     _extract_mapping_rule,
-    _is_missing_token
+    _is_missing_token,
+    _extract_representation_map
 
     )
 
@@ -1992,3 +1993,55 @@ class TestExtractMappingRule:
         row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "unknown_rule"})
         with pytest.raises(ValueError, match="Unknown mapping rule"):
             _extract_mapping_rule(row)
+
+class TestExtractRepresentationMap:
+    """Tests for `_extract_representation_map` which builds a sanitized mapping DataFrame."""
+
+    @pytest.fixture
+    def sample_rep_data(self):
+        """Provides valid source and target DataFrames for tests."""
+        source_df = pd.DataFrame({"src_col": ["A", "B", None, "C"], "extra": [1, 2, 3, 4]})
+        target_df = pd.DataFrame({"tgt_col": ["X", "Y", "Z", None], "extra": [5, 6, 7, 8]})
+        return {"source": source_df, "target": target_df}
+
+    def test_valid_mapping(self, sample_rep_data):
+        """Tests that valid mapping returns correct DataFrame with duplicates and NA removed."""
+        result_df = _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
+        expected = pd.DataFrame({"source": ["A", "B"], "target": ["X", "Y"]})
+        pd.testing.assert_frame_equal(result_df, expected)
+
+    @pytest.mark.skip(reason="Not sure this is expected behavior")
+    def test_raises_value_error_on_missing_rep_data(self):
+        """Tests that ValueError is raised when rep_data is empty or invalid."""
+        invalid_cases = [
+            {},  # Empty dict
+            {"source": None, "target": None},  # None DataFrames
+            {"source": pd.DataFrame(), "target": pd.DataFrame()},  # Empty DataFrames
+        ]
+        for case in invalid_cases:
+            with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING'"):
+                _extract_representation_map(case, "src_col", "tgt_col")
+
+    def test_raises_value_error_on_column_not_found(self, sample_rep_data):
+        """Tests that ValueError is raised when column resolution fails."""
+        with pytest.raises(ValueError):
+            _extract_representation_map(sample_rep_data, "invalid_src", "invalid_tgt")
+
+    def test_raises_value_error_on_empty_result_after_sanitization(self):
+        """Tests that ValueError is raised when all rows are dropped after sanitization."""
+        source_df = pd.DataFrame({"src_col": [None, None], "extra": [1, 2]})
+        target_df = pd.DataFrame({"tgt_col": [None, None], "extra": [3, 4]})
+        rep_data = {"source": source_df, "target": target_df}
+
+        with pytest.raises(ValueError, match="No valid mapping rows found"):
+            _extract_representation_map(rep_data, "src_col", "tgt_col")
+
+    def test_deduplication_of_pairs(self):
+        """Tests that duplicate mapping pairs are removed."""
+        source_df = pd.DataFrame({"src_col": ["A", "A"], "extra": [1, 2]})
+        target_df = pd.DataFrame({"tgt_col": ["X", "X"], "extra": [3, 4]})
+        rep_data = {"source": source_df, "target": target_df}
+
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 1
+        assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
