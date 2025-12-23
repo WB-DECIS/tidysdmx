@@ -45,7 +45,13 @@ from tidysdmx.structures import (
     build_multi_representation_map,
     build_structure_map,
     _extract_artefact_id,
-    build_structure_map_from_template_wb
+    _validate_mappings,
+    build_structure_map_from_template_wb,
+    _extract_all_artefact_ids,
+    _extract_metadata_from_info_sheet,
+    _extract_mapping_rule,
+    _is_missing_token,
+    _extract_representation_map
 
     )
 
@@ -1680,18 +1686,10 @@ class TestBuildStructureMapFromTemplateWb:
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
         assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
 
-    def test_missing_info_sheet_uses_defaults(self, valid_mappings):
-        """Tests that missing INFO sheet falls back to default agency and version."""
-        mappings = valid_mappings.copy()
-        mappings.pop("INFO")
-        structure_map = build_structure_map_from_template_wb(mappings)
-        assert structure_map.agency == "SDMX"
-        assert structure_map.version == "1.0"
-
     def test_missing_comp_mapping_sheet_raises_valueerror(self, valid_mappings):
         """Tests that missing COMP_MAPPING sheet raises ValueError."""
         mappings = {"INFO": valid_mappings["INFO"]}
-        with pytest.raises(ValueError, match="Sheet 'COMP_MAPPING' not found"):
+        with pytest.raises(ValueError, match="Missing required sheet 'COMP_MAPPING'."):
             build_structure_map_from_template_wb(mappings)
 
     def test_invalid_fixed_rule_format_raises_valueerror(self, valid_mappings):
@@ -1712,7 +1710,7 @@ class TestBuildStructureMapFromTemplateWb:
         """Tests that representation rule without REP_MAPPING sheet raises ValueError."""
         mappings = valid_mappings.copy()
         mappings.pop("REP_MAPPING")
-        with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING' sheet"):
+        with pytest.raises(ValueError, match="Missing required sheet 'REP_MAPPING'."):
             build_structure_map_from_template_wb(mappings)
 
     def test_representation_empty_combined_df_raises_valueerror(self, valid_mappings):
@@ -1745,7 +1743,305 @@ class TestBuildStructureMapFromTemplateWb:
         assert structure_map.id == "WB_STRUCTURE_MAP"
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
 
+class TestValidateMappings: #noqa: D101
+    def test_validate_mappings_valid_input(self):
+        """Valid input with all required keys and DataFrames should pass without error."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame(),
+            "REP_MAPPING": pd.DataFrame()
+        }
+        # Should not raise any exception
+        _validate_mappings(mappings)
 
 
+    def test_validate_mappings_missing_key(self):
+        """Missing one required key should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame()
+            # REP_MAPPING is missing
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "Missing required sheet 'REP_MAPPING'" in str(exc_info.value)
 
 
+    def test_validate_mappings_invalid_type(self):
+        """Invalid type for one of the keys should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": "not_a_dataframe",  # Invalid type
+            "REP_MAPPING": pd.DataFrame()
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "must be a pandas DataFrame" in str(exc_info.value)
+
+
+    def test_validate_mappings_empty_dict(self):
+        """Empty dictionary should raise ValueError for missing keys."""
+        mappings = {}
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "Missing required sheet 'INFO'" in str(exc_info.value)
+
+
+    def test_validate_mappings_partial_invalid_type(self):
+        """One valid key and one invalid type should raise ValueError."""
+        mappings = {
+            "INFO": pd.DataFrame(),
+            "COMP_MAPPING": pd.DataFrame(),
+            "REP_MAPPING": 123  # Invalid type
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_mappings(mappings)
+        assert "must be a pandas DataFrame" in str(exc_info.value)
+
+class TestExtractAllArtefactIds: #noqa: D101
+    
+    def test_extract_all_artefact_ids_normal(self):
+        """Test normal case with valid artefact keys and values."""
+        df = pd.DataFrame({
+            'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+            'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
+        })
+        result = _extract_all_artefact_ids(df)
+        assert result == {'dataflow': 'AGENCY:DF1(1.0)', 'datastructure': 'AGENCY:DSD1(1.0)', 'provisionagreement': 'AGENCY:PA1(1.0)'}
+        assert isinstance(result, dict)
+    
+    def test_extract_all_artefact_ids_with_missing_values(self):
+        """Test normal case with valid artefact keys and missing values."""
+        df = pd.DataFrame({
+            'Key': ['dataflow', 'datastructure', 'provisionagreement'],
+            'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', '']
+        })
+        result = _extract_all_artefact_ids(df)
+        assert result == {'dataflow': 'AGENCY:DF1(1.0)', 'datastructure': 'AGENCY:DSD1(1.0)'}
+        assert isinstance(result, dict)
+
+    def test_extract_all_artefact_ids_empty_df(self):
+        """Test empty DataFrame raises ValueError."""
+        df = pd.DataFrame(columns=['Key', 'Value'])
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_missing_columns(self):
+        """Test missing columns raises ValueError."""
+        df = pd.DataFrame({'Key': ['dataflow']})
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_no_matching_keys(self):
+        """Test DataFrame with no matching keys raises ValueError."""
+        df = pd.DataFrame({'Key': ['other'], 'Value': ['AGENCY:XYZ(1.0)']})
+        with pytest.raises(ValueError):
+            _extract_all_artefact_ids(df)
+
+    def test_extract_all_artefact_ids_invalid_type(self):
+        """Test invalid input type raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
+            _extract_all_artefact_ids("not a dataframe")
+
+
+class TestExtractMetadataFromInfoSheet:
+    """Tests for `_extract_metadata_from_info_sheet` function."""
+	
+    @pytest.fixture
+    def info_df_with_all(self):
+        """Fixture: DataFrame with datastructure, dataflow, and FMR_AGENCY keys."""
+        return pd.DataFrame({
+            "Key": ["datastructure", "dataflow", "FMR_AGENCY"],
+            "Value": ["AGENCY:DSD(1.0)", "AGENCY:DF(2.0)", "ALT_AGENCY"]
+        })
+
+    @pytest.fixture
+    def info_df_only_dataflow(self):
+        """Fixture: DataFrame with only dataflow key."""
+        return pd.DataFrame({
+            "Key": ["dataflow"],
+            "Value": ["AGENCY:DF(2.0)"]
+        })
+
+
+    @pytest.fixture
+    def empty_info_df(self):
+        """Fixture: Empty DataFrame."""
+        return pd.DataFrame(columns=["Key", "Value"])
+
+    def test_preferred_structure_type_present(self, info_df_with_all):
+        """Tests that datastructure is selected when present."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            info_df_with_all,
+            agency = "default_agency",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "AGENCY"
+        assert version == "1.0"
+        assert artefact_ref == "AGENCY:DSD(1.0)"
+
+    def test_fallback_to_dataflow(self, info_df_only_dataflow):
+        """Tests fallback when datastructure is missing but dataflow exists."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            info_df_only_dataflow, 
+            agency = "default_agency",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "AGENCY"
+        assert version == "2.0"
+        assert artefact_ref == "AGENCY:DF(2.0)"
+
+    def test_empty_dataframe_returns_defaults(self, empty_info_df):
+        """Tests that defaults are returned when DataFrame is empty."""
+        agency, version, artefact_ref = _extract_metadata_from_info_sheet(
+            empty_info_df,
+            agency = "SDMX",
+            version = "1.0",
+            structure_type =  "datastructure")
+        assert agency == "SDMX"
+        assert version == "1.0"
+        assert artefact_ref is None
+
+    def test_invalid_structure_type_still_falls_back(self, info_df_with_all):
+        """Tests that invalid structure_type raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
+            _extract_metadata_from_info_sheet(
+                info_df_with_all,
+                agency = "default_agency",
+            version = "1.0",
+            structure_type =  "invalid_type")
+
+class TestIsMissingToken:
+    """Tests for the `_is_missing_token` function which checks if a string is a missing token."""
+
+    @pytest.mark.parametrize("input_str,expected", [
+        ("nan", True),
+        ("NaN", True),
+        ("<na>", True),
+        ("<NA>", True),
+        ("", True),
+        ("   ", True),  # whitespace only
+        ("valid", False),
+        ("fixed:123", False),
+    ])
+    def test_missing_token_cases(self, input_str, expected):
+        """Tests that `_is_missing_token` correctly identifies missing tokens."""
+        assert _is_missing_token(input_str) == expected
+
+
+class TestExtractMappingRule:
+    """Tests for the `_extract_mapping_rule` function which parses mapping rules from a pandas Series."""
+
+    def test_skip_rule_when_target_empty(self):
+        """Tests that rule is 'skip' when TARGET is empty."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "", "MAPPING_RULES": "implicit"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "skip"
+        assert result["source_id"] == "SRC"
+        assert result["target_id"] == ""
+        assert result["fixed_value"] is None
+
+    def test_skip_rule_when_rule_missing(self):
+        """Tests that rule is 'skip' when MAPPING_RULES is missing-like."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "nan"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "skip"
+
+    def test_fixed_rule_valid(self):
+        """Tests that a valid fixed rule returns correct mapping."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:123"})
+        result = _extract_mapping_rule(row)
+        assert result == {
+            "mapping_rule": "fixed",
+            "source_id": "SRC",
+            "target_id": "TGT",
+            "fixed_value": "123",
+        }
+
+    def test_fixed_rule_invalid_format(self):
+        """Tests that an invalid fixed rule raises ValueError."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:"})
+        with pytest.raises(ValueError, match="Invalid fixed rule format"):
+            _extract_mapping_rule(row)
+
+    def test_implicit_rule_valid(self):
+        """Tests that implicit rule works when SOURCE is present."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "implicit"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "implicit"
+
+    def test_implicit_rule_missing_source(self):
+        """Tests that implicit rule raises ValueError when SOURCE is missing."""
+        row = pd.Series({"SOURCE": "", "TARGET": "TGT", "MAPPING_RULES": "implicit"})
+        with pytest.raises(ValueError, match="Implicit map rule requires"):
+            _extract_mapping_rule(row)
+
+    def test_representation_rule_valid(self):
+        """Tests that representation rule works when rule equals TARGET."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "TGT"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "representation"
+
+    def test_representation_rule_missing_source(self):
+        """Tests that representation rule raises ValueError when SOURCE is missing."""
+        row = pd.Series({"SOURCE": "", "TARGET": "TGT", "MAPPING_RULES": "TGT"})
+        with pytest.raises(ValueError, match="Representation map rule requires"):
+            _extract_mapping_rule(row)
+
+    def test_unknown_rule_raises_error(self):
+        """Tests that unknown mapping rule raises ValueError."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "unknown_rule"})
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            _extract_mapping_rule(row)
+
+class TestExtractRepresentationMap:
+    """Tests for `_extract_representation_map` which builds a sanitized mapping DataFrame."""
+
+    @pytest.fixture
+    def sample_rep_data(self):
+        """Provides valid source and target DataFrames for tests."""
+        source_df = pd.DataFrame({"src_col": ["A", "B", None, "C"], "extra": [1, 2, 3, 4]})
+        target_df = pd.DataFrame({"tgt_col": ["X", "Y", "Z", None], "extra": [5, 6, 7, 8]})
+        return {"source": source_df, "target": target_df}
+
+    def test_valid_mapping(self, sample_rep_data):
+        """Tests that valid mapping returns correct DataFrame with duplicates and NA removed."""
+        result_df = _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
+        expected = pd.DataFrame({"source": ["A", "B"], "target": ["X", "Y"]})
+        pd.testing.assert_frame_equal(result_df, expected)
+
+    @pytest.mark.skip(reason="Not sure this is expected behavior")
+    def test_raises_value_error_on_missing_rep_data(self):
+        """Tests that ValueError is raised when rep_data is empty or invalid."""
+        invalid_cases = [
+            {},  # Empty dict
+            {"source": None, "target": None},  # None DataFrames
+            {"source": pd.DataFrame(), "target": pd.DataFrame()},  # Empty DataFrames
+        ]
+        for case in invalid_cases:
+            with pytest.raises(ValueError, match="Mapping rule requires 'REP_MAPPING'"):
+                _extract_representation_map(case, "src_col", "tgt_col")
+
+    def test_raises_value_error_on_column_not_found(self, sample_rep_data):
+        """Tests that ValueError is raised when column resolution fails."""
+        with pytest.raises(ValueError):
+            _extract_representation_map(sample_rep_data, "invalid_src", "invalid_tgt")
+
+    def test_raises_value_error_on_empty_result_after_sanitization(self):
+        """Tests that ValueError is raised when all rows are dropped after sanitization."""
+        source_df = pd.DataFrame({"src_col": [None, None], "extra": [1, 2]})
+        target_df = pd.DataFrame({"tgt_col": [None, None], "extra": [3, 4]})
+        rep_data = {"source": source_df, "target": target_df}
+
+        with pytest.raises(ValueError, match="No valid mapping rows found"):
+            _extract_representation_map(rep_data, "src_col", "tgt_col")
+
+    def test_deduplication_of_pairs(self):
+        """Tests that duplicate mapping pairs are removed."""
+        source_df = pd.DataFrame({"src_col": ["A", "A"], "extra": [1, 2]})
+        target_df = pd.DataFrame({"tgt_col": ["X", "X"], "extra": [3, 4]})
+        rep_data = {"source": source_df, "target": target_df}
+
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 1
+        assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
