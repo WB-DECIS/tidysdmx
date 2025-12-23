@@ -1,7 +1,17 @@
 # Changelog
 
 <!--next-version-placeholder-->
-## v0.7.0 (16/12/2025)
+## v0.7.1 (23/12/2025)
+### Added
+
+- Added functions to the `structures` module
+
+### Changed
+
+- Refactored functions in the `structures` module
+
+
+## v0.7.0 (18/12/2025)
 ### Added
 
 - Added `parse_mapping_template_wb` function
