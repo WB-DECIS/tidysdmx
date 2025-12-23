@@ -1507,7 +1507,7 @@ def build_structure_map_from_template_wb(
 
     generated_maps: List[Union[FixedValueMap, ImplicitComponentMap, ComponentMap]] = []
 
-    # 4. Iterate Logic
+    # 4. Generate structure map elements
     for _, row in comp_df.iterrows():
         try:
             parsed = _extract_mapping_rule(row)
