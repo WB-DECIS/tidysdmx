@@ -48,7 +48,9 @@ from tidysdmx.structures import (
     _validate_mappings,
     build_structure_map_from_template_wb,
     _extract_all_artefact_ids,
-    _extract_metadata_from_info_sheet
+    _extract_metadata_from_info_sheet,
+    _extract_mapping_rule,
+    _is_missing_token
 
     )
 
@@ -1907,3 +1909,86 @@ class TestExtractMetadataFromInfoSheet:
                 agency = "default_agency",
             version = "1.0",
             structure_type =  "invalid_type")
+
+class TestIsMissingToken:
+    """Tests for the `_is_missing_token` function which checks if a string is a missing token."""
+
+    @pytest.mark.parametrize("input_str,expected", [
+        ("nan", True),
+        ("NaN", True),
+        ("<na>", True),
+        ("<NA>", True),
+        ("", True),
+        ("   ", True),  # whitespace only
+        ("valid", False),
+        ("fixed:123", False),
+    ])
+    def test_missing_token_cases(self, input_str, expected):
+        """Tests that `_is_missing_token` correctly identifies missing tokens."""
+        assert _is_missing_token(input_str) == expected
+
+
+class TestExtractMappingRule:
+    """Tests for the `_extract_mapping_rule` function which parses mapping rules from a pandas Series."""
+
+    def test_skip_rule_when_target_empty(self):
+        """Tests that rule is 'skip' when TARGET is empty."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "", "MAPPING_RULES": "implicit"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "skip"
+        assert result["source_id"] == "SRC"
+        assert result["target_id"] == ""
+        assert result["fixed_value"] is None
+
+    def test_skip_rule_when_rule_missing(self):
+        """Tests that rule is 'skip' when MAPPING_RULES is missing-like."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "nan"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "skip"
+
+    def test_fixed_rule_valid(self):
+        """Tests that a valid fixed rule returns correct mapping."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:123"})
+        result = _extract_mapping_rule(row)
+        assert result == {
+            "mapping_rule": "fixed",
+            "source_id": "SRC",
+            "target_id": "TGT",
+            "fixed_value": "123",
+        }
+
+    def test_fixed_rule_invalid_format(self):
+        """Tests that an invalid fixed rule raises ValueError."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:"})
+        with pytest.raises(ValueError, match="Invalid fixed rule format"):
+            _extract_mapping_rule(row)
+
+    def test_implicit_rule_valid(self):
+        """Tests that implicit rule works when SOURCE is present."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "implicit"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "implicit"
+
+    def test_implicit_rule_missing_source(self):
+        """Tests that implicit rule raises ValueError when SOURCE is missing."""
+        row = pd.Series({"SOURCE": "", "TARGET": "TGT", "MAPPING_RULES": "implicit"})
+        with pytest.raises(ValueError, match="Implicit map rule requires"):
+            _extract_mapping_rule(row)
+
+    def test_representation_rule_valid(self):
+        """Tests that representation rule works when rule equals TARGET."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "TGT"})
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "representation"
+
+    def test_representation_rule_missing_source(self):
+        """Tests that representation rule raises ValueError when SOURCE is missing."""
+        row = pd.Series({"SOURCE": "", "TARGET": "TGT", "MAPPING_RULES": "TGT"})
+        with pytest.raises(ValueError, match="Representation map rule requires"):
+            _extract_mapping_rule(row)
+
+    def test_unknown_rule_raises_error(self):
+        """Tests that unknown mapping rule raises ValueError."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "unknown_rule"})
+        with pytest.raises(ValueError, match="Unknown mapping rule"):
+            _extract_mapping_rule(row)

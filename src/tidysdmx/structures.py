@@ -1704,3 +1704,77 @@ def _extract_metadata_from_info_sheet(
             pass 
 
     return current_agency, current_version, artefact_ref
+
+# tokens that mean "missing" for MAPPING_RULES
+_MISSING_RULE_TOKENS = {"nan", "<na>", ""}
+
+def _is_missing_token(s: str) -> bool:
+    """Return True if s is a case-insensitive missing token."""
+    return s.strip().lower() in _MISSING_RULE_TOKENS
+
+def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
+    """Parse a COMP_MAPPING row and return a dict of mapping rules. This function performs *syntax-level* validation only and never touches external data.
+
+    Returns a dict with the following keys:
+      - mapping_rule: one of {"skip", "fixed", "implicit", "representation"}
+      - source_id: normalized SOURCE (may be empty for fixed)
+      - target_id: normalized TARGET (empty only if mapping_rule == "skip")
+      - fixed_value: present only for mapping_rule == "fixed", else None
+
+    Raises:
+      - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
+                    or for implicit/representation if SOURCE is missing,
+                    or for unknown rule strings.
+    """
+    source_id = str(row.get("SOURCE", "")).strip()
+    target_id = str(row.get("TARGET", "")).strip()
+    raw_rule  = str(row.get("MAPPING_RULES", "")).strip()
+
+    # Skip when TARGET is empty or rule is missing-ish
+    if not target_id or _is_missing_token(raw_rule):
+        return {
+            "mapping_rule": "skip",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    rule_lower = raw_rule.lower()
+
+    # fixed:<VALUE>
+    if rule_lower.startswith("fixed:"):
+        parts = raw_rule.split(":", 1)
+        if len(parts) < 2 or not parts[1].strip():
+            raise ValueError(f"Invalid fixed rule format: {raw_rule}")
+        fixed_val = parts[1].strip()
+        return {
+            "mapping_rule": "fixed",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": fixed_val,
+        }
+
+    # implicit
+    if rule_lower == "implicit":
+        if not source_id:
+            raise ValueError("Implicit map rule requires a non-empty 'SOURCE' component ID.")
+        return {
+            "mapping_rule": "implicit",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    # representation (exact equality: rule == target_id)
+    if raw_rule == target_id:
+        if not source_id:
+            raise ValueError("Representation map rule requires a non-empty 'SOURCE' component ID.")
+        return {
+            "mapping_rule": "representation",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+        }
+
+    # unknown
+    raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
