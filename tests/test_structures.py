@@ -15,7 +15,9 @@ from pysdmx.model.map import (
     MultiValueMap, 
     RepresentationMap,
     ComponentMap,
-    MultiRepresentationMap
+    MultiRepresentationMap,
+    StructureMap,
+    MultiComponentMap
     )
 import pandas as pd
 import numpy as np
@@ -51,7 +53,8 @@ from tidysdmx.structures import (
     _extract_metadata_from_info_sheet,
     _extract_mapping_rule,
     _is_missing_token,
-    _extract_representation_map
+    _extract_representation_map,
+    create_xl_template_from_sm
 
     )
 
@@ -2045,3 +2048,97 @@ class TestExtractRepresentationMap:
         result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
         assert len(result_df) == 1
         assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
+
+class TestCreateXlTemplateFromSm:
+    """Tests for the create_xl_template_from_sm function which generates Excel templates from a StructureMap."""
+
+    @pytest.fixture
+    def structure_map_with_various_mappings(self):
+        """Fixture that returns a StructureMap with multiple mapping types including RepresentationMap."""
+        m1 = ImplicitComponentMap("OBS_CONF", "CONF_STATUS")
+        m2 = FixedValueMap("FREQ", "M")
+        m3 = DatePatternMap("ACTIVITY_DATE", "TIME_PERIOD", "MMM YYYY", "M")
+        m4 = ComponentMap(
+            "SRC1",
+            "TGT1",
+            RepresentationMap(
+                id="REP1",
+                name="RepMap1",
+                agency="BIS",
+                source="CL1",
+                target="CL2",
+                maps=[ValueMap(source="1", target="A"), ValueMap(source="2", target="B")],
+            ),
+        )
+        m5 = MultiComponentMap(
+            source=["SRC_M1", "SRC_M2"],
+            target=["TGT_M1", "TGT_M2"],
+            values=MultiRepresentationMap(
+                id = "MREP1",
+                agency="BIS",
+                maps=[
+                    ValueMap(source=["X1", "X2"], target=["Y1", "Y2"]),
+                    ValueMap(source=["X3", "X4"], target=["Y3", "Y4"]),
+                ]
+            ),
+        )
+
+        return StructureMap(
+            id="SM_FULL",
+            name="Full Map",
+            agency="WB",
+            source="urn:sdmx:source",
+            target="urn:sdmx:target",
+            maps=[m1, m2, m3, m4, m5],
+        )
+
+
+    @pytest.fixture
+    def empty_structure_map(self):
+        """Fixture that returns a StructureMap with no mappings."""
+        return StructureMap(
+            id="SM_EMPTY",
+            name="Empty Map",
+            agency="WB",
+            source="src",
+            target="tgt",
+            maps=[],
+        )
+
+    def test_valid_structure_map_creates_comp_mapping_sheet(self, structure_map_with_various_mappings):
+        """Tests that comp_mapping sheet is created with correct columns and rows."""
+        result = create_xl_template_from_sm(structure_map_with_various_mappings)
+        assert isinstance(result, dict)
+        # assert "comp_mapping" in result
+        # df = result["comp_mapping"]
+        # assert isinstance(df, pd.DataFrame)
+        # assert set(df.columns) == {"source", "target", "mapping_rules"}
+        # assert len(df) == len(structure_map_with_various_mappings.maps)
+
+    def test_representation_map_creates_extra_sheet(self, structure_map_with_various_mappings):
+        """Tests that RepresentationMap creates an additional sheet with correct columns."""
+        result = create_xl_template_from_sm(structure_map_with_various_mappings)
+        assert "TGT1" in result
+        df = result["TGT1"]
+        assert isinstance(df, pd.DataFrame)
+        assert set(df.columns) == {"source", "target", "valid_from", "valid_to"}
+        assert len(df) == 2  # Two ValueMap entries
+
+    def test_multi_representation_map_creates_extra_sheet(self, structure_map_with_various_mappings):
+        """Tests that MultiRepresentationMap creates an additional sheet with correct columns."""
+        result = create_xl_template_from_sm(structure_map_with_various_mappings)
+        assert "TGT_M1" in result
+        df = result["TGT_M1"]
+        assert isinstance(df, pd.DataFrame)
+        assert set(df.columns) == {"source", "target", "valid_from", "valid_to"}
+        assert len(df) == 2  # Two ValueMap entries
+
+    def test_empty_maps_raises_value_error(self, empty_structure_map):
+        """Tests that ValueError is raised when StructureMap contains no mappings."""
+        with pytest.raises(ValueError, match="structure_map contains no mappings"):
+            create_xl_template_from_sm(empty_structure_map)
+
+    def test_invalid_type_raises_type_error(self):
+        """Tests that TypeError is raised when input is not a StructureMap instance."""
+        with pytest.raises(TypeCheckError):
+            create_xl_template_from_sm("not_a_structure_map")

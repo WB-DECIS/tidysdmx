@@ -51,7 +51,8 @@ from .structures import (
     build_single_component_map,
     build_structure_map,
     create_schema_from_table,
-    build_structure_map_from_template_wb
+    build_structure_map_from_template_wb,
+    create_xl_template_from_sm
     )
 
 __all__ = [
@@ -107,5 +108,6 @@ __all__ = [
     "build_structure_map_from_template_wb",
     "apply_multi_component_map",
     "standardize_output",
-    "parse_mapping_template_wb"
+    "parse_mapping_template_wb",
+    "create_xl_template_from_sm"
     ]

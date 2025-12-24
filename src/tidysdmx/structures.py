@@ -1,13 +1,10 @@
 from typeguard import typechecked
 from dataclasses import dataclass
 from typing import List, Tuple, Union, Optional, Literal, Sequence, Any, Dict
-from itertools import combinations
 from datetime import datetime, timezone
 from pysdmx.model.dataflow import Schema, Components, Component
 from pysdmx.model import Concept, Role, DataType, Codelist, Code
-from openpyxl import Workbook, load_workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-from pathlib import Path
+from openpyxl import Workbook
 from pysdmx.model.map import (
     RepresentationMap, 
     FixedValueMap, 
@@ -17,7 +14,8 @@ from pysdmx.model.map import (
     MultiValueMap,
     MultiRepresentationMap,
     ComponentMap,
-    StructureMap
+    StructureMap,
+    MultiComponentMap
     )
 import pandas as pd
 import re
@@ -1450,8 +1448,6 @@ def _validate_mappings(mappings: Dict[str, pd.DataFrame]) -> None:
 
 
 # Region: Main Function
-
-
 @typechecked
 def build_structure_map_from_template_wb(
     mappings: Dict[str, pd.DataFrame],
@@ -1567,8 +1563,6 @@ def build_structure_map_from_template_wb(
     )
 
 # endregion
-
-
 
 @typechecked
 def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
@@ -1838,3 +1832,53 @@ def _extract_representation_map(
         )
 
     return rep_mapping_df
+
+@typechecked
+def create_xl_template_from_sm(structure_map: StructureMap) -> dict[str, pd.DataFrame]:
+    """Create a dictionary of pandas DataFrames representing mapping templates from a StructureMap object. Each DataFrame corresponds to a sheet that can be exported to a multi-sheet Excel file.
+
+    Args:
+        structure_map (StructureMap): A pysdmx StructureMap object containing component and value mappings.
+
+    Returns:
+        dict[str, pd.DataFrame]: Dictionary where keys are sheet names and values are DataFrames for Excel export.
+
+    Raises:
+        ValueError: If structure_map contains no mappings.
+        TypeError: If structure_map is not an instance of StructureMap.
+
+    Examples:
+        >>> from pysdmx.model.mapping import StructureMap
+        >>> sm = StructureMap(id='SM_IFPRI_ASTI_TO_DATA360', name='Example', version='1.0', agency='WB', source='src', target='tgt', maps=[])
+        >>> result = create_xl_template_from_sm(sm)
+        >>> isinstance(result, dict)
+        True
+    """
+    if not structure_map.maps:
+        raise ValueError("structure_map contains no mappings.")
+
+    sheets: dict[str, pd.DataFrame] = {}
+
+    # Component mapping sheet
+    comp_rows = []
+    for m in structure_map.maps:
+        if isinstance(m, ImplicitComponentMap):
+            comp_rows.append({"source": m.source, "target": m.target, "mapping_rules": "implicit"})
+        elif isinstance(m, FixedValueMap):
+            comp_rows.append({"source": "", "target": m.target, "mapping_rules": f"fixed:{m.value}"})
+        elif isinstance(m, ComponentMap):
+            comp_rows.append({"source": m.source, "target": m.target, "mapping_rules": m.target})
+        elif isinstance(m, MultiComponentMap):
+            comp_rows.append({"source": ":".join(m.source), "target": ":".join(m.target), "mapping_rules": ":".join(m.target)})
+    sheets["comp_mapping"] = pd.DataFrame(comp_rows, columns=["source", "target", "mapping_rules"])
+
+    # Representation mapping sheets
+    for m in structure_map.maps:
+        if isinstance(m, ComponentMap) and isinstance(m.values, RepresentationMap):
+            rows = [{"source": vm.source, "target": vm.target, "valid_from": "", "valid_to": ""} for vm in m.values.maps]
+            sheets[m.target] = pd.DataFrame(rows, columns=["source", "target", "valid_from", "valid_to"])
+        elif isinstance(m, MultiComponentMap) and isinstance(m.values, MultiRepresentationMap):
+            rows = [{"source": "|".join(vm.source), "target": "|".join(vm.target), "valid_from": "", "valid_to": ""} for vm in m.values.maps]
+            sheets[m.target[0]] = pd.DataFrame(rows, columns=["source", "target", "valid_from", "valid_to"])
+
+    return sheets
