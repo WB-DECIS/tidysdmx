@@ -216,20 +216,23 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
 	
 def standardize_sdmx(
 		data: pd.DataFrame, 
-		mapping: dict
+		mapping: dict,
+		cat_indicator: bool = False
 	) -> pd.DataFrame:
 	"""Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
 
 	Args:
 		data (pd.DataFrame): The input DataFrame with raw data.
 		mapping (dict): A dictionary containing the mapping DataFrame and other relevant information.
+		cat_indicator (bool): Whether OBS_VALUE is categorical indicator. Default is False.
 
 	Returns:
 		pd.DataFrame: The standardized DataFrame with columns transformed according to the mapping.
 	"""
 	data = transform_source_to_target(data, mapping)
 	data = map_to_sdmx(data, mapping)
-	data = standardize_data_for_upload(data, dsd=mapping["dsd_id"])
+	data = standardize_data_for_upload(data, dsd=mapping["dsd_id"], 
+									cat_indicator=cat_indicator)
 
 	return data
 
@@ -531,7 +534,11 @@ def standardize_indicator_id(df):
 
 	return df
 
-def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
+def standardize_data_for_upload(df, 
+								dsd, 
+								structure="datastructure", 
+								action="I",
+								cat_indicator: bool = False):
 	"""Standardizes the DataFrame for SDMX upload.
 
 	Finalizes the DataFrame for a successful upload into an SDMX database by fixing the 'INDICATOR' values, adding necessary reference columns, and reordering the columns.
@@ -541,6 +548,7 @@ def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
 		dataset_id (str): The dataset identifier to prepend to the 'INDICATOR' values.
 		dsd (str): The Data Structure Definition (DSD) identifier.
 		structure (str): The structure type. Default is 'datastructure'. Potential options accepted by SDMX for structure include:
+		cat_indicator (bool): Whether OBS_VALUE is categorical indicator. Default is False.
 			
 			- 'datastructure': Represents a data structure definition.
 			- 'metadataflow': Represents a metadata flow definition.
@@ -563,7 +571,8 @@ def standardize_data_for_upload(df, dsd, structure="datastructure", action="I"):
 	)
 	# QUALITY ASSURANCE OPERATION
 	# WILL BE MOVED INTO THERE OWN NODES
-	df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
+	if not cat_indicator:
+		df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
 	df = qa_remove_duplicates(df)
 
 	df = standardize_indicator_id(df=df)
