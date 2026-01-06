@@ -1,6 +1,11 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.7.2 (6/1/2026)
+### Added
+
+- Added a new parameter to `standardize_sdmx` and `standardize_data_for_upload` to support string in `OBS_VALUE`.
+
 ## v0.7.1 (23/12/2025)
 ### Added
 
