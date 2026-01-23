@@ -1,6 +1,6 @@
 from typeguard import typechecked
 from dataclasses import dataclass
-from typing import List, Tuple, Union, Optional, Literal, Sequence, Any, Dict
+from typing import List, Tuple, Union, Optional, Literal, Sequence, Any, Dict, Iterable
 from itertools import combinations
 from datetime import datetime, timezone
 from pysdmx.model.dataflow import Schema, Components, Component
@@ -655,42 +655,42 @@ class MappingDefinition:
     fixed_value: Optional[str] = None
     representation_df: Optional[pd.DataFrame] = None
 
-@typechecked
-def _read_comp_mapping_sheet(workbook: Workbook) -> pd.DataFrame:
-    """Loads and validates the structure of the mandatory 'comp_mapping' sheet.
+# @typechecked
+# def _read_comp_mapping_sheet(workbook: Workbook) -> pd.DataFrame:
+#     """Loads and validates the structure of the mandatory 'comp_mapping' sheet.
 
-    Args:
-        workbook (Workbook): The openpyxl Workbook object.
+#     Args:
+#         workbook (Workbook): The openpyxl Workbook object.
 
-    Returns:
-        pd.DataFrame: The validated DataFrame with normalized headers.
+#     Returns:
+#         pd.DataFrame: The validated DataFrame with normalized headers.
 
-    Raises:
-        KeyError: If 'comp_mapping' sheet is missing.
-        ValueError: If the sheet is empty or headers are incorrect.
-    """
-    try:
-        ws_comp = workbook["comp_mapping"]
-    except KeyError:
-        raise KeyError("Mandatory sheet 'comp_mapping' not found in workbook.")
+#     Raises:
+#         KeyError: If 'comp_mapping' sheet is missing.
+#         ValueError: If the sheet is empty or headers are incorrect.
+#     """
+#     try:
+#         ws_comp = workbook["comp_mapping"]
+#     except KeyError:
+#         raise KeyError("Mandatory sheet 'COMP_MAPPING' not found in workbook.")
 
-    data = list(ws_comp.values)
-    if not data or len(data) < 2:
-        raise ValueError("The 'comp_mapping' sheet is empty or missing headers.")
+#     data = list(ws_comp.values)
+#     if not data or len(data) < 2:
+#         raise ValueError("The 'COMP_MAPPING' sheet is empty or missing headers.")
 
-    df_comp = pd.DataFrame(data[1:], columns=data[0])
+#     df_comp = pd.DataFrame(data[1:], columns=data[0])
     
-    # Normalize headers
-    df_comp.columns = [str(c).lower() for c in df_comp.columns]
-    required_cols = {"source", "target", "mapping_rules"}
-    if not required_cols.issubset(set(df_comp.columns)):
-        raise ValueError(f"The 'comp_mapping' sheet must have columns: {required_cols}")
+#     # Normalize headers
+#     df_comp.columns = [str(c).lower() for c in df_comp.columns]
+#     required_cols = {"source", "target", "mapping_rules"}
+#     if not required_cols.issubset(set(df_comp.columns)):
+#         raise ValueError(f"The 'comp_mapping' sheet must have columns: {required_cols}")
     
     
-    # Remove rows where all values are NaN
-    df_comp = df_comp.dropna(how='all')
+#     # Remove rows where all values are NaN
+#     df_comp = df_comp.dropna(how='all')
 
-    return df_comp.fillna("")
+#     return df_comp.fillna("")
 
 
 @typechecked
@@ -738,51 +738,51 @@ def _create_representation_definition(
         representation_df=df_rep
     )
 
-@typechecked
-def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
-    """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
+# @typechecked
+# def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
+#     """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
 
-    Args:
-        workbook (Workbook): The openpyxl Workbook object.
+#     Args:
+#         workbook (Workbook): The openpyxl Workbook object.
 
-    Returns:
-        list[MappingDefinition]: A list of intermediate objects describing the maps.
+#     Returns:
+#         list[MappingDefinition]: A list of intermediate objects describing the maps.
 
-    Raises:
-        KeyError: If 'comp_mapping' sheet is missing (from helper).
-        ValueError: If sheet structure or rules are malformed (from helpers).
-    """
-    # 1. Load and Validate Main Mapping Sheet Structure
-    df_comp = _read_comp_mapping_sheet(workbook)
+#     Raises:
+#         KeyError: If 'comp_mapping' sheet is missing (from helper).
+#         ValueError: If sheet structure or rules are malformed (from helpers).
+#     """
+#     # 1. Load and Validate Main Mapping Sheet Structure
+#     df_comp = _read_comp_mapping_sheet(workbook)
     
-    definitions: list[MappingDefinition] = []
+#     definitions: list[MappingDefinition] = []
     
-    # 2. Iterate and Dispatch Parsing
-    for _, row in df_comp.iterrows():
-        source: str = str(row["source"]).strip()
-        target: str = str(row["target"]).strip()
-        mapping_rules: str = str(row["mapping_rules"]).strip()
+#     # 2. Iterate and Dispatch Parsing
+#     for _, row in df_comp.iterrows():
+#         source: str = str(row["source"]).strip()
+#         target: str = str(row["target"]).strip()
+#         mapping_rules: str = str(row["mapping_rules"]).strip()
         
-        if not target:
-            continue
-        if not mapping_rules and not source:
-            continue
+#         if not target:
+#             continue
+#         if not mapping_rules and not source:
+#             continue
 
-        if mapping_rules.startswith("fixed:"):
-            definitions.append(_create_fixed_definition(row, target, mapping_rules))
+#         if mapping_rules.startswith("fixed:"):
+#             definitions.append(_create_fixed_definition(row, target, mapping_rules))
             
-        elif mapping_rules == "implicit":
-            definitions.append(_create_implicit_definition(row, target, source))
+#         elif mapping_rules == "implicit":
+#             definitions.append(_create_implicit_definition(row, target, source))
             
-        elif mapping_rules == target and mapping_rules:
-            definitions.append(_create_representation_definition(workbook, target, source))
+#         elif mapping_rules == target and mapping_rules:
+#             definitions.append(_create_representation_definition(workbook, target, source))
             
-        elif mapping_rules and not mapping_rules.startswith("=HYPERLINK"):
-             raise ValueError(
-                f"Unknown mapping rule for target '{target}': '{mapping_rules}'"
-            )
+#         elif mapping_rules and not mapping_rules.startswith("=HYPERLINK"):
+#              raise ValueError(
+#                 f"Unknown mapping rule for target '{target}': '{mapping_rules}'"
+#             )
 
-    return definitions
+#     return definitions
 
 @typechecked
 def build_structure_map(
@@ -1448,6 +1448,136 @@ def _validate_mappings(mappings: Dict[str, pd.DataFrame]) -> None:
         if not isinstance(mappings[key], pd.DataFrame):
             raise ValueError(f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}.")
 
+@typechecked
+def _collect_required_sheet_errors(
+    mappings: dict[str, pd.DataFrame],
+    required_keys: Iterable[str],
+) -> List[str]:
+    """Collect validation errors related to missing required sheets."""
+    errors: List[str] = []
+    
+    # Check that mandatory sheets are present
+    for sheet_name in required_keys:
+        if sheet_name not in mappings:
+            msg = f"Missing required sheet: '{sheet_name}'."
+            errors.append(msg)
+
+    return errors
+
+
+@typechecked
+def _collect_mapping_rules_errors(
+    comp_mapping: pd.DataFrame,
+    *, # Ensures following args are keyword-only
+    valid_rules: Iterable[str],
+    valid_prefixes: Iterable[str],
+) -> List[str]:
+    """Collect validation errors for the MAPPING_RULES column in COMP_MAPPING.
+
+    Rules:
+        * Column 'MAPPING_RULES' must exist.
+        * Each non-null entry must be:
+            - one of valid_rules
+            - or start with one of valid_prefixes followed by a non-empty value.
+    """
+    errors: List[str] = []
+
+    if "MAPPING_RULES" not in comp_mapping.columns:
+        msg = "COMP_MAPPING sheet is missing required 'MAPPING_RULES' column."
+        # logger.debug("Validation error: %s", msg)
+        errors.append(msg)
+        return errors
+
+    valid_set = set(valid_rules)
+
+    # Normalize prefixes once
+    prefixes = tuple(str(p) for p in valid_prefixes)
+    if not prefixes or any(p == "" for p in prefixes):
+        raise ValueError("Argument 'valid_prefixes' must contain non-empty strings.")
+
+    rules_series = comp_mapping["MAPPING_RULES"]
+
+    for row_idx, raw_value in rules_series.items():
+        if pd.isna(raw_value):
+            continue
+
+        value = str(raw_value).strip()
+
+        # 1) Literal rules
+        if value in valid_set:
+            continue
+
+        # 2) Prefixed rules (enforce non-empty parsed_value)
+        matched_prefix = next((p for p in prefixes if value.startswith(p)), None)
+        if matched_prefix is not None:
+            parsed_value = value[len(matched_prefix) :].strip()
+            if not parsed_value:
+                msg = (
+                    f"Invalid MAPPING_RULES value at row {row_idx}: '{raw_value}'. "
+                    f"Rule '{matched_prefix}' must be followed by a non-empty value, "
+                    f"e.g. '{matched_prefix}A'."
+                )
+                # logger.debug("Validation error: %s", msg)
+                errors.append(msg)
+            # either way, we handled a recognized prefix (valid or invalid)
+            continue
+
+        # 3) Everything else invalid
+        msg = (
+            f"Invalid MAPPING_RULES value at row {row_idx}: '{raw_value}'. "
+            "Expected one of "
+            f"{sorted(valid_set)!r} "
+            f"or a string starting with one of {list(prefixes)!r}."
+        )
+        # logger.debug("Validation error: %s", msg)
+        errors.append(msg)
+
+    return errors
+
+@typechecked
+def _validate_mapping_template_wb(
+    mappings: dict[str, pd.DataFrame],
+    *,  # Ensures following args are keyword-only
+    required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
+    valid_rules: Iterable[str] = ("representation", "implicit"),
+    valid_prefixes: Iterable[str] = ("fixed:",),
+) -> None:
+    """Validate a mapping template workbook represented as a mapping of DataFrames.
+
+    If any validation fails, raises ValueError listing all issues.
+    """
+    # Ensure functions arguments are of the expected type
+    for key in mappings.keys():
+        # All keys should be strings
+        if not isinstance(key, str):
+            raise ValueError(f"All keys must be strings. Key: '{key}' is of type {type(key).__name__}.")
+        # Values should be dataframes
+        if not isinstance(mappings[key], pd.DataFrame):
+            raise ValueError(f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}.")
+
+    errors: List[str] = []
+
+    # 1) Check required sheet presence and type validity
+    errors.extend(_collect_required_sheet_errors(mappings, required_keys))
+
+    # 2) Validate mapping_rules
+    comp_mapping = mappings.get("COMP_MAPPING")
+    if comp_mapping is not None:
+        errors.extend(
+            _collect_mapping_rules_errors(
+                comp_mapping,
+                valid_rules=valid_rules,
+                valid_prefixes=valid_prefixes,
+            )
+        )
+
+    if errors:
+        full_message = (
+            "Mapping template workbook validation failed with the "
+            "following issues:\n- " + "\n- ".join(errors)
+        )
+        raise ValueError(full_message)
+
 
 # Region: Main Function
 
@@ -1459,6 +1589,9 @@ def build_structure_map_from_template_wb(
     structure_map_id: str = "WB_STRUCTURE_MAP",
     structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
     version: str = "1.0",
+    required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
+    valid_rules: Iterable[str] = ("representation", "implicit"),
+    valid_prefixes: Iterable[str] = ("fixed:",)
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
@@ -1466,6 +1599,9 @@ def build_structure_map_from_template_wb(
         mappings (Dict[str, pd.DataFrame]): Dictionary of DataFrames containing all sheets.
         agency (str): Fallback agency ID if not found in INFO.
         structure_map_id (str): ID for the resulting StructureMap.
+        structure_type (Literal["datastructure", "dataflow", "provisionagreement"]):
+            The type of artefact to extract from INFO.
+        version (str): Fallback version if not found in INFO.
 
     Returns:
         StructureMap: A valid pysdmx StructureMap object.
@@ -1484,7 +1620,10 @@ def build_structure_map_from_template_wb(
         True
     """
     # Validate mappings upfront
-    _validate_mappings(mappings)
+    _validate_mapping_template_wb(mappings,
+            required_keys = required_keys,
+            valid_rules = valid_rules,
+            valid_prefixes = valid_prefixes)
 
     # 1. Extract Metadata (Agency & Version)
     info_df = _parse_info_sheet(mappings)
@@ -1755,9 +1894,10 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
         }
 
     # representation (exact equality: rule == target_id)
-    if raw_rule == target_id:
-        if not source_id:
-            raise ValueError("Representation map rule requires a non-empty 'SOURCE' component ID.")
+    # if raw_rule == target_id:
+    if rule_lower == "representation":
+        if not source_id or not target_id:
+            raise ValueError("Representation map rule requires non-empty 'SOURCE' and 'TARGET' component ID.")
         return {
             "mapping_rule": "representation",
             "source_id": source_id,
