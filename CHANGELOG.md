@@ -1,6 +1,11 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.7.3 (23/1/2026)
+### Added
+
+- Added functions to make more robust validations of the Excel template, and more helpful error messages.
+
 ## v0.7.2 (6/1/2026)
 ### Added
 
