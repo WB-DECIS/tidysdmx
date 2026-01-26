@@ -1,6 +1,11 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.7.4 (26/1/2026)
+### Changed
+
+- Changed how to organize dataframes based on `artefact_type`, e.g., `datastructure`, `dataflow` or `provisionagreement`.
+
 ## v0.7.3 (23/1/2026)
 ### Added
 
