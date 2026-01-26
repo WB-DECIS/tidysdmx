@@ -1,6 +1,11 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.7.5 (26/1/2026)
+### Fixed
+
+- Fixed `validate_dataset_local` to support dataflows
+
 ## v0.7.4 (26/1/2026)
 ### Changed
 
