@@ -39,7 +39,11 @@ def validate_dataset_local(
 
     # STEP 1: Validate components
     try:
-        validate_columns(df, valid_columns=valid["valid_comp"])
+        validate_columns(
+			df, 
+			valid_columns=valid["valid_comp"],
+			sdmx_cols=sdmx_cols
+		)
     except ValueError as e:
         error_records.append({error_columns[0]: "columns", error_columns[1]: str(e)})
 
