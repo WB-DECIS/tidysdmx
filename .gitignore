@@ -150,7 +150,7 @@ dmypy.json
 *.pem
 
 # Custom
-notebooks/TMP/
+TMP/
 # Ignore everything under scripts/
 scripts/*
 #But keep the scripts directory itself
