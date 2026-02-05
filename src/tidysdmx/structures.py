@@ -1,10 +1,22 @@
 from typeguard import typechecked
+from collections import namedtuple
 from dataclasses import dataclass
 from typing import List, Tuple, Union, Optional, Literal, Sequence, Any, Dict, Iterable
 from itertools import combinations
 from datetime import datetime, timezone
-from pysdmx.model.dataflow import Schema, Components, Component
-from pysdmx.model import Concept, Role, DataType, Codelist, Code
+from pysdmx.model.__base import ItemReference
+from pysdmx.model import (
+    Role, 
+    DataType, 
+    Codelist, 
+    Code, 
+    DataStructureDefinition, 
+    Component, 
+    Components, 
+    Concept, 
+    ConceptScheme,  
+    Schema
+    )
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from pathlib import Path
@@ -1032,6 +1044,324 @@ def _create_time_period_component() -> Component:
         description="Timespan or point in time to which the observation actually refers.",
     )
 
+@typechecked
+def _concept_ref(agency_id, scheme_id, version, concept_id):
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
+        f"{agency_id}:{scheme_id}({version}).{concept_id}"
+    )
+    concept = Concept(id=concept_id, urn=urn)
+    ref = ItemReference(
+        sdmx_type="Concept",
+        agency=agency_id,
+        id=scheme_id,
+        version=version,
+        item_id=concept_id,
+    )
+    return concept, ref
+
+# @typechecked
+# def create_schema_from_table(
+#     dataframe: pd.DataFrame,
+#     dimensions: list[str],
+#     measure: str,
+#     time_dimension: str,
+#     attributes: Optional[list[str]] = None,
+#     agency_id: str = "SDMX",
+#     schema_id: str = "GENERATED_SCHEMA",
+#     version: str = "1.0",
+# ) -> DataStructureDefinition:
+#     """Create a pysdmx DataStructureDefinition object from a pandas DataFrame, including inferred Codelists.
+
+#     This function automatically maps the provided `time_dimension` column to the 
+#     standard SDMX `TIME_PERIOD` concept. For other dimensions, it infers a Codelist
+#     from the unique values present in the column.
+
+#     Args:
+#         dataframe (pd.DataFrame): The source data.
+#         dimensions (list[str]): List of column names to serve as Dimensions.
+#         measure (str): The column name to serve as the Measure.
+#         time_dimension (str): The column name to serve as the Time Dimension.
+#             The resulting component will always be ID='TIME_PERIOD'.
+#         attributes (Optional[list[str]]): List of column names to serve as Attributes.
+#             Defaults to None.
+#         agency_id (str): The Agency ID to assign to the Schema. Defaults to "SDMX".
+#         schema_id (str): The ID to assign to the Schema. Defaults to "GENERATED_SCHEMA".
+#         version (str): The version string. Defaults to "1.0".
+
+#     Returns:
+#         DataStructureDefinition: A pysdmx DataStructureDefinition object containing the generated Components and Codelists.
+
+#     Raises:
+#         ValueError: If specified columns are missing from the dataframe.
+
+#     Examples:
+#         >>> import pandas as pd
+#         >>> df = pd.DataFrame({
+#         ...     "FREQ": ["A", "A", "M"],
+#         ...     "Year": ["2020", "2021", "2021-01"],
+#         ...     "OBS_VALUE": [10.5, 20.0, 15.0],
+#         ...     "OBS_STATUS": ["A", "A", "E"]
+#         ... })
+#         >>> schema = create_schema_from_table(
+#         ...     df,
+#         ...     dimensions=["FREQ"],
+#         ...     time_dimension="Year",
+#         ...     measure="OBS_VALUE",
+#         ...     attributes=["OBS_STATUS"]
+#         ... )
+#         >>> # Verify Codelist creation for FREQ
+#         >>> freq_comp = schema.components["FREQ"]
+#         >>> len(freq_comp.local_codes.items)
+#         2
+#         >>> freq_comp.local_codes.items[0].id
+#         'A'
+#     """
+#     if attributes is None:
+#         attributes = []
+
+#     # Validate that all columns exist in the dataframe
+#     all_required_cols = dimensions + [measure] + [time_dimension] + attributes
+#     missing_cols = [col for col in all_required_cols if col not in dataframe.columns]
+    
+#     if missing_cols:
+#         #logger.error("Missing columns in dataframe: %s", missing_cols)
+#         raise ValueError(f"Columns not found in dataframe: {missing_cols}")
+    
+#     # Create Concepts
+#     scheme_id = f"{schema_id}_CS"
+#     concept_items = []
+#     components = []
+
+#     for col in dimensions:
+#         concept, concept_ref = _concept_ref(agency_id, scheme_id, version, col)
+#         concept.dtype = _infer_sdmx_type(dataframe[col].dtype)
+#         concept_items.append(concept)
+#         codelist = _create_codelist_from_series(...)
+#         components.append(
+#             _create_component(
+#                 col,
+#                 Role.DIMENSION,
+#                 concept_ref,
+#                 required=True,
+#                 codelist=codelist,
+#             )
+#         )
+
+#     concept, concept_ref = _concept_ref(agency_id, scheme_id, version, "TIME_PERIOD")
+#     concept.dtype = DataType.OBSERVATIONAL_TIME_PERIOD
+#     concept_items.append(concept)
+#     components.append(_create_time_period_component(concept_ref))
+
+#     component_list: list[Component] = []
+
+#     # 1. Process Dimensions (with Codelist inference)
+#     for col in dimensions:
+#         # Determine strict type
+#         dtype = _infer_sdmx_type(dataframe[col].dtype)
+        
+#         # Create Concept
+#         concept = _create_concept(col, dtype)
+        
+#         # Generate Codelist for Dimensions (Standard practice is that dimensions are coded)
+#         # Note: We use the unique values to build the Codelist
+#         codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
+        
+#         # Create Component attaching the Codelist
+#         comp = _create_component(
+#             col, 
+#             Role.DIMENSION, 
+#             concept, 
+#             required=True,
+#             codelist=codelist
+#         )
+#         component_list.append(comp)
+
+#     # 2. Process Time Dimension (Standardized)
+#     # Time dimension usually does NOT have a simple enumerated codelist (it uses Period format)
+#     time_comp = _create_time_period_component()
+#     component_list.append(time_comp)
+
+#     # 3. Process Measure (Single, Uncoded)
+#     meas_dtype = _infer_sdmx_type(dataframe[measure].dtype)
+#     meas_concept = _create_concept(measure, meas_dtype)
+#     meas_comp = _create_component(
+#         measure, 
+#         Role.MEASURE, 
+#         meas_concept, 
+#         required=True
+#     )
+#     component_list.append(meas_comp)
+
+#     # 4. Process Attributes (Optional Codelist)
+#     # For this implementation, we will infer Codelists for attributes if they appear to be categorical (string)
+#     # However, to be safe and robust, we often allow attributes to be coded if they are strings.
+#     for col in attributes:
+#         dtype = _infer_sdmx_type(dataframe[col].dtype)
+#         concept = _create_concept(col, dtype)
+        
+#         # Heuristic: If string type, create a Codelist. 
+#         # If numeric, leave as uncoded value (or user would need to specify).
+#         # We will assume string attributes are coded for consistency with Dimensions in this context.
+#         attr_codelist = None
+#         if dtype == DataType.STRING:
+#             attr_codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
+
+#         comp = _create_component(
+#             col, 
+#             Role.ATTRIBUTE, 
+#             concept, 
+#             required=False, 
+#             attachment_level="O", # Default to Observation level
+#             codelist=attr_codelist
+#         )
+#         component_list.append(comp)
+
+#     # Construct the Components container
+#     components_obj = Components(component_list)
+
+#     # Create a DSD artefact
+#     dsd = DataStructureDefinition(
+#         id=schema_id,
+#         agency=agency_id,
+#         version=version,
+#         components=components_obj,
+#         name=f"Auto-generated DSD for {schema_id}",
+#     )
+
+#     return dsd
+
+_ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+
+def _to_identifier(raw: str) -> str:
+    cleaned = _ID_PATTERN.sub("_", raw).strip("_")
+    if not cleaned:
+        raise ValueError(f"Column name {raw!r} cannot be converted to a valid SDMX identifier.")
+    if cleaned[0].isdigit():
+        cleaned = f"_{cleaned}"
+    return cleaned.upper()
+
+def _code_id(raw: str) -> str:
+    candidate = _to_identifier(str(raw))
+    return candidate or "UNSPECIFIED"
+
+# Create the namedtuple type
+SchemaComponents = namedtuple('SchemaComponents', ['dsd', 'concept_scheme', 'codelists'])
+
+@typechecked
+def _create_codelist_for_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    comp_id: str,
+    agency_id: str,
+    version: str
+) -> Codelist:
+    """Create a codelist from unique values in a DataFrame column."""
+    values = dataframe[column].dropna().astype(str).unique()
+    codes = [Code(id=_code_id(value), name=value) for value in values]
+    cl_id = f"CL_{comp_id}"
+    cl_urn = f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
+    
+    return Codelist(
+        id=cl_id,
+        name=f"{column} codelist",
+        agency=agency_id,
+        version=version,
+        urn=cl_urn,
+        items=codes,
+    )
+
+
+@typechecked
+def _create_dimension_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept],
+    codelists: list[Codelist]
+) -> Component:
+    """Create a dimension component with its concept and codelist."""
+    comp_id = _to_identifier(column)
+    dtype = _infer_sdmx_type(dataframe[column].dtype)
+    
+    # Create concept reference
+    ref = _mk_concept_helper(column, comp_id, dtype, agency_id, scheme_id, version, concept_items)
+    
+    # Create codelist
+    codelist = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version)
+    codelists.append(codelist)
+    
+    return Component(
+        id=comp_id,
+        name=column,
+        required=True,
+        role=Role.DIMENSION,
+        concept=ref,
+        local_codes=codelist,
+    )
+
+
+@typechecked
+def _create_attribute_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept],
+    codelists: list[Codelist]
+) -> Component:
+    """Create an attribute component with optional codelist."""
+    comp_id = _to_identifier(column)
+    dtype = _infer_sdmx_type(dataframe[column].dtype)
+    
+    # Create concept reference
+    ref = _mk_concept_helper(column, comp_id, dtype, agency_id, scheme_id, version, concept_items)
+    
+    # Create codelist only for string types
+    local_codes = None
+    if dtype == DataType.STRING:
+        local_codes = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version)
+        codelists.append(local_codes)
+    
+    return Component(
+        id=comp_id,
+        name=column,
+        required=False,
+        role=Role.ATTRIBUTE,
+        concept=ref,
+        local_codes=local_codes,
+        attachment_level="O",
+    )
+
+
+def _mk_concept_helper(
+    column: str,
+    concept_id: str,
+    dtype: Optional[DataType],
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept]
+) -> ItemReference:
+    """Helper to create concept and return reference (extracted from nested function)."""
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
+        f"{agency_id}:{scheme_id}({version}).{concept_id}"
+    )
+    concept_items.append(
+        Concept(id=concept_id, name=column, dtype=dtype, urn=urn)
+    )
+    return ItemReference(
+        sdmx_type="Concept",
+        agency=agency_id,
+        id=scheme_id,
+        version=version,
+        item_id=concept_id,
+    )
+
 
 @typechecked
 def create_schema_from_table(
@@ -1040,143 +1370,255 @@ def create_schema_from_table(
     measure: str,
     time_dimension: str,
     attributes: Optional[list[str]] = None,
-    agency_id: str = "SDMX",
-    schema_id: str = "GENERATED_SCHEMA",
+    agency_id: str = "WB.DP",
+    schema_id: str = "DP_SCHEMA",
     version: str = "1.0",
-) -> Schema:
-    """Create a pysdmx Schema object from a pandas DataFrame, including inferred Codelists.
+) -> SchemaComponents:
+    """Create schema components from a table (refactored for DRY)."""
+    attributes = attributes or []
+    required = dimensions + [measure, time_dimension] + attributes
+    missing = [col for col in required if col not in dataframe.columns]
+    if missing:
+        raise ValueError(f"Columns not found in dataframe: {missing}")
 
-    This function automatically maps the provided `time_dimension` column to the 
-    standard SDMX `TIME_PERIOD` concept. For other dimensions, it infers a Codelist
-    from the unique values present in the column.
+    scheme_id = f"{_to_identifier(schema_id)}_CS"
+    concept_items: list[Concept] = []
+    codelists: list[Codelist] = []
+    components: list[Component] = []
 
-    Args:
-        dataframe (pd.DataFrame): The source data.
-        dimensions (list[str]): List of column names to serve as Dimensions.
-        measure (str): The column name to serve as the Measure.
-        time_dimension (str): The column name to serve as the Time Dimension.
-            The resulting component will always be ID='TIME_PERIOD'.
-        attributes (Optional[list[str]]): List of column names to serve as Attributes.
-            Defaults to None.
-        agency_id (str): The Agency ID to assign to the Schema. Defaults to "SDMX".
-        schema_id (str): The ID to assign to the Schema. Defaults to "GENERATED_SCHEMA".
-        version (str): The version string. Defaults to "1.0".
+    # Process dimensions
+    for column in dimensions:
+        component = _create_dimension_component(
+            dataframe, column, agency_id, scheme_id, version, concept_items, codelists
+        )
+        components.append(component)
 
-    Returns:
-        Schema: A pysdmx Schema object containing the generated Components and Codelists.
-
-    Raises:
-        ValueError: If specified columns are missing from the dataframe.
-
-    Examples:
-        >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     "FREQ": ["A", "A", "M"],
-        ...     "Year": ["2020", "2021", "2021-01"],
-        ...     "OBS_VALUE": [10.5, 20.0, 15.0],
-        ...     "OBS_STATUS": ["A", "A", "E"]
-        ... })
-        >>> schema = create_schema_from_table(
-        ...     df,
-        ...     dimensions=["FREQ"],
-        ...     time_dimension="Year",
-        ...     measure="OBS_VALUE",
-        ...     attributes=["OBS_STATUS"]
-        ... )
-        >>> # Verify Codelist creation for FREQ
-        >>> freq_comp = schema.components["FREQ"]
-        >>> len(freq_comp.local_codes.items)
-        2
-        >>> freq_comp.local_codes.items[0].id
-        'A'
-    """
-    if attributes is None:
-        attributes = []
-
-    # Validate that all columns exist in the dataframe
-    all_required_cols = dimensions + [measure] + [time_dimension] + attributes
-    missing_cols = [col for col in all_required_cols if col not in dataframe.columns]
-    
-    if missing_cols:
-        #logger.error("Missing columns in dataframe: %s", missing_cols)
-        raise ValueError(f"Columns not found in dataframe: {missing_cols}")
-
-    component_list: list[Component] = []
-
-    # 1. Process Dimensions (with Codelist inference)
-    for col in dimensions:
-        # Determine strict type
-        dtype = _infer_sdmx_type(dataframe[col].dtype)
-        
-        # Create Concept
-        concept = _create_concept(col, dtype)
-        
-        # Generate Codelist for Dimensions (Standard practice is that dimensions are coded)
-        # Note: We use the unique values to build the Codelist
-        codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
-        
-        # Create Component attaching the Codelist
-        comp = _create_component(
-            col, 
-            Role.DIMENSION, 
-            concept, 
+    # Process time dimension
+    time_ref = _mk_concept_helper(
+        time_dimension, "TIME_PERIOD", DataType.PERIOD,
+        agency_id, scheme_id, version, concept_items
+    )
+    components.append(
+        Component(
+            id="TIME_PERIOD",
+            name=time_dimension,
             required=True,
-            codelist=codelist
+            role=Role.DIMENSION,
+            concept=time_ref,
+            local_dtype=DataType.PERIOD,
         )
-        component_list.append(comp)
+    )
 
-    # 2. Process Time Dimension (Standardized)
-    # Time dimension usually does NOT have a simple enumerated codelist (it uses Period format)
-    time_comp = _create_time_period_component()
-    component_list.append(time_comp)
-
-    # 3. Process Measure (Single, Uncoded)
+    # Process measure
+    meas_id = _to_identifier(measure)
     meas_dtype = _infer_sdmx_type(dataframe[measure].dtype)
-    meas_concept = _create_concept(measure, meas_dtype)
-    meas_comp = _create_component(
-        measure, 
-        Role.MEASURE, 
-        meas_concept, 
-        required=True
+    meas_ref = _mk_concept_helper(
+        measure, meas_id, meas_dtype, agency_id, scheme_id, version, concept_items
     )
-    component_list.append(meas_comp)
-
-    # 4. Process Attributes (Optional Codelist)
-    # For this implementation, we will infer Codelists for attributes if they appear to be categorical (string)
-    # However, to be safe and robust, we often allow attributes to be coded if they are strings.
-    for col in attributes:
-        dtype = _infer_sdmx_type(dataframe[col].dtype)
-        concept = _create_concept(col, dtype)
-        
-        # Heuristic: If string type, create a Codelist. 
-        # If numeric, leave as uncoded value (or user would need to specify).
-        # We will assume string attributes are coded for consistency with Dimensions in this context.
-        attr_codelist = None
-        if dtype == DataType.STRING:
-            attr_codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
-
-        comp = _create_component(
-            col, 
-            Role.ATTRIBUTE, 
-            concept, 
-            required=False, 
-            attachment_level="O", # Default to Observation level
-            codelist=attr_codelist
+    components.append(
+        Component(
+            id=meas_id,
+            name=measure,
+            required=True,
+            role=Role.MEASURE,
+            concept=meas_ref,
+            local_dtype=meas_dtype,
         )
-        component_list.append(comp)
-
-    # Construct the Components container
-    components_obj = Components(component_list)
-
-    return Schema(
-        context="dataflow",
-        agency=agency_id,
-        id=schema_id,
-        version=version,
-        components=components_obj,
-        generated=datetime.now(timezone.utc),
-        name=f"Auto-generated schema for {schema_id}",
     )
+
+    # Process attributes
+    for column in attributes:
+        component = _create_attribute_component(
+            dataframe, column, agency_id, scheme_id, version, concept_items, codelists
+        )
+        components.append(component)
+
+    # Create concept scheme and DSD (unchanged)
+    concept_scheme = ConceptScheme(
+        id=scheme_id,
+        name=f"{schema_id} generated concept scheme",
+        agency=agency_id,
+        version=version,
+        urn=f"urn:sdmx:org.sdmx.infomodel.conceptscheme.ConceptScheme={agency_id}:{scheme_id}({version})",
+        items=concept_items,
+    )
+
+    dsd = DataStructureDefinition(
+        id=_to_identifier(schema_id),
+        name=f"{schema_id} generated DSD",
+        agency=agency_id,
+        version=version,
+        urn=f"urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure={agency_id}:{_to_identifier(schema_id)}({version})",
+        components=Components(components),
+    )
+
+    return SchemaComponents(dsd=dsd, concept_scheme=concept_scheme, codelists=codelists)
+
+# @typechecked
+# def create_schema_from_table(
+#     dataframe: pd.DataFrame,
+#     dimensions: list[str],
+#     measure: str,
+#     time_dimension: str,
+#     attributes: Optional[list[str]] = None,
+#     agency_id: str = "WB.DP",
+#     schema_id: str = "DP_SCHEMA",
+#     version: str = "1.0",
+# ) -> SchemaComponents:
+#     attributes = attributes or []
+#     required = dimensions + [measure, time_dimension] + attributes
+#     missing = [col for col in required if col not in dataframe.columns]
+#     if missing:
+#         raise ValueError(f"Columns not found in dataframe: {missing}")
+
+#     scheme_id = f"{_to_identifier(schema_id)}_CS"
+#     concept_items: list[Concept] = []
+#     concept_refs: dict[str, ItemReference] = {}
+
+#     def _mk_concept(column: str, concept_id: str, dtype: Optional[DataType]) -> ItemReference:
+#         urn = (
+#             f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
+#             f"{agency_id}:{scheme_id}({version}).{concept_id}"
+#         )
+#         concept_items.append(
+#             Concept(
+#                 id=concept_id,
+#                 name=column,
+#                 dtype=dtype,
+#                 urn=urn,
+#             )
+#         )
+#         ref = ItemReference(
+#             sdmx_type="Concept",
+#             agency=agency_id,
+#             id=scheme_id,
+#             version=version,
+#             item_id=concept_id,
+#         )
+#         concept_refs[column] = ref
+#         return ref
+
+#     codelists: list[Codelist] = []
+#     components: list[Component] = []
+
+#     for column in dimensions:
+#         comp_id = _to_identifier(column)
+#         dtype = _infer_sdmx_type(dataframe[column].dtype)
+#         ref = _mk_concept(column, comp_id, dtype)
+#         values = (
+#             dataframe[column]
+#             .dropna()
+#             .astype(str)
+#             .unique()
+#         )
+#         codes = [
+#             Code(id=_code_id(value), name=value)
+#             for value in values
+#         ]
+#         cl_id = f"CL_{comp_id}"
+#         cl_urn = f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
+#         codelist = Codelist(
+#             id=cl_id,
+#             name=f"{column} codelist",
+#             agency=agency_id,
+#             version=version,
+#             urn=cl_urn,
+#             items=codes,
+#         )
+#         codelists.append(codelist)
+#         components.append(
+#             Component(
+#                 id=comp_id,
+#                 name=column,
+#                 required=True,
+#                 role=Role.DIMENSION,
+#                 concept=ref,
+#                 local_codes=codelist,
+#             )
+#         )
+
+#     time_ref = _mk_concept(time_dimension, "TIME_PERIOD", DataType.PERIOD)
+#     components.append(
+#         Component(
+#             id="TIME_PERIOD",
+#             name=time_dimension,
+#             required=True,
+#             role=Role.DIMENSION,
+#             concept=time_ref,
+#             local_dtype=DataType.PERIOD,
+#         )
+#     )
+
+#     meas_id = _to_identifier(measure)
+#     meas_dtype = _infer_sdmx_type(dataframe[measure].dtype)
+#     meas_ref = _mk_concept(measure, meas_id, meas_dtype)
+#     components.append(
+#         Component(
+#             id=meas_id,
+#             name=measure,
+#             required=True,
+#             role=Role.MEASURE,
+#             concept=meas_ref,
+#             local_dtype=meas_dtype,
+#         )
+#     )
+
+#     for column in attributes:
+#         comp_id = _to_identifier(column)
+#         dtype = _infer_sdmx_type(dataframe[column].dtype)
+#         ref = _mk_concept(column, comp_id, dtype)
+#         local_codes = None
+#         if dtype == DataType.STRING:
+#             values = (
+#                 dataframe[column]
+#                 .dropna()
+#                 .astype(str)
+#                 .unique()
+#             )
+#             codes = [Code(id=_code_id(value), name=value) for value in values]
+#             cl_id = f"CL_{comp_id}"
+#             cl_urn = f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
+#             local_codes = Codelist(
+#                 id=cl_id,
+#                 name=f"{column} attribute codelist",
+#                 agency=agency_id,
+#                 version=version,
+#                 urn=cl_urn,
+#                 items=codes,
+#             )
+#             codelists.append(local_codes)
+
+#         components.append(
+#             Component(
+#                 id=comp_id,
+#                 name=column,
+#                 required=False,
+#                 role=Role.ATTRIBUTE,
+#                 concept=ref,
+#                 local_codes=local_codes,
+#                 attachment_level="O",
+#             )
+#         )
+
+#     concept_scheme = ConceptScheme(
+#         id=scheme_id,
+#         name=f"{schema_id} generated concept scheme",
+#         agency=agency_id,
+#         version=version,
+#         urn=f"urn:sdmx:org.sdmx.infomodel.conceptscheme.ConceptScheme={agency_id}:{scheme_id}({version})",
+#         items=concept_items,
+#     )
+
+#     dsd = DataStructureDefinition(
+#         id=_to_identifier(schema_id),
+#         name=f"{schema_id} generated DSD",
+#         agency=agency_id,
+#         version=version,
+#         urn=f"urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure={agency_id}:{_to_identifier(schema_id)}({version})",
+#         components=Components(components),
+#     )
+
+#     return SchemaComponents(dsd=dsd, concept_scheme=concept_scheme, codelists=codelists)
 # endregion
 
 # region build_schema_from_wb_template
