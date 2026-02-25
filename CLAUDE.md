@@ -14,6 +14,14 @@ It provides:
 The project wraps pysdmx where possible, but also adds higher-level functionality
 not present in pysdmx itself.
 
+## Before Writing Any Code
+Always read the following documents first — they define the domain and the 
+upstream dependency your code wraps:
+
+1. `docs/sdmx/information_model.md` — understand the SDMX artefacts involved
+2. `docs/pysdmx/overview.md` — understand how pysdmx models those artefacts
+3. `docs/architecture.md` — understand how tidysdmx maps onto pysdmx
+
 ## Python Environment
 
 - Python 3.11.9+
@@ -62,7 +70,12 @@ tests/
 - `pysdmx.api.fmr` — FMR API client
 - `pysdmx.io.format.StructureFormat` — structure serialisation formats
 
-pysdmx source: https://github.com/bis-med-it/pysdmx
+## pysdmx Source Code
+The pysdmx source is available at `.pysdmx-src/`. When you need to understand 
+how pysdmx implements something, read the source directly rather than guessing.
+Key modules:
+- `.pysdmx-src/src/pysdmx/model/` — core data model classes
+- `.pysdmx-src/src/pysdmx/io/` — readers and writers
 
 ## SDMX Domain Knowledge
 
