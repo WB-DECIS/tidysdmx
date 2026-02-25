@@ -54,6 +54,12 @@ from .structures import (
     build_structure_map_from_template_wb
     )
 
+from .structure_map_writer import (
+    collect_structure_map_artifacts,
+    validate_structure_map_references,
+    prepare_structure_map_for_upload
+    )
+
 __all__ = [
     "fetch_dsd_schema",
     "fetch_schema", 
@@ -107,5 +113,8 @@ __all__ = [
     "build_structure_map_from_template_wb",
     "apply_multi_component_map",
     "standardize_output",
-    "parse_mapping_template_wb"
+    "parse_mapping_template_wb",
+    "collect_structure_map_artifacts",
+    "validate_structure_map_references",
+    "prepare_structure_map_for_upload"
     ]

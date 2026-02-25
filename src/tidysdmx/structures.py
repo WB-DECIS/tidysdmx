@@ -402,7 +402,8 @@ def build_representation_map(
     source_col: str = "source",
     target_col: str = "target",
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True
 ) -> RepresentationMap:
     """Build a RepresentationMap object from a pandas DataFrame using build_value_map_list.
 
@@ -419,6 +420,7 @@ def build_representation_map(
         target_col (str): Column name for target values. Defaults to "target".
         valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
         valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+        generate_urn: If True, automatically generate URN. Defaults to True.
 
     Returns:
         RepresentationMap: A RepresentationMap object containing the mappings.
@@ -448,7 +450,12 @@ def build_representation_map(
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col
     )
-
+    
+    # Generate URN if requested and id is provided
+    urn = None
+    if generate_urn and id:
+        urn = gen_urn("RepresentationMap", agency, id, version)
+    
     return RepresentationMap(
         id=id,
         name=name,
@@ -457,7 +464,8 @@ def build_representation_map(
         target=target_cl,
         maps=value_maps,
         description=description,
-        version=version
+        version=version,
+        urn=urn 
     )
 
 
@@ -557,7 +565,8 @@ def build_single_component_map(
     source_col: str = "source",
     target_col: str = "target",
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True 
 ) -> ComponentMap:
     """Build a ComponentMap mapping one source component to one target component using a RepresentationMap built from a pandas DataFrame.
 
@@ -575,7 +584,8 @@ def build_single_component_map(
         source_col (str): Column name for source values. Defaults to "source".
         target_col (str): Column name for target values. Defaults to "target".
         valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".,
+        generate_urn: If True, generate URN for the RepresentationMap. Defaults to True.
 
     Returns:
         ComponentMap: A ComponentMap object mapping the source component to the target component.
@@ -628,7 +638,8 @@ def build_single_component_map(
         source_col=source_col,
         target_col=target_col,
         valid_from_col=valid_from_col,
-        valid_to_col=valid_to_col
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn 
     )
 
     # Return ComponentMap
@@ -2023,6 +2034,45 @@ def _validate_mapping_template_wb(
 
 # Region: Main Function
 
+SDMX_PACKAGE_MAP: Dict[str, str] = {
+    "StructureMap": "mapping",
+    "RepresentationMap": "mapping",
+    "MultiRepresentationMap": "mapping",
+    "Codelist": "codelist",
+    "ConceptScheme": "conceptscheme",
+    "DataStructureDefinition": "datastructure",
+    "Dataflow": "datastructure",
+    "AgencyScheme": "base",
+    "ProvisionAgreement": "registry",
+}
+
+def gen_urn(
+    artefact_type: str,
+    agency: str,
+    artefact_id: str,
+    version: str = "1.0"
+) -> str:
+    """Generate a full SDMX URN for any maintainable artefact.
+    
+    Args:
+        artefact_type: The type of artefact (e.g., "StructureMap", "RepresentationMap")
+        agency: The agency ID
+        artefact_id: The artefact ID
+        version: The version (default "1.0")
+        
+    Returns:
+        Full URN string
+        
+    Example:
+        >>> generate_urn("StructureMap", "BIS", "SM_TEST", "1.0")
+        'urn:sdmx:org.sdmx.infomodel.mapping.StructureMap=BIS:SM_TEST(1.0)'
+    """
+    package = SDMX_PACKAGE_MAP.get(artefact_type, "base")
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.{package}.{artefact_type}"
+        f"={agency}:{artefact_id}({version})"
+    )
+    return urn
 
 @typechecked
 def build_structure_map_from_template_wb(
@@ -2033,7 +2083,8 @@ def build_structure_map_from_template_wb(
     version: str = "1.0",
     required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
     valid_rules: Iterable[str] = ("representation", "implicit"),
-    valid_prefixes: Iterable[str] = ("fixed:",)
+    valid_prefixes: Iterable[str] = ("fixed:",),
+    generate_urns: bool = True 
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
@@ -2044,6 +2095,12 @@ def build_structure_map_from_template_wb(
         structure_type (Literal["datastructure", "dataflow", "provisionagreement"]):
             The type of artefact to extract from INFO.
         version (str): Fallback version if not found in INFO.
+        required_keys (Iterable[str]): Required sheet names to validate.
+        valid_rules (Iterable[str]): Valid literal mapping rules.
+        valid_prefixes (Iterable[str]): Valid prefixes for parameterized mapping rules.
+        generate_urns: If True, automatically generate URNs for StructureMap and 
+                      nested RepresentationMaps. Defaults to True.
+
 
     Returns:
         StructureMap: A valid pysdmx StructureMap object.
@@ -2087,6 +2144,9 @@ def build_structure_map_from_template_wb(
         pass
 
     generated_maps: List[Union[FixedValueMap, ImplicitComponentMap, ComponentMap]] = []
+    
+    # Track RepresentationMap IDs to avoid duplicates
+    rep_map_counter = {}
 
     # 4. Generate structure map elements
     for _, row in comp_df.iterrows():
@@ -2114,36 +2174,50 @@ def build_structure_map_from_template_wb(
                         target_id=target_id
                     )
 
+                # Generate unique ID for RepresentationMap
+                base_id = f"RM_{source_id}_{target_id}"
+                if base_id in rep_map_counter:
+                    rep_map_counter[base_id] += 1
+                    rep_map_id = f"{base_id}_{rep_map_counter[base_id]}"
+                else:
+                    rep_map_counter[base_id] = 0
+                    rep_map_id = base_id
 
                 comp_map = build_single_component_map(
                     df=rep_mapping_df,
                     source_component=source_id,
                     target_component=target_id,
                     agency=current_agency,
-                    id=f"MAP_{target_id}",
-                    name=f"Mapping for {target_id}",
+                    id=rep_map_id,  # Use unique ID
+                    name=f"Mapping {source_id} to {target_id}",
                     source_col="source",
                     target_col="target",
-                    version=current_version
+                    version=current_version,
+                    generate_urn=generate_urns  # Pass flag through
                 )
                 generated_maps.append(comp_map)
 
             else:
-                # Defensive guard; parser guarantees mapping_rule is one of the known values
+                # Defensive guard
                 raise ValueError(f"Unhandled mapping rule: {mapping_rule}")
 
         except ValueError as e:
-            # Keep your contextual error wrapping
             target_for_msg = str(row.get("TARGET", "")).strip()
             raise ValueError(f"Error processing mapping for Target '{target_for_msg}': {str(e)}") from e
 
-    # 5. Construct Final Object
+    # 5. Generate URN for StructureMap if requested
+    structure_map_urn = None
+    if generate_urns:
+        structure_map_urn = gen_urn("StructureMap", current_agency, structure_map_id, current_version)
+
+    # 6. Construct Final Object
     name_suffix = artefact_ref if artefact_ref else structure_map_id
     return StructureMap(
         id=structure_map_id,
         agency=current_agency,
         version=current_version,
-        name=f"Structure Map generated for {name_suffix}",
+        name=f"Structure Map for {name_suffix}",
+        urn=structure_map_urn,
         maps=generated_maps
     )
 
