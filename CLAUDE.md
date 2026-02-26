@@ -18,9 +18,9 @@ not present in pysdmx itself.
 Always read the following documents first — they define the domain and the 
 upstream dependency your code wraps:
 
-1. `docs/sdmx/information_model.md` — understand the SDMX artefacts involved
-2. `docs/pysdmx/overview.md` — understand how pysdmx models those artefacts
-3. `docs/architecture.md` — understand how tidysdmx maps onto pysdmx
+1. `docs/sdmx-information-model.md` — understand the SDMX artefacts involved
+2. `docs/pysdmx-overview.md` — understand how pysdmx models those artefacts
+3. `docs/tidy-sdmx-architecture.md` — understand how tidysdmx maps onto pysdmx
 
 ## Python Environment
 
