@@ -1772,6 +1772,45 @@ class TestBuildStructureMapFromTemplateWb:
         assert structure_map.id == "WB_STRUCTURE_MAP"
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
 
+    def test_source_and_target_urns_generated(self, valid_mappings):
+        """Tests that source and target URNs are generated from structure IDs."""
+        sm = build_structure_map_from_template_wb(
+            valid_mappings,
+            source_structure_id="SRC_AGENCY:SRC_DSD(2.0)",
+            target_structure_id="TGT_AGENCY:TGT_DSD(3.0)",
+            structure_type="datastructure",
+        )
+        assert "DataStructure=SRC_AGENCY:SRC_DSD(2.0)" in sm.source
+        assert "DataStructure=TGT_AGENCY:TGT_DSD(3.0)" in sm.target
+
+    def test_source_and_target_urns_for_dataflow(self, valid_mappings):
+        """Tests that URNs use Dataflow artefact type when structure_type is dataflow."""
+        sm = build_structure_map_from_template_wb(
+            valid_mappings,
+            source_structure_id="AG:DF_SRC(1.0)",
+            target_structure_id="AG:DF_TGT(1.0)",
+            structure_type="dataflow",
+        )
+        assert "Dataflow=AG:DF_SRC(1.0)" in sm.source
+        assert "Dataflow=AG:DF_TGT(1.0)" in sm.target
+
+    def test_omitted_structure_ids_default_to_empty(self, valid_mappings):
+        """Tests backward compatibility: omitting source/target IDs keeps empty strings."""
+        sm = build_structure_map_from_template_wb(valid_mappings)
+        assert sm.source == ""
+        assert sm.target == ""
+
+    def test_generate_urns_false_skips_source_target(self, valid_mappings):
+        """Tests that generate_urns=False skips source/target URN generation."""
+        sm = build_structure_map_from_template_wb(
+            valid_mappings,
+            source_structure_id="AG:DSD(1.0)",
+            target_structure_id="AG:DSD(1.0)",
+            generate_urns=False,
+        )
+        assert sm.source == ""
+        assert sm.target == ""
+
 class TestValidateMappings: #noqa: D101
     def test_validate_mappings_valid_input(self):
         """Valid input with all required keys and DataFrames should pass without error."""

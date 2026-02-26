@@ -2075,12 +2075,19 @@ def _validate_mapping_template_wb(
 
 # Region: Main Function
 
+STRUCTURE_TYPE_TO_ARTEFACT: Dict[str, str] = {
+    "datastructure": "DataStructure",
+    "dataflow": "Dataflow",
+    "provisionagreement": "ProvisionAgreement",
+}
+
 SDMX_PACKAGE_MAP: Dict[str, str] = {
     "StructureMap": "structuremapping",
     "RepresentationMap": "structuremapping",
     "MultiRepresentationMap": "structuremapping",
     "Codelist": "codelist",
     "ConceptScheme": "conceptscheme",
+    "DataStructure": "datastructure",
     "DataStructureDefinition": "datastructure",
     "Dataflow": "datastructure",
     "AgencyScheme": "base",
@@ -2126,7 +2133,9 @@ def build_structure_map_from_template_wb(
     required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
     valid_rules: Iterable[str] = ("representation", "implicit"),
     valid_prefixes: Iterable[str] = ("fixed:",),
-    generate_urns: bool = True 
+    generate_urns: bool = True,
+    source_structure_id: Optional[str] = None,
+    target_structure_id: Optional[str] = None,
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
@@ -2140,9 +2149,16 @@ def build_structure_map_from_template_wb(
         required_keys (Iterable[str]): Required sheet names to validate.
         valid_rules (Iterable[str]): Valid literal mapping rules.
         valid_prefixes (Iterable[str]): Valid prefixes for parameterized mapping rules.
-        generate_urns: If True, automatically generate URNs for StructureMap and 
+        generate_urns: If True, automatically generate URNs for StructureMap and
                       nested RepresentationMaps. Defaults to True.
-
+        source_structure_id: Optional source structure reference in
+            ``"AGENCY:ID(VERSION)"`` format (e.g. ``"WB:DSD_ASPIRE(1.0)"``).
+            When provided and ``generate_urns`` is True, a full SDMX URN is
+            built and set as the StructureMap's ``source``.
+        target_structure_id: Optional target structure reference in
+            ``"AGENCY:ID(VERSION)"`` format (e.g. ``"WB:DSD_WDI(1.0)"``).
+            When provided and ``generate_urns`` is True, a full SDMX URN is
+            built and set as the StructureMap's ``target``.
 
     Returns:
         StructureMap: A valid pysdmx StructureMap object.
@@ -2249,10 +2265,19 @@ def build_structure_map_from_template_wb(
             target_for_msg = str(row.get("TARGET", "")).strip()
             raise ValueError(f"Error processing mapping for Target '{target_for_msg}': {str(e)}") from e
 
-    # 5. Generate URN for StructureMap if requested
+    # 5. Generate URNs if requested
     structure_map_urn = None
+    source_urn = ""
+    target_urn = ""
     if generate_urns:
         structure_map_urn = gen_urn("StructureMap", current_agency, structure_map_id, current_version)
+        artefact_type = STRUCTURE_TYPE_TO_ARTEFACT[structure_type]
+        if source_structure_id:
+            s_agency, s_id, s_version = parse_artefact_id(source_structure_id)
+            source_urn = gen_urn(artefact_type, s_agency, s_id, s_version)
+        if target_structure_id:
+            t_agency, t_id, t_version = parse_artefact_id(target_structure_id)
+            target_urn = gen_urn(artefact_type, t_agency, t_id, t_version)
 
     # 6. Construct Final Object
     name_suffix = artefact_ref if artefact_ref else structure_map_id
@@ -2262,6 +2287,8 @@ def build_structure_map_from_template_wb(
         version=current_version,
         name=f"Structure Map for {name_suffix}",
         urn=structure_map_urn,
+        source=source_urn,
+        target=target_urn,
         maps=generated_maps
     )
 
