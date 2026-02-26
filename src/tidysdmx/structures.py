@@ -36,6 +36,40 @@ import re
 # Import tidysdmx functions
 from .tidysdmx import parse_artefact_id
 
+# region helpers
+
+def _resolve_representation_ref(
+    codelist_urn: Optional[str] = None,
+    default_dtype: str = DataType.STRING,
+) -> str:
+    """Resolve a representation reference to either a codelist URN or DataType string.
+
+    When a RepresentationMap maps between codelists, the source/target should
+    contain the codelist URN. When mapping plain strings (no codelist), the
+    source/target should contain a DataType value (e.g. "String").
+
+    Args:
+        codelist_urn: A codelist URN string, or None if no codelist applies.
+        default_dtype: The DataType value to use when no codelist is provided.
+            Defaults to DataType.STRING ("String").
+
+    Returns:
+        The codelist URN if provided, otherwise the default_dtype string value.
+
+    Note:
+        The pysdmx XML writer currently always outputs ``<str:SourceCodelist>``
+        / ``<str:TargetCodelist>`` tags, even when the value is a DataType
+        string. DataType-based RepresentationMaps will not produce fully valid
+        SDMX-ML until pysdmx adds ``<str:SourceDataType>`` /
+        ``<str:TargetDataType>`` support. The JSON writer handles both cases
+        correctly.
+    """
+    if codelist_urn is not None and str(codelist_urn).strip():
+        return str(codelist_urn).strip()
+    return str(default_dtype)
+
+# endregion
+
 # region structure map
 @typechecked
 def build_fixed_map(target: str, value: str, located_in: Optional[str] = "target") -> FixedValueMap:
@@ -460,12 +494,12 @@ def build_representation_map(
         id=id,
         name=name,
         agency=agency,
-        source=source_cl,
-        target=target_cl,
+        source=_resolve_representation_ref(source_cl),
+        target=_resolve_representation_ref(target_cl),
         maps=value_maps,
         description=description,
         version=version,
-        urn=urn 
+        urn=urn
     )
 
 
@@ -542,8 +576,8 @@ def build_multi_representation_map(
         id=id,
         name=name,
         agency=agency,
-        source=source_cls if source_cls else [], # Fix 1: 'source' not 'sources' + None handling
-        target=target_cls if target_cls else [], # Fix 2: 'target' not 'targets' + None handling
+        source=[_resolve_representation_ref(s) for s in source_cls] if source_cls else [str(DataType.STRING)],
+        target=[_resolve_representation_ref(t) for t in target_cls] if target_cls else [str(DataType.STRING)],
         maps=multi_value_maps,
         description=description,
         version=version
@@ -1725,18 +1759,25 @@ def _parse_comp_mapping_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str =
 
     df = sheets[sheet_name]
 
-    expected_columns = ["SOURCE", "TARGET", "MAPPING_RULES"]
-    
+    required_columns = ["SOURCE", "TARGET", "MAPPING_RULES"]
+    optional_columns = ["SOURCE_CL", "TARGET_CL"]
+
     # Validate that required columns exist
-    missing_columns = [col for col in expected_columns if col not in df.columns]
+    missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(
             f"Sheet '{sheet_name}' is missing required columns: {missing_columns}. "
             f"Found: {df.columns.tolist()}"
         )
 
-    # Extract only the relevant columns to ignore potential artifacts (e.g., 'Unnamed: X')
-    result_df = df[expected_columns]
+    # Extract required columns + any optional columns that exist
+    cols_to_extract = required_columns + [c for c in optional_columns if c in df.columns]
+    result_df = df[cols_to_extract].copy()
+
+    # Ensure optional columns exist in output (fill with None if absent from sheet)
+    for col in optional_columns:
+        if col not in result_df.columns:
+            result_df[col] = None
 
     # Remove rows where ALL columns are NaN/None (empty rows)
     # We do not use how='any' because some mapping rules might have an empty SOURCE
@@ -2035,9 +2076,9 @@ def _validate_mapping_template_wb(
 # Region: Main Function
 
 SDMX_PACKAGE_MAP: Dict[str, str] = {
-    "StructureMap": "mapping",
-    "RepresentationMap": "mapping",
-    "MultiRepresentationMap": "mapping",
+    "StructureMap": "structuremapping",
+    "RepresentationMap": "structuremapping",
+    "MultiRepresentationMap": "structuremapping",
     "Codelist": "codelist",
     "ConceptScheme": "conceptscheme",
     "DataStructureDefinition": "datastructure",
@@ -2046,6 +2087,7 @@ SDMX_PACKAGE_MAP: Dict[str, str] = {
     "ProvisionAgreement": "registry",
 }
 
+@typechecked
 def gen_urn(
     artefact_type: str,
     agency: str,
@@ -2190,6 +2232,8 @@ def build_structure_map_from_template_wb(
                     agency=current_agency,
                     id=rep_map_id,  # Use unique ID
                     name=f"Mapping {source_id} to {target_id}",
+                    source_cl=parsed.get("source_cl"),
+                    target_cl=parsed.get("target_cl"),
                     source_col="source",
                     target_col="target",
                     version=current_version,
@@ -2364,6 +2408,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
       - source_id: normalized SOURCE (may be empty for fixed)
       - target_id: normalized TARGET (empty only if mapping_rule == "skip")
       - fixed_value: present only for mapping_rule == "fixed", else None
+      - source_cl: codelist URN for the source component, or None
+      - target_cl: codelist URN for the target component, or None
 
     Raises:
       - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
@@ -2374,6 +2420,12 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
     target_id = str(row.get("TARGET", "")).strip()
     raw_rule  = str(row.get("MAPPING_RULES", "")).strip()
 
+    # Extract optional codelist URNs (None when absent or empty)
+    raw_source_cl = row.get("SOURCE_CL")
+    source_cl = str(raw_source_cl).strip() if pd.notna(raw_source_cl) and str(raw_source_cl).strip() else None
+    raw_target_cl = row.get("TARGET_CL")
+    target_cl = str(raw_target_cl).strip() if pd.notna(raw_target_cl) and str(raw_target_cl).strip() else None
+
     # Skip when TARGET is empty or rule is missing-ish
     if not target_id or _is_missing_token(raw_rule):
         return {
@@ -2381,6 +2433,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     rule_lower = raw_rule.lower()
@@ -2396,6 +2450,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": fixed_val,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     # implicit
@@ -2407,6 +2463,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     # representation (exact equality: rule == target_id)
@@ -2419,6 +2477,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     # unknown

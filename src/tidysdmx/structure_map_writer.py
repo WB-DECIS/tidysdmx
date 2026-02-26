@@ -1,20 +1,62 @@
 """Utility functions for writing complete StructureMaps with dependencies."""
 
-from typing import List, Sequence, Union
-
+from typeguard import typechecked
 from pysdmx.model.__base import MaintainableArtefact
 from pysdmx.model.map import (
     ComponentMap,
-    DatePatternMap,
-    FixedValueMap,
-    ImplicitComponentMap,
     MultiComponentMap,
     MultiRepresentationMap,
     RepresentationMap,
     StructureMap,
 )
 
+from .structures import gen_urn
 
+@typechecked
+def _get_embedded_rep_map(map_rule):
+    """Return the embedded RepresentationMap/MultiRepresentationMap, or None."""
+    if isinstance(map_rule, ComponentMap) and isinstance(
+        map_rule.values, RepresentationMap
+    ):
+        return map_rule.values
+    if isinstance(map_rule, MultiComponentMap) and isinstance(
+        map_rule.values, MultiRepresentationMap
+    ):
+        return map_rule.values
+    return None
+
+@typechecked
+def _replace_values_with_urn(map_rule):
+    """Return a copy of the map rule with the embedded rep map replaced by its URN.
+
+    If the map rule has no embedded rep map, returns it unchanged.
+    Works for both ComponentMap and MultiComponentMap since they share
+    the same (source, target, values) constructor signature.
+    """
+    rep_map = _get_embedded_rep_map(map_rule)
+    if rep_map is None:
+        return map_rule
+    urn = rep_map.urn if rep_map.urn else gen_urn(rep_map)
+    return type(map_rule)(
+        source=map_rule.source, target=map_rule.target, values=urn
+    )
+
+@typechecked
+def _validate_rep_map_fields(rep_map):
+    """Validate that a RepresentationMap has required fields populated.
+
+    Returns a list of issue descriptions (empty if valid).
+    """
+    issues = []
+    if not rep_map.source or str(rep_map.source) == "None":
+        issues.append("source is None or empty")
+    if not rep_map.target or str(rep_map.target) == "None":
+        issues.append("target is None or empty")
+    if not rep_map.maps:
+        issues.append("no value mappings defined")
+    return issues
+
+@typechecked
 def _convert_to_urn_references(
     structure_map: StructureMap,
 ) -> StructureMap:
@@ -29,62 +71,7 @@ def _convert_to_urn_references(
     Returns:
         A new StructureMap with URN references instead of objects.
     """
-    new_maps: List[
-        Union[
-            ComponentMap,
-            DatePatternMap,
-            FixedValueMap,
-            ImplicitComponentMap,
-            MultiComponentMap,
-        ]
-    ] = []
-
-    for map_rule in structure_map.maps:
-        if isinstance(map_rule, ComponentMap):
-            if isinstance(map_rule.values, RepresentationMap):
-                # Replace the object with its URN
-                # Use urn if available, otherwise construct from short_urn
-                urn = (
-                    map_rule.values.urn
-                    if map_rule.values.urn
-                    else (
-                        "urn:sdmx:org.sdmx.infomodel.structuremapping."
-                        f"{map_rule.values.short_urn}"
-                    )
-                )
-                new_maps.append(
-                    ComponentMap(
-                        source=map_rule.source,
-                        target=map_rule.target,
-                        values=urn,
-                    )
-                )
-            else:
-                new_maps.append(map_rule)
-        elif isinstance(map_rule, MultiComponentMap):
-            if isinstance(map_rule.values, MultiRepresentationMap):
-                # Replace the object with its URN
-                # Use urn if available, otherwise construct from short_urn
-                urn = (
-                    map_rule.values.urn
-                    if map_rule.values.urn
-                    else (
-                        "urn:sdmx:org.sdmx.infomodel.structuremapping."
-                        f"{map_rule.values.short_urn}"
-                    )
-                )
-                new_maps.append(
-                    MultiComponentMap(
-                        source=map_rule.source,
-                        target=map_rule.target,
-                        values=urn,
-                    )
-                )
-            else:
-                new_maps.append(map_rule)
-        else:
-            # Keep other map types as-is
-            new_maps.append(map_rule)
+    new_maps = [_replace_values_with_urn(m) for m in structure_map.maps]
 
     # Create a new StructureMap with URN references
     return StructureMap(
@@ -99,11 +86,11 @@ def _convert_to_urn_references(
         annotations=structure_map.annotations,
     )
 
-
+@typechecked
 def collect_structure_map_artifacts(
     structure_map: StructureMap,
     convert_to_urns: bool = True,
-) -> List[MaintainableArtefact]:
+) -> list[MaintainableArtefact]:
     """Collect the StructureMap and all its dependent RepresentationMaps.
 
     When a StructureMap contains RepresentationMap objects, this function
@@ -131,16 +118,11 @@ def collect_structure_map_artifacts(
         ...     prettyprint=True
         ... )
     """
-    artifacts: List[MaintainableArtefact] = []
-
-    # Add all RepresentationMaps from ComponentMaps
-    for map_rule in structure_map.maps:
-        if isinstance(map_rule, ComponentMap):
-            if isinstance(map_rule.values, RepresentationMap):
-                artifacts.append(map_rule.values)
-        elif isinstance(map_rule, MultiComponentMap):
-            if isinstance(map_rule.values, MultiRepresentationMap):
-                artifacts.append(map_rule.values)
+    artifacts: list[MaintainableArtefact] = [
+        rep_map
+        for m in structure_map.maps
+        if (rep_map := _get_embedded_rep_map(m)) is not None
+    ]
 
     # Convert RepresentationMap objects to URN references if requested
     if convert_to_urns and artifacts:
@@ -152,7 +134,7 @@ def collect_structure_map_artifacts(
 
     return artifacts
 
-
+@typechecked
 def validate_structure_map_references(structure_map: StructureMap) -> None:
     """Validate that all RepresentationMap references are resolved.
 
@@ -179,54 +161,27 @@ def validate_structure_map_references(structure_map: StructureMap) -> None:
     invalid_rep_maps = []
 
     for i, map_rule in enumerate(structure_map.maps):
-        if isinstance(map_rule, ComponentMap):
-            if isinstance(map_rule.values, str):
-                unresolved.append(
-                    f"ComponentMap[{i}] (source={map_rule.source}, "
-                    f"target={map_rule.target}): URN reference '{map_rule.values}'"
+        if not isinstance(map_rule, (ComponentMap, MultiComponentMap)):
+            continue
+
+        type_name = type(map_rule).__name__
+
+        if isinstance(map_rule.values, str):
+            unresolved.append(
+                f"{type_name}[{i}] (source={map_rule.source}, "
+                f"target={map_rule.target}): URN reference '{map_rule.values}'"
+            )
+            continue
+
+        rep_map = _get_embedded_rep_map(map_rule)
+        if rep_map is not None:
+            issues = _validate_rep_map_fields(rep_map)
+            if issues:
+                rep_type_name = type(rep_map).__name__
+                invalid_rep_maps.append(
+                    f"{type_name}[{i}] {rep_type_name} '{rep_map.id}': "
+                    f"{', '.join(issues)}"
                 )
-            elif isinstance(map_rule.values, RepresentationMap):
-                # Validate the RepresentationMap itself
-                rep_map = map_rule.values
-                issues = []
-                
-                if not rep_map.source:
-                    issues.append("source is None or empty")
-                if not rep_map.target:
-                    issues.append("target is None or empty")
-                if not rep_map.maps:
-                    issues.append("no value mappings defined")
-                
-                if issues:
-                    invalid_rep_maps.append(
-                        f"ComponentMap[{i}] RepresentationMap '{rep_map.id}': "
-                        f"{', '.join(issues)}"
-                    )
-                    
-        elif isinstance(map_rule, MultiComponentMap):
-            if isinstance(map_rule.values, str):
-                unresolved.append(
-                    f"MultiComponentMap[{i}] "
-                    f"(source={map_rule.source}, target={map_rule.target}): "
-                    f"URN reference '{map_rule.values}'"
-                )
-            elif isinstance(map_rule.values, MultiRepresentationMap):
-                # Validate the MultiRepresentationMap itself
-                rep_map = map_rule.values
-                issues = []
-                
-                if not rep_map.source:
-                    issues.append("source is None or empty")
-                if not rep_map.target:
-                    issues.append("target is None or empty")
-                if not rep_map.maps:
-                    issues.append("no value mappings defined")
-                
-                if issues:
-                    invalid_rep_maps.append(
-                        f"MultiComponentMap[{i}] MultiRepresentationMap '{rep_map.id}': "
-                        f"{', '.join(issues)}"
-                    )
 
     errors = []
     
@@ -247,11 +202,11 @@ def validate_structure_map_references(structure_map: StructureMap) -> None:
     if errors:
         raise ValueError("\n\n".join(errors))
 
-
+@typechecked
 def prepare_structure_map_for_upload(
     structure_map: StructureMap,
     validate: bool = True,
-) -> List[MaintainableArtefact]:
+) -> list[MaintainableArtefact]:
     """Prepare a StructureMap for upload by collecting all dependencies.
 
     This is a convenience function that combines validation (optional)

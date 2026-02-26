@@ -54,7 +54,8 @@ from tidysdmx.structures import (
     _extract_representation_map,
     _validate_mapping_template_wb,
     _collect_required_sheet_errors,
-    _collect_mapping_rules_errors
+    _collect_mapping_rules_errors,
+    _resolve_representation_ref
     )
 
 # region fixtures
@@ -764,6 +765,22 @@ class TestBuildRepresentationMap:  # noqa: D101
                 assert isinstance(vm.valid_to, datetime)
                 assert vm.valid_to.tzinfo == timezone.utc or vm.valid_to.tzinfo is None
 
+    def test_defaults_to_string_dtype_when_no_codelist(self, value_map_df_mandatory_cols):
+        """When source_cl and target_cl are omitted, source/target default to 'String'."""
+        rm = build_representation_map(df=value_map_df_mandatory_cols)
+        assert rm.source == "String"
+        assert rm.target == "String"
+
+    def test_mixed_codelist_and_dtype(self, value_map_df_mandatory_cols):
+        """When only source_cl is provided, target defaults to 'String'."""
+        urn = "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)"
+        rm = build_representation_map(
+            df=value_map_df_mandatory_cols,
+            source_cl=urn
+        )
+        assert rm.source == urn
+        assert rm.target == "String"
+
 class TestBuildSingleComponentMap:  # noqa: D101
     def test_build_single_component_map_valid(self, value_map_df_mandatory_cols):
         """Test normal case with valid DataFrame and fixture."""
@@ -783,6 +800,16 @@ class TestBuildSingleComponentMap:  # noqa: D101
         assert cm.target == "COUNTRY"
         assert isinstance(cm.values, RepresentationMap)
 
+
+    def test_build_single_component_map_defaults_to_string_dtype(self, value_map_df_mandatory_cols):
+        """When no codelist args, RepresentationMap source/target default to 'String'."""
+        cm = build_single_component_map(
+            value_map_df_mandatory_cols,
+            source_component="COUNTRY",
+            target_component="COUNTRY"
+        )
+        assert cm.values.source == "String"
+        assert cm.values.target == "String"
 
     def test_build_single_component_map_empty_df(self):
         """Empty DataFrame should raise ValueError."""
@@ -1953,12 +1980,12 @@ class TestExtractMappingRule:
         """Tests that a valid fixed rule returns correct mapping."""
         row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:123"})
         result = _extract_mapping_rule(row)
-        assert result == {
-            "mapping_rule": "fixed",
-            "source_id": "SRC",
-            "target_id": "TGT",
-            "fixed_value": "123",
-        }
+        assert result["mapping_rule"] == "fixed"
+        assert result["source_id"] == "SRC"
+        assert result["target_id"] == "TGT"
+        assert result["fixed_value"] == "123"
+        assert result["source_cl"] is None
+        assert result["target_cl"] is None
 
     def test_fixed_rule_invalid_format(self):
         """Tests that an invalid fixed rule raises ValueError."""
@@ -1995,6 +2022,55 @@ class TestExtractMappingRule:
         row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "unknown_rule"})
         with pytest.raises(ValueError, match="Unknown mapping rule"):
             _extract_mapping_rule(row)
+
+    def test_codelist_urns_extracted(self):
+        """Tests that SOURCE_CL and TARGET_CL are extracted when present."""
+        row = pd.Series({
+            "SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation",
+            "SOURCE_CL": "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)",
+            "TARGET_CL": "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_TGT(1.0)",
+        })
+        result = _extract_mapping_rule(row)
+        assert result["source_cl"] == "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)"
+        assert result["target_cl"] == "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_TGT(1.0)"
+
+    def test_codelist_urns_none_when_absent(self):
+        """Tests that SOURCE_CL and TARGET_CL are None when columns are absent."""
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation"})
+        result = _extract_mapping_rule(row)
+        assert result["source_cl"] is None
+        assert result["target_cl"] is None
+
+
+class TestResolveRepresentationRef:
+    """Tests for `_resolve_representation_ref`."""
+
+    def test_returns_codelist_urn(self):
+        """Valid URN is returned as-is."""
+        urn = "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_CURRENCY(1.0)"
+        assert _resolve_representation_ref(urn) == urn
+
+    def test_returns_string_dtype_for_none(self):
+        """None input defaults to DataType.STRING value."""
+        assert _resolve_representation_ref(None) == "String"
+
+    def test_returns_string_dtype_for_empty(self):
+        """Empty string defaults to DataType.STRING value."""
+        assert _resolve_representation_ref("") == "String"
+
+    def test_returns_string_dtype_for_whitespace(self):
+        """Whitespace-only string defaults to DataType.STRING value."""
+        assert _resolve_representation_ref("   ") == "String"
+
+    def test_strips_whitespace_from_urn(self):
+        """Leading/trailing whitespace is stripped from valid URNs."""
+        urn = "  urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_X(1.0)  "
+        assert _resolve_representation_ref(urn) == urn.strip()
+
+    def test_custom_default_dtype(self):
+        """Custom default_dtype is used when no codelist provided."""
+        assert _resolve_representation_ref(None, default_dtype=DataType.INTEGER) == "Integer"
+
 
 class TestExtractRepresentationMap:
     """Tests for `_extract_representation_map` which builds a sanitized mapping DataFrame."""
