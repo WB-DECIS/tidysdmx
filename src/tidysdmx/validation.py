@@ -147,10 +147,10 @@ def validate_codelist_ids(df, codelist_ids):
 	"""
 	for col, valid_ids in codelist_ids.items():
 		if col in df.columns:
-			# Convert all values to string before comparison
-			df[col] = df[col].astype(str)
-			valid_ids = [str(id) for id in valid_ids]
-			invalid_values = df[~df[col].isin(valid_ids)][col].unique()
+			# Convert to string for comparison only, without mutating the DataFrame
+			col_as_str = df[col].astype(str)
+			valid_ids_str = [str(id) for id in valid_ids]
+			invalid_values = col_as_str[~col_as_str.isin(valid_ids_str)].unique()
 			if len(invalid_values) > 0:
 				raise ValueError(
 					f"Invalid values found in column '{col}': {invalid_values}"

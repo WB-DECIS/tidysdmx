@@ -21,7 +21,7 @@ def map_structures(
     Returns:
         pd.DataFrame: Modified DataFrame with all mappings applied.
     """
-    result_df = df.copy()
+    result_df = df.copy()  
 
     # Separate maps by type
     fixed_value_maps = []
