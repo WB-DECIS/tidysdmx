@@ -1,4 +1,4 @@
-from typing import Dict, List, Sequence, AbstractSet, Union
+from typing import Dict, List, Sequence, AbstractSet, Union, Optional
 from typeguard import typechecked
 from pathlib import Path
 from openpyxl import Workbook
@@ -316,3 +316,48 @@ def parse_mapping_template_wb(path: Union[str, Path]) -> dict[str, pd.DataFrame]
         return workbook
     except Exception as e:
         raise RuntimeError(f"Failed to read Excel file: {e}")
+
+
+def fix_sdmx_xml_datatype_tags(
+    input_path: Union[str, Path],
+    output_path: Optional[Union[str, Path]] = None,
+) -> Path:
+    """Fix incorrectly written ``SourceCodelist``/``TargetCodelist`` tags in SDMX-ML.
+
+    The pysdmx XML writer currently emits ``<str:SourceCodelist>String</str:SourceCodelist>``
+    and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a RepresentationMap
+    uses a plain DataType (no codelist). The correct tags in SDMX 3.0 are
+    ``<str:SourceDataType>`` and ``<str:TargetDataType>``.
+
+    This function performs a targeted string replacement on the serialised XML
+    file to produce a conformant SDMX-ML document.
+
+    Args:
+        input_path: Path to the SDMX-ML XML file to fix.
+        output_path: Path to write the corrected XML. If ``None``, the input
+            file is overwritten in place.
+
+    Returns:
+        The path to the written output file.
+
+    Raises:
+        FileNotFoundError: If ``input_path`` does not exist.
+    """
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"File not found: {input_path}")
+
+    output_path = Path(output_path) if output_path is not None else input_path
+
+    content = input_path.read_text(encoding="utf-8")
+    content = content.replace(
+        "<str:SourceCodelist>String</str:SourceCodelist>",
+        "<str:SourceDataType>String</str:SourceDataType>",
+    )
+    content = content.replace(
+        "<str:TargetCodelist>String</str:TargetCodelist>",
+        "<str:TargetDataType>String</str:TargetDataType>",
+    )
+    output_path.write_text(content, encoding="utf-8")
+    return output_path
+

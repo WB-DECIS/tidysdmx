@@ -1286,9 +1286,42 @@ def _to_identifier(raw: str) -> str:
         cleaned = f"_{cleaned}"
     return cleaned.upper()
 
-def _code_id(raw: str) -> str:
+def _code_id(raw: str, uppercase: bool = True) -> str:
     candidate = _to_identifier(str(raw))
-    return candidate or "UNSPECIFIED"
+    return (candidate if uppercase else candidate.lower()) or "UNSPECIFIED"
+
+
+def sanitize_variable(value: str, uppercase: bool = True) -> str:
+    """Sanitize a raw string value into a valid SDMX code ID.
+
+    Applies the same sanitization used internally by ``create_schema_from_table``
+    when building codelist code IDs from DataFrame column values. Use this
+    function during your data cleaning phase to ensure that the values in your
+    DataFrame will match the code IDs generated in the schema.
+
+    The sanitization rules are:
+    - Non-alphanumeric/underscore characters (including dots) are replaced with ``_``.
+    - Leading/trailing underscores are stripped.
+    - IDs starting with a digit are prefixed with ``_``.
+    - Result is uppercased by default (controlled by ``uppercase``).
+
+    Args:
+        value: The raw string value to sanitize (e.g. ``"per_allsp.adq_ep_preT_tot"``).
+        uppercase: If True (default), the result is uppercased, matching the default
+            behaviour of ``create_schema_from_table``. Set to False if you called
+            ``create_schema_from_table`` with ``uppercase_code_ids=False``.
+
+    Returns:
+        A sanitized SDMX-safe identifier string.
+
+    Examples:
+        >>> sanitize_code_id("per_allsp.adq_ep_preT_tot")
+        'PER_ALLSP_ADQ_EP_PRET_TOT'
+        >>> sanitize_code_id("per_allsp.adq_ep_preT_tot", uppercase=False)
+        'per_allsp_adq_ep_pret_tot'
+    """
+    return _code_id(value, uppercase=uppercase)
+
 
 # Create the namedtuple type
 SchemaComponents = namedtuple('SchemaComponents', ['dsd', 'concept_scheme', 'codelists'])
@@ -1299,11 +1332,12 @@ def _create_codelist_for_component(
     column: str,
     comp_id: str,
     agency_id: str,
-    version: str
+    version: str,
+    uppercase_code_ids: bool = True,
 ) -> Codelist:
     """Create a codelist from unique values in a DataFrame column."""
     values = dataframe[column].dropna().astype(str).unique()
-    codes = [Code(id=_code_id(value), name=value) for value in values]
+    codes = [Code(id=_code_id(value, uppercase=uppercase_code_ids), name=value) for value in values]
     cl_id = f"CL_{comp_id}"
     cl_urn = f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
     
@@ -1325,7 +1359,8 @@ def _create_dimension_component(
     scheme_id: str,
     version: str,
     concept_items: list[Concept],
-    codelists: list[Codelist]
+    codelists: list[Codelist],
+    uppercase_code_ids: bool = True,
 ) -> Component:
     """Create a dimension component with its concept and codelist."""
     comp_id = _to_identifier(column)
@@ -1335,7 +1370,7 @@ def _create_dimension_component(
     ref = _mk_concept_helper(column, comp_id, dtype, agency_id, scheme_id, version, concept_items)
     
     # Create codelist
-    codelist = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version)
+    codelist = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version, uppercase_code_ids=uppercase_code_ids)
     codelists.append(codelist)
     
     return Component(
@@ -1356,7 +1391,8 @@ def _create_attribute_component(
     scheme_id: str,
     version: str,
     concept_items: list[Concept],
-    codelists: list[Codelist]
+    codelists: list[Codelist],
+    uppercase_code_ids: bool = True,
 ) -> Component:
     """Create an attribute component with optional codelist."""
     comp_id = _to_identifier(column)
@@ -1368,7 +1404,7 @@ def _create_attribute_component(
     # Create codelist only for string types
     local_codes = None
     if dtype == DataType.STRING:
-        local_codes = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version)
+        local_codes = _create_codelist_for_component(dataframe, column, comp_id, agency_id, version, uppercase_code_ids=uppercase_code_ids)
         codelists.append(local_codes)
     
     return Component(
@@ -1418,8 +1454,22 @@ def create_schema_from_table(
     agency_id: str = "WB.DP",
     schema_id: str = "DP_SCHEMA",
     version: str = "1.0",
+    uppercase_code_ids: bool = True,
 ) -> SchemaComponents:
-    """Create schema components from a table (refactored for DRY)."""
+    """Create schema components from a table (refactored for DRY).
+
+    Args:
+        dataframe: The source DataFrame.
+        dimensions: Column names to use as SDMX dimensions.
+        measure: Column name to use as the SDMX measure.
+        time_dimension: Column name to use as the SDMX time dimension.
+        attributes: Optional column names to use as SDMX attributes.
+        agency_id: Agency identifier for the generated artefacts.
+        schema_id: Base identifier for the generated DSD and concept scheme.
+        version: Version string for the generated artefacts.
+        uppercase_code_ids: If True (default), codelist code IDs are uppercased.
+            Set to False to preserve the original casing of code values.
+    """
     attributes = attributes or []
     required = dimensions + [measure, time_dimension] + attributes
     missing = [col for col in required if col not in dataframe.columns]
@@ -1434,7 +1484,8 @@ def create_schema_from_table(
     # Process dimensions
     for column in dimensions:
         component = _create_dimension_component(
-            dataframe, column, agency_id, scheme_id, version, concept_items, codelists
+            dataframe, column, agency_id, scheme_id, version, concept_items, codelists,
+            uppercase_code_ids=uppercase_code_ids,
         )
         components.append(component)
 
@@ -1474,7 +1525,8 @@ def create_schema_from_table(
     # Process attributes
     for column in attributes:
         component = _create_attribute_component(
-            dataframe, column, agency_id, scheme_id, version, concept_items, codelists
+            dataframe, column, agency_id, scheme_id, version, concept_items, codelists,
+            uppercase_code_ids=uppercase_code_ids,
         )
         components.append(component)
 

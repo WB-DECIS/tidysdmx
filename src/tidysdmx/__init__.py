@@ -28,7 +28,8 @@ from .utils import (
     create_mapping_rules,
     build_excel_workbook,
     write_excel_mapping_template,
-    parse_mapping_template_wb
+    parse_mapping_template_wb,
+    fix_sdmx_xml_datatype_tags,
 )
 from .mapping import map_structures, apply_fixed_value_maps, apply_implicit_component_maps, apply_multi_component_map
 from .validation import (
@@ -51,7 +52,8 @@ from .structures import (
     build_single_component_map,
     build_structure_map,
     create_schema_from_table,
-    build_structure_map_from_template_wb
+    build_structure_map_from_template_wb,
+    sanitize_variable,
     )
 
 from .structure_map_writer import (
@@ -111,9 +113,11 @@ __all__ = [
     "build_structure_map",
     "create_schema_from_table",
     "build_structure_map_from_template_wb",
+    "sanitize_variable",
     "apply_multi_component_map",
     "standardize_output",
     "parse_mapping_template_wb",
+    "fix_sdmx_xml_datatype_tags",
     "collect_structure_map_artifacts",
     "validate_structure_map_references",
     "prepare_structure_map_for_upload"
