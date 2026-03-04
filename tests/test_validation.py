@@ -23,14 +23,14 @@ class TestValidateNoMissingValues: # noqa: D101
     def test_validate_no_missing_values_missing_in_one_column(self):
         df = pd.DataFrame({"col1": [1, 2, None], "col2": [4, 5, 6]})
         mandatory_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
+        with pytest.raises(ValueError, match="row\\(s\\) with missing values in mandatory columns"):
             validate_no_missing_values(df, mandatory_columns)
 
 
     def test_validate_no_missing_values_missing_in_multiple_columns(self):
         df = pd.DataFrame({"col1": [1, None, 3], "col2": [None, 5, 6]})
         mandatory_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Missing values found in mandatory columns"):
+        with pytest.raises(ValueError, match="row\\(s\\) with missing values in mandatory columns"):
             validate_no_missing_values(df, mandatory_columns)
 
 
@@ -57,7 +57,7 @@ class TestValidateDuplicates: # noqa: D101
     def test_validate_duplicates_with_duplicates(self):
         df = pd.DataFrame({"col1": [1, 2, 2], "col2": [4, 5, 5]})
         dim_columns = ["col1", "col2"]
-        with pytest.raises(ValueError, match="Duplicate rows found"):
+        with pytest.raises(ValueError, match="duplicate rows"):
             validate_duplicates(df, dim_columns)
 
 class TestValidateCodelistIds: # noqa: D101
@@ -139,7 +139,8 @@ class TestValidateColumns:
         df = pd.DataFrame(columns=df_columns)
         with pytest.raises(ValueError) as exc_info:
             validate_columns(df, valid_columns=valid_columns, sdmx_cols=sdmx_cols)
-        assert f"Found unexpected column: {invalid_col}" in str(exc_info.value)
+        assert f"Found unexpected columns" in str(exc_info.value)
+        assert invalid_col in str(exc_info.value)
 
     def test_empty_dataframe_passes(self):
         """Tests that an empty DataFrame passes validation (no columns to check)."""
@@ -180,10 +181,11 @@ class TestValidateCodelistIds:
         })
         with pytest.raises(ValueError) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
-        assert "Invalid values found in column 'col1'" in str(excinfo.value)
+        assert "Invalid codelist values found" in str(excinfo.value)
+        assert "col1" in str(excinfo.value)
 
     def test_multiple_invalid_values(self, sample_codelist_ids):
-        """Tests that multiple invalid values are reported."""
+        """Tests that invalid values across multiple columns are all reported."""
         df = pd.DataFrame({
             "col1": ["INVALID1", "INVALID2"],
             "col2": ["INVALID3", "B2"]
@@ -191,7 +193,7 @@ class TestValidateCodelistIds:
         with pytest.raises(ValueError) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         msg = str(excinfo.value)
-        assert "Invalid values found in column 'col1'" in msg or "Invalid values found in column 'col2'" in msg
+        assert "col1" in msg and "col2" in msg
 
     def test_column_not_in_dataframe_is_ignored(self, sample_codelist_ids):
         """Tests that columns not present in DataFrame are ignored."""
@@ -265,7 +267,7 @@ class TestValidateDatasetLocal:
 
         result = validate_dataset_local(df, valid=valid_info)
         assert "columns" in result["Validation"].values
-        assert "Found unexpected column" in result["Error"].iloc[0]
+        assert "Found unexpected columns" in result["Error"].iloc[0]
 
     def test_missing_mandatory_columns_error(self, valid_info):
         """Tests that missing mandatory columns produce an error record."""
@@ -293,7 +295,7 @@ class TestValidateDatasetLocal:
 
         result = validate_dataset_local(df, valid=valid_info)
         assert "codelist_ids" in result["Validation"].values
-        assert "Invalid values found" in result["Error"].iloc[0]
+        assert "Invalid codelist values found" in result["Error"].iloc[0]
 
     def test_duplicate_rows_error(self, valid_info):
         """Tests that duplicate rows produce an error record."""
@@ -309,7 +311,7 @@ class TestValidateDatasetLocal:
 
         result = validate_dataset_local(df, valid=valid_info)
         assert "duplicates" in result["Validation"].values
-        assert "Duplicate rows found" in result["Error"].iloc[0]
+        assert "duplicate rows" in result["Error"].iloc[0]
 
     def test_missing_values_error(self, valid_info):
         """Tests that missing values in mandatory columns produce an error record."""
@@ -325,7 +327,7 @@ class TestValidateDatasetLocal:
 
         result = validate_dataset_local(df, valid=valid_info)
         assert "missing_values" in result["Validation"].values
-        assert "Missing values found" in result["Error"].iloc[0]
+        assert "missing values in mandatory columns" in result["Error"].iloc[0]
 
     def test_raises_error_if_no_schema_or_valid(self):
         """Tests that ValueError is raised if neither schema nor valid is provided."""
