@@ -21,8 +21,7 @@ import numpy as np
 import pytest
 import re
 # Import tidysdmx functions
-from tidysdmx.structures import (
-    # infer_role_dimension, 
+from tidysdmx.structures import ( 
     build_fixed_map, 
     build_implicit_component_map, 
     build_date_pattern_map,
@@ -31,18 +30,12 @@ from tidysdmx.structures import (
     build_multi_value_map_list,
     build_representation_map,
     build_single_component_map,
-    #_extract_mapping_definitions,
-    #_read_comp_mapping_sheet,
-    _create_fixed_definition,
-    _create_implicit_definition,
-    _create_representation_definition,
     create_schema_from_table,
     _parse_info_sheet,
     _parse_comp_mapping_sheet,
     _parse_rep_mapping_sheet,
     _match_column_name,
     build_multi_representation_map,
-    build_structure_map,
     _extract_artefact_id,
     _validate_mappings,
     build_structure_map_from_template_wb,
