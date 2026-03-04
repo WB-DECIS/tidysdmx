@@ -36,7 +36,12 @@ def _replace_values_with_urn(map_rule):
     rep_map = _get_embedded_rep_map(map_rule)
     if rep_map is None:
         return map_rule
-    urn = rep_map.urn if rep_map.urn else gen_urn(rep_map)
+    urn = rep_map.urn if rep_map.urn else gen_urn(
+                        artefact_type = type(rep_map).__name__, 
+                        agency = rep_map.agency, 
+                        artefact_id = rep_map.id, 
+                        version = rep_map.version
+                        )
     return type(map_rule)(
         source=map_rule.source, target=map_rule.target, values=urn
     )
