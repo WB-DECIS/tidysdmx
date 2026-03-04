@@ -1,8 +1,8 @@
-from typing import Dict, List, Any
+from typing import Dict
 import pandas as pd
-import pysdmx as px
-from tidysdmx.utils import *
 from typeguard import typechecked
+
+from tidysdmx.utils import extract_validation_info
 
 # region Functions to validate formatted dataset
 
@@ -58,7 +58,7 @@ def validate_dataset_local(
         error_records.append({error_columns[0]: "mandatory_columns", error_columns[1]: str(e)})
         all_mandatory_comp_ok = False
 
-	# STEP 2: If all mandatory components are present. Continue with validation
+    # STEP 2: If all mandatory components are present, continue with validation.
     if all_mandatory_comp_ok:
         try:
             validate_codelist_ids(df, valid["codelist_ids"])
@@ -80,112 +80,104 @@ def validate_dataset_local(
 
 
 
+@typechecked
 def validate_columns(
-	df, valid_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-):
-	"""Validate that all columns in the DataFrame are part of the specified components or sdmx_cols.
+    df: pd.DataFrame,
+    valid_columns: list[str],
+    sdmx_cols: list[str] = ["STRUCTURE", "STRUCTURE_ID", "ACTION"],
+) -> None:
+    """Validate that all columns in the DataFrame are valid component or SDMX reference columns.
 
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		valid_columns (list): List of valid component names.
-		sdmx_cols (list, optional): List of additional valid column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
+    Args:
+        df: The DataFrame to validate.
+        valid_columns: List of valid component names.
+        sdmx_cols: List of additional allowed column names. Defaults to
+            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
 
-	Raises:
-		ValueError: If any column in the DataFrame is not in the list of valid components or sdmx_cols.
-	"""
-	cols = df.columns
-	for col in cols:
-		if col not in sdmx_cols and col not in valid_columns:
-			raise ValueError(f"Found unexpected column: {col}")
+    Raises:
+        ValueError: If any column in the DataFrame is not in ``valid_columns`` or ``sdmx_cols``.
+    """
+    for col in df.columns:
+        if col not in sdmx_cols and col not in valid_columns:
+            raise ValueError(f"Found unexpected column: {col}")
 
 
+@typechecked
 def validate_mandatory_columns(
-	df, mandatory_columns, sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-):
-	"""Validate that all mandatory columns are present in the DataFrame.
+    df: pd.DataFrame,
+    mandatory_columns: list[str],
+    sdmx_cols: list[str] = ["STRUCTURE", "STRUCTURE_ID", "ACTION"],
+) -> None:
+    """Validate that all mandatory columns are present in the DataFrame.
 
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		mandatory_columns (list): List of mandatory component names.
-		sdmx_cols (list, optional): List of additional mandatory column names. Defaults to ['STRUCTURE', 'STRUCTURE_ID', 'ACTION'].
+    Args:
+        df: The DataFrame to validate.
+        mandatory_columns: List of mandatory component names.
+        sdmx_cols: List of additional mandatory column names. Defaults to
+            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
 
-	Raises:
-		ValueError: If any mandatory column is not present in the DataFrame.
-	"""
-	required_columns = set(mandatory_columns + sdmx_cols)
-	missing_columns = required_columns - set(df.columns)
-	if missing_columns:
-		raise ValueError(f"Missing mandatory columns: {missing_columns}")
-
-
-def get_codelist_ids(comp, coded_comp):
-	"""Retrieve all codelist IDs for given coded components.
-
-	Args:
-		comp (list): List of components.
-		coded_comp (list): List of coded components.
-
-	Returns:
-		dict: Dictionary with coded components as keys and list of codelist IDs as values.
-	"""
-	codelist_dict = {}
-	for component in coded_comp:
-		codes = comp[component].local_codes.items
-		codelist_dict[component] = [code.id for code in codes]
-	return codelist_dict
+    Raises:
+        ValueError: If any mandatory column is absent from the DataFrame.
+    """
+    required_columns = set(mandatory_columns + sdmx_cols)
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise ValueError(f"Missing mandatory columns: {missing_columns}")
 
 
-def validate_codelist_ids(df, codelist_ids):
-	"""Validate that all values in specified columns of a DataFrame are within the allowed codelist IDs.
+@typechecked
+def validate_codelist_ids(df: pd.DataFrame, codelist_ids: Dict[str, list[str]]) -> None:
+    """Validate that all values in coded columns are within the allowed codelist IDs.
 
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		codelist_ids (dict): A dictionary where keys are column names and values are lists of allowed IDs.
+    Args:
+        df: The DataFrame to validate.
+        codelist_ids: Mapping of column name to list of allowed code IDs.
 
-	Raises:
-		ValueError: If any value in the specified columns is not in the allowed codelist IDs.
-	"""
-	for col, valid_ids in codelist_ids.items():
-		if col in df.columns:
-			# Convert to string for comparison only, without mutating the DataFrame
-			col_as_str = df[col].astype(str)
-			valid_ids_str = [str(id) for id in valid_ids]
-			invalid_values = col_as_str[~col_as_str.isin(valid_ids_str)].unique()
-			if len(invalid_values) > 0:
-				raise ValueError(
-					f"Invalid values found in column '{col}': {invalid_values}"
-				)
-
-
-def validate_duplicates(df, dim_comp):
-	"""Validate that there are no duplicate rows in the DataFrame for the given combination of columns.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		dim_comp (list): List of column names to check for duplicates.
-
-	Raises:
-		ValueError: If duplicate rows are found for the given combination of columns.
-	"""
-	# Check for duplicates
-	duplicates = df.duplicated(subset=dim_comp, keep=False)
-	if duplicates.any():
-		duplicate_rows = df[duplicates]
-		raise ValueError(f"Duplicate rows found:\n{duplicate_rows}")
+    Raises:
+        ValueError: If any value in a coded column is not in the allowed IDs.
+    """
+    for col, valid_ids in codelist_ids.items():
+        if col in df.columns:
+            # Convert to string for comparison only, without mutating the DataFrame
+            col_as_str = df[col].astype(str)
+            valid_ids_str = [str(id) for id in valid_ids]
+            invalid_values = col_as_str[~col_as_str.isin(valid_ids_str)].unique()
+            if len(invalid_values) > 0:
+                raise ValueError(
+                    f"Invalid values found in column '{col}': {invalid_values}"
+                )
 
 
-def validate_no_missing_values(df, mandatory_columns):
-	"""Validate that there are no missing values in the mandatory columns of the DataFrame.
+@typechecked
+def validate_duplicates(df: pd.DataFrame, dim_comp: list[str]) -> None:
+    """Validate that there are no duplicate rows for a given set of key columns.
 
-	Args:
-		df (pd.DataFrame): The DataFrame to validate.
-		mandatory_columns (list): List of mandatory column names to check for missing values.
+    Args:
+        df: The DataFrame to validate.
+        dim_comp: List of column names that form the uniqueness key (typically dimensions).
 
-	Raises:
-		ValueError: If missing values are found in any of the mandatory columns.
-	"""
-	missing_values = df[mandatory_columns].isnull().any(axis=1)
-	if missing_values.any():
-		missing_rows = df[missing_values]
-		raise ValueError(f"Missing values found in mandatory columns:\n{missing_rows}")
+    Raises:
+        ValueError: If duplicate rows are found for the given combination of columns.
+    """
+    duplicates = df.duplicated(subset=dim_comp, keep=False)
+    if duplicates.any():
+        duplicate_rows = df[duplicates]
+        raise ValueError(f"Duplicate rows found:\n{duplicate_rows}")
+
+
+@typechecked
+def validate_no_missing_values(df: pd.DataFrame, mandatory_columns: list[str]) -> None:
+    """Validate that there are no missing values in mandatory columns.
+
+    Args:
+        df: The DataFrame to validate.
+        mandatory_columns: List of mandatory column names to check.
+
+    Raises:
+        ValueError: If missing values are found in any mandatory column.
+    """
+    missing_values = df[mandatory_columns].isnull().any(axis=1)
+    if missing_values.any():
+        missing_rows = df[missing_values]
+        raise ValueError(f"Missing values found in mandatory columns:\n{missing_rows}")
 # endregion

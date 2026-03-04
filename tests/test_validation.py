@@ -1,15 +1,13 @@
 import pandas as pd
-from pysdmx.model import Code, Codelist, Component, Role, Concept
 import pytest
 # Import tidysdmx functions
 from tidysdmx.validation import (
-    validate_no_missing_values, 
-    validate_duplicates, 
-    validate_codelist_ids, 
-    validate_mandatory_columns, 
+    validate_no_missing_values,
+    validate_duplicates,
+    validate_codelist_ids,
+    validate_mandatory_columns,
     validate_columns,
-    get_codelist_ids,
-    validate_dataset_local
+    validate_dataset_local,
 )
 
 class TestValidateNoMissingValues: # noqa: D101
@@ -153,80 +151,6 @@ class TestValidateColumns:
         df = pd.DataFrame(columns=["STRUCTURE", "STRUCTURE_ID"])
         validate_columns(df, valid_columns=[], sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"])
 
-class TestGetCodelistIds:
-    """Tests for get_codelist_ids using real pysdmx Component and Codelist objects."""
-
-    @pytest.fixture
-    def make_component(self):
-        """Fixture that returns a factory to create a Component with a Codelist."""
-        def _factory(id_prefix, ids):
-            # Create Code objects
-            codes = [Code(id=f"{id_prefix}{cid}", name=f"Name-{cid}") for cid in ids]
-            # Create Codelist with those codes
-            codelist = Codelist(
-                id=f"CL_{id_prefix}",
-                name=f"Codelist-{id_prefix}",
-                agency="SDMX",
-                items=codes,
-                version="1.0"
-            )
-            # Create Component referencing the Codelist
-            return Component(
-                concept=Concept("TEST", name="A test concept"),
-                id=f"comp_{id_prefix}", 
-                name=f"Component-{id_prefix}", 
-                local_codes=codelist, 
-                required=True,
-                role=Role.DIMENSION)
-        return _factory
-
-    def test_multiple_components_with_codes(self, make_component):
-        """Tests that multiple components return correct codelist IDs."""
-        comp = {
-            "comp1": make_component("A", ["1", "2"]),
-            "comp2": make_component("B", ["X", "Y"])
-        }
-        coded_comp = ["comp1", "comp2"]
-        expected = {
-            "comp1": ["A1", "A2"],
-            "comp2": ["BX", "BY"]
-        }
-        assert get_codelist_ids(comp, coded_comp) == expected
-
-    def test_empty_coded_comp_returns_empty_dict(self, make_component):
-        """Tests that an empty coded_comp list returns an empty dictionary."""
-        comp = {"comp1": make_component("A", ["1"])}
-        coded_comp = []
-        assert get_codelist_ids(comp, coded_comp) == {}
-
-    def test_component_with_no_codes_returns_empty_list(self, make_component):
-        """Tests that a component with no codes returns an empty list."""
-        comp = {"comp1": make_component("A", [])}
-        coded_comp = ["comp1"]
-        expected = {"comp1": []}
-        assert get_codelist_ids(comp, coded_comp) == expected
-
-    def test_invalid_component_name_raises_keyerror(self, make_component):
-        """Tests that an invalid component name raises KeyError."""
-        comp = {"comp1": make_component("A", ["1"])}
-        coded_comp = ["invalid_comp"]
-        with pytest.raises(KeyError):
-            get_codelist_ids(comp, coded_comp)
-
-    @pytest.mark.parametrize(
-        "coded_comp,expected",
-        [
-            (["comp1", "comp2"], {"comp1": ["A1"], "comp2": []}),
-            (["comp2"], {"comp2": []}),
-        ],
-    )
-    def test_mixed_components_some_empty(self, make_component, coded_comp, expected):
-        """Tests that mixed components (some empty) return correct results."""
-        comp = {
-            "comp1": make_component("A", ["1"]),
-            "comp2": make_component("B", []),
-        }
-        assert get_codelist_ids(comp, coded_comp) == expected
 
 class TestValidateCodelistIds:
     """Tests for validate_codelist_ids function."""
