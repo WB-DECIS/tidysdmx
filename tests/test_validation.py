@@ -256,7 +256,7 @@ class TestValidateDatasetLocal:
         assert result.empty
 
     def test_unexpected_column_error(self, valid_info):
-        """Tests that unexpected columns produce an error record."""
+        """Tests that unexpected columns produce one error row per unexpected column."""
         df = pd.DataFrame({
             "TIME_PERIOD": ["2020"],
             "OBS_VALUE": [100],
@@ -266,8 +266,9 @@ class TestValidateDatasetLocal:
         })
 
         result = validate_dataset_local(df, valid=valid_info)
-        assert "columns" in result["Validation"].values
-        assert "Found unexpected columns" in result["Error"].iloc[0]
+        col_errors = result[result["Validation"] == "columns"]
+        assert not col_errors.empty
+        assert any("Unexpected column: 'EXTRA_COL'" in e for e in col_errors["Error"].values)
 
     def test_missing_mandatory_columns_error(self, valid_info):
         """Tests that missing mandatory columns produce an error record."""
@@ -282,7 +283,7 @@ class TestValidateDatasetLocal:
         assert "Missing mandatory columns" in result["Error"].iloc[0]
 
     def test_invalid_codelist_values_error(self, valid_info):
-        """Tests that invalid codelist values produce an error record."""
+        """Tests that invalid codelist values produce one error row per (column, value) pair."""
         df = pd.DataFrame({
             "TIME_PERIOD": ["2020"],
             "OBS_VALUE": [100],
@@ -294,8 +295,11 @@ class TestValidateDatasetLocal:
         })
 
         result = validate_dataset_local(df, valid=valid_info)
-        assert "codelist_ids" in result["Validation"].values
-        assert "Invalid codelist values found" in result["Error"].iloc[0]
+        codelist_errors = result[result["Validation"] == "codelist_ids"]
+        assert not codelist_errors.empty
+        # Each row is a single (column: value) pair
+        assert any("'AREA': INVALID" in e for e in codelist_errors["Error"].values)
+        assert len(codelist_errors) == 1
 
     def test_duplicate_rows_error(self, valid_info):
         """Tests that duplicate rows produce an error record."""
@@ -310,8 +314,9 @@ class TestValidateDatasetLocal:
         })
 
         result = validate_dataset_local(df, valid=valid_info)
-        assert "duplicates" in result["Validation"].values
-        assert "duplicate rows" in result["Error"].iloc[0]
+        dup_errors = result[result["Validation"] == "duplicates"]
+        assert not dup_errors.empty
+        assert any("duplicate rows" in e for e in dup_errors["Error"].values)
 
     def test_missing_values_error(self, valid_info):
         """Tests that missing values in mandatory columns produce an error record."""
@@ -326,8 +331,47 @@ class TestValidateDatasetLocal:
         })
 
         result = validate_dataset_local(df, valid=valid_info)
-        assert "missing_values" in result["Validation"].values
-        assert "missing values in mandatory columns" in result["Error"].iloc[0]
+        mv_errors = result[result["Validation"] == "missing_values"]
+        assert not mv_errors.empty
+        assert any("missing values in mandatory columns" in e for e in mv_errors["Error"].values)
+
+    def test_multiple_codelist_violations_produce_multiple_rows(self, valid_info):
+        """Tests that violations in two columns produce two separate rows in the result."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020"],
+            "OBS_VALUE": [100],
+            "AREA": ["BAD_AREA"],
+            "INDICATOR": ["BAD_INDICATOR"],
+            "STRUCTURE": ["X"],
+            "STRUCTURE_ID": ["Y"],
+            "ACTION": ["A"]
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        codelist_errors = result[result["Validation"] == "codelist_ids"]
+        # One row per (column, invalid_value) — two distinct violations
+        assert len(codelist_errors) == 2
+        error_msgs = codelist_errors["Error"].tolist()
+        assert any("'AREA': BAD_AREA" in m for m in error_msgs)
+        assert any("'INDICATOR': BAD_INDICATOR" in m for m in error_msgs)
+
+    def test_multiple_unexpected_columns_produce_multiple_rows(self, valid_info):
+        """Tests that two unexpected columns produce two separate rows in the result."""
+        df = pd.DataFrame({
+            "TIME_PERIOD": ["2020"],
+            "OBS_VALUE": [100],
+            "AREA": ["COL"],
+            "INDICATOR": ["RES_FEMALE_TOT_FTE"],
+            "EXTRA1": ["x"],
+            "EXTRA2": ["y"],
+        })
+
+        result = validate_dataset_local(df, valid=valid_info)
+        col_errors = result[result["Validation"] == "columns"]
+        assert len(col_errors) == 2
+        error_msgs = col_errors["Error"].tolist()
+        assert any("'EXTRA1'" in m for m in error_msgs)
+        assert any("'EXTRA2'" in m for m in error_msgs)
 
     def test_raises_error_if_no_schema_or_valid(self):
         """Tests that ValueError is raised if neither schema nor valid is provided."""

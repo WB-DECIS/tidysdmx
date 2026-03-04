@@ -7,6 +7,60 @@ from tidysdmx.utils import extract_validation_info
 # Module-level constant to avoid mutable default arguments
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
+
+# region Private helpers
+
+
+def _get_unexpected_columns(
+    df: pd.DataFrame,
+    valid_columns: list[str],
+    sdmx_cols: list[str],
+) -> list[str]:
+    """Return column names that are not in *valid_columns* or *sdmx_cols*.
+
+    Args:
+        df: The DataFrame whose columns are checked.
+        valid_columns: Allowed component column names.
+        sdmx_cols: Allowed SDMX reference column names.
+
+    Returns:
+        List of unexpected column names (preserving the order they appear in *df*).
+    """
+    allowed = set(valid_columns) | set(sdmx_cols)
+    return [col for col in df.columns if col not in allowed]
+
+
+def _get_codelist_violations(
+    df: pd.DataFrame,
+    codelist_ids: Dict[str, list[str]],
+    max_errors: int,
+) -> list[tuple[str, str]]:
+    """Return one ``(column, invalid_value)`` tuple per codelist violation.
+
+    Args:
+        df: The DataFrame to check.
+        codelist_ids: Mapping of column name to list of allowed code IDs.
+        max_errors: Maximum number of violations to return across all columns.
+
+    Returns:
+        List of ``(column_name, invalid_value_str)`` tuples, capped at *max_errors*.
+    """
+    violations: list[tuple[str, str]] = []
+    for col, valid_ids in codelist_ids.items():
+        if col not in df.columns or len(violations) >= max_errors:
+            continue
+        col_as_str = df[col].astype(str)
+        valid_ids_str = [str(vid) for vid in valid_ids]
+        invalid_values = col_as_str[~col_as_str.isin(valid_ids_str)].unique()
+        for val in invalid_values:
+            if len(violations) >= max_errors:
+                break
+            violations.append((col, str(val)))
+    return violations
+
+
+# endregion
+
 # region Functions to validate formatted dataset
 
 @typechecked
@@ -49,16 +103,10 @@ def validate_dataset_local(
 
     error_records: list[dict[str, str]] = []
 
-    # STEP 1: Validate components
-    try:
-        validate_columns(
-            df,
-            valid_columns=valid["valid_comp"],
-            sdmx_cols=sdmx_cols,
-            max_errors=max_errors,
-        )
-    except ValueError as e:
-        error_records.append({error_columns[0]: "columns", error_columns[1]: str(e)})
+    # STEP 1: Validate components — one row per unexpected column
+    unexpected = _get_unexpected_columns(df, valid["valid_comp"], sdmx_cols)
+    for col in unexpected[:max_errors]:
+        error_records.append({error_columns[0]: "columns", error_columns[1]: f"Unexpected column: '{col}'"})
 
     all_mandatory_comp_ok = True
     try:
@@ -73,10 +121,9 @@ def validate_dataset_local(
 
     # STEP 2: If all mandatory components are present, continue with validation.
     if all_mandatory_comp_ok:
-        try:
-            validate_codelist_ids(df, valid["codelist_ids"], max_errors=max_errors)
-        except ValueError as e:
-            error_records.append({error_columns[0]: "codelist_ids", error_columns[1]: str(e)})
+        # One row per (column, invalid_value) pair
+        for col, val in _get_codelist_violations(df, valid["codelist_ids"], max_errors):
+            error_records.append({error_columns[0]: "codelist_ids", error_columns[1]: f"'{col}': {val}"})
 
         try:
             validate_duplicates(df, dim_comp=valid["dim_comp"], max_errors=max_errors)
@@ -116,8 +163,7 @@ def validate_columns(
     """
     if sdmx_cols is None:
         sdmx_cols = list(_DEFAULT_SDMX_COLS)
-    allowed = set(valid_columns) | set(sdmx_cols)
-    unexpected = [col for col in df.columns if col not in allowed]
+    unexpected = _get_unexpected_columns(df, valid_columns, sdmx_cols)
     if unexpected:
         capped = unexpected[:max_errors]
         truncated = len(unexpected) - len(capped)
@@ -173,24 +219,14 @@ def validate_codelist_ids(
         ValueError: If any value in a coded column is not in the allowed IDs,
             listing all offending values (up to ``max_errors``) with their column.
     """
-    violations: list[str] = []
-    for col, valid_ids in codelist_ids.items():
-        if col not in df.columns or len(violations) >= max_errors:
-            continue
-        col_as_str = df[col].astype(str)
-        valid_ids_str = [str(id) for id in valid_ids]
-        invalid_values = col_as_str[~col_as_str.isin(valid_ids_str)].unique()
-        for val in invalid_values:
-            if len(violations) >= max_errors:
-                break
-            violations.append(f"'{col}': {val}")
+    violations = _get_codelist_violations(df, codelist_ids, max_errors)
     if violations:
         truncated = ""
         if len(violations) >= max_errors:
             truncated = f" (capped at max_errors={max_errors})"
         raise ValueError(
             f"Invalid codelist values found{truncated}:\n  "
-            + "\n  ".join(violations)
+            + "\n  ".join(f"'{col}': {val}" for col, val in violations)
         )
 
 
