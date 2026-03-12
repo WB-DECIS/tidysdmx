@@ -469,6 +469,58 @@ class TestConvertToUrnReferences:
 
         assert len(result.maps) == len(sm.maps)
 
+    def test_urn_preserved(self, make_rep_map):
+        """An explicit URN on the StructureMap must survive URN conversion."""
+        explicit_urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".StructureMap=ECB:SM_TEST(1.0)"
+        )
+        sm = StructureMap(
+            id="SM_TEST",
+            name="Test",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            urn=explicit_urn,
+            maps=[
+                ComponentMap(
+                    source="COUNTRY", target="GEO", values=make_rep_map()
+                ),
+            ],
+        )
+
+        result = _convert_to_urn_references(sm)
+
+        assert result.urn == explicit_urn
+
+    def test_uri_and_validity_preserved(self, make_rep_map):
+        """uri, valid_from, and valid_to must be carried over."""
+        from datetime import datetime
+
+        vf = datetime(2024, 1, 1)
+        vt = datetime(2025, 12, 31)
+        sm = StructureMap(
+            id="SM_TEST",
+            name="Test",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            uri="https://example.com/sm",
+            valid_from=vf,
+            valid_to=vt,
+            maps=[
+                ComponentMap(
+                    source="COUNTRY", target="GEO", values=make_rep_map()
+                ),
+            ],
+        )
+
+        result = _convert_to_urn_references(sm)
+
+        assert result.uri == "https://example.com/sm"
+        assert result.valid_from == vf
+        assert result.valid_to == vt
+
 class TestCollectStructureMapArtifacts:
     """Tests for collect_structure_map_artifacts."""
 
