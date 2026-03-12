@@ -89,6 +89,14 @@ def _convert_to_urn_references(
         maps=new_maps,
         description=structure_map.description,
         annotations=structure_map.annotations,
+        urn=structure_map.urn,
+        uri=structure_map.uri,
+        valid_from=structure_map.valid_from,
+        valid_to=structure_map.valid_to,
+        is_final=structure_map.is_final,
+        is_external_reference=structure_map.is_external_reference,
+        service_url=structure_map.service_url,
+        structure_url=structure_map.structure_url,
     )
 
 @typechecked
