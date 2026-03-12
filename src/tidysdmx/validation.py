@@ -193,7 +193,8 @@ def validate_mandatory_columns(
     if sdmx_cols is None:
         sdmx_cols = list(_DEFAULT_SDMX_COLS)
     required_columns = set(mandatory_columns + sdmx_cols)
-    missing_columns = required_columns - set(df.columns)
+    missing_columns = sorted(required_columns - set(df.columns))
+
     if missing_columns:
         raise ValueError(f"Missing mandatory columns: {missing_columns}")
 

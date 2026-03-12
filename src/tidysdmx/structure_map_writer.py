@@ -229,8 +229,8 @@ def prepare_structure_map_for_upload(
         ValueError: If validate=True and unresolved references are found.
 
     Example:
-        >>> from pysdmx.api.fmr import RegistryMaintenanceClient, StructureAction
-        >>> from pysdmx.util.structure_map_writer import prepare_structure_map_for_upload
+        >>> from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
+        >>> from tidysdmx.structure_map_writer import prepare_structure_map_for_upload
         >>> 
         >>> # Prepare artifacts
         >>> artifacts = prepare_structure_map_for_upload(my_structure_map)

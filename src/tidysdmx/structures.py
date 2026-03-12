@@ -1745,7 +1745,7 @@ def gen_urn(
         
     Example:
         >>> generate_urn("StructureMap", "BIS", "SM_TEST", "1.0")
-        'urn:sdmx:org.sdmx.infomodel.mapping.StructureMap=BIS:SM_TEST(1.0)'
+        'urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=BIS:SM_TEST(1.0)'
     """
     package = SDMX_PACKAGE_MAP.get(artefact_type, "base")
     urn = (

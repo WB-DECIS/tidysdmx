@@ -144,7 +144,7 @@ class TestGetEmbeddedRepMap:
 
     def test_component_map_with_urn_string_returns_none(self):
         """ComponentMap whose values is a URN string should return None."""
-        urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=urn)
 
         result = _get_embedded_rep_map(cm)
@@ -153,7 +153,7 @@ class TestGetEmbeddedRepMap:
 
     def test_multi_component_map_with_urn_string_returns_none(self):
         """MultiComponentMap whose values is a URN string should return None."""
-        urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:MRM(1.0)"
+        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:MRM(1.0)"
         mcm = MultiComponentMap(source=["COUNTRY"], target=["GEO"], values=urn)
 
         result = _get_embedded_rep_map(mcm)
@@ -220,7 +220,7 @@ class TestReplaceValuesWithUrn:
 
     def test_uses_existing_urn_when_present(self, make_rep_map):
         """If the RepresentationMap already has a URN, it should be used as-is."""
-        explicit_urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        explicit_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         rep_map = make_rep_map(urn=explicit_urn)
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=rep_map)
 
@@ -267,7 +267,7 @@ class TestReplaceValuesWithUrn:
 
     def test_component_map_with_urn_string_unchanged(self):
         """ComponentMap whose values is already a URN string should be returned as-is."""
-        existing_urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        existing_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=existing_urn)
 
         result = _replace_values_with_urn(cm)
@@ -306,7 +306,7 @@ class TestReplaceValuesWithUrn:
 
     def test_multi_uses_existing_urn_when_present(self, make_multi_rep_map):
         """If the MultiRepresentationMap has a URN, it should be used as-is."""
-        explicit_urn = "urn:sdmx:org.sdmx.infomodel.mapping.MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+        explicit_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
         mrm = make_multi_rep_map(urn=explicit_urn)
         mcm = MultiComponentMap(
             source=["COUNTRY", "CURRENCY"],
@@ -348,7 +348,7 @@ class TestReplaceValuesWithUrn:
 
     def test_multi_component_map_with_urn_string_unchanged(self):
         """MultiComponentMap whose values is already a URN string is returned as-is."""
-        existing_urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:MRM(1.0)"
+        existing_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:MRM(1.0)"
         mcm = MultiComponentMap(
             source=["COUNTRY"],
             target=["GEO"],
@@ -555,7 +555,7 @@ class TestValidateStructureMapReferences:
 
     def test_unresolved_urn_reference_raises_value_error(self):
         """A ComponentMap with a URN string instead of an object must raise ValueError."""
-        urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         sm = StructureMap(
             id="SM", name="SM", agency="ECB",
             source="urn:src", target="urn:tgt",
@@ -627,7 +627,7 @@ class TestPrepareStructureMapForUpload:
 
     def test_validate_true_raises_for_unresolved_urn(self):
         """With validate=True, an unresolved URN reference must raise ValueError."""
-        urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         sm = StructureMap(
             id="SM", name="SM", agency="ECB",
             source="urn:src", target="urn:tgt",
@@ -639,7 +639,7 @@ class TestPrepareStructureMapForUpload:
 
     def test_validate_false_skips_validation(self):
         """With validate=False, an unresolved URN reference must not raise."""
-        urn = "urn:sdmx:org.sdmx.infomodel.mapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
         sm = StructureMap(
             id="SM", name="SM", agency="ECB",
             source="urn:src", target="urn:tgt",
