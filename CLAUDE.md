@@ -15,7 +15,7 @@ The project wraps pysdmx where possible, but also adds higher-level functionalit
 not present in pysdmx itself.
 
 ## Before Writing Any Code
-Always read the following documents first — they define the domain and the 
+Always read the following documents first — they define the domain and the
 upstream dependency your code wraps:
 
 1. `docs/sdmx-information-model.md` — understand the SDMX artefacts involved
@@ -30,10 +30,20 @@ upstream dependency your code wraps:
 
 ## Key Commands
 
-- Run tests: `pytest`
-- Lint + format: `ruff check . && ruff format .`
-- Full check: `ruff check . && pytest`
+- Run tests: `poetry run pytest`
+- Run unit tests only: `poetry run pytest -m "not integration"`
+- Run tests with coverage: `poetry run pytest --cov --cov-report=term-missing`
+- Lint: `poetry run ruff check .`
+- Format check: `poetry run ruff format --check .`
+- Auto-fix lint + format: `poetry run ruff check --fix . && poetry run ruff format .`
 - Pre-commit (all files): `pre-commit run --all-files`
+
+## Claude Code Commands
+
+- `/test` — run the test suite (accepts pytest flags, e.g. `/test -k test_name`)
+- `/lint` — run ruff linting and format checks
+- `/review-pr` — review current branch changes against master
+- `/add-tests` — generate tests for new/changed functions
 
 ## Repository Layout
 
@@ -56,6 +66,11 @@ tests/
     ├── fxtr_dummy_data.py  — Dummy DataFrame fixtures
     ├── fxtr_structures.py  — SDMX structure artefact fixtures
     └── fxtr_mapping.py     — StructureMap fixtures
+
+.claude/
+├── settings.json           — Pre-approved permissions for common commands
+├── commands/               — Slash commands (/test, /lint, /review-pr, /add-tests)
+└── rules/                  — Python and testing convention rules
 ```
 
 ## Key pysdmx Classes Used
@@ -71,7 +86,7 @@ tests/
 - `pysdmx.io.format.StructureFormat` — structure serialisation formats
 
 ## pysdmx Source Code
-The pysdmx source is available at `.pysdmx-src/`. When you need to understand 
+The pysdmx source is available at `.pysdmx-src/`. When you need to understand
 how pysdmx implements something, read the source directly rather than guessing.
 Key modules:
 - `.pysdmx-src/src/pysdmx/model/` — core data model classes
@@ -102,7 +117,17 @@ Key modules:
 - Use fixtures in `tests/fixtures/` to construct pysdmx artefacts and dummy datasets —
   do not create inline artefacts when a fixture already exists
 - Fixtures are loaded as pytest plugins via `conftest.py`
-- Every new public function should have a corresponding test
+- Every new public function must have a corresponding test
+- Mark tests: `@pytest.mark.unit` (default) or `@pytest.mark.integration` (FMR/network)
+- See `.claude/rules/testing-conventions.md` for full test writing guidelines
+
+## CI/CD
+
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): runs ruff lint + format check, then
+  pytest with coverage on Python 3.11 and 3.12 — triggered on push/PR to master
+- **Claude PR Review** (`.github/workflows/pr-review.yml`): automated code review on PRs
+  using Claude, checking SDMX correctness, type safety, test coverage, and code quality
+- **Semantic Release**: `python-semantic-release` manages versioning from commit messages
 
 ## What NOT to Do
 
@@ -110,3 +135,5 @@ Key modules:
 - Do not invent SDMX concepts not present in the information model
 - Do not expose raw pysdmx internal objects in the public API without considering
   whether wrapping is appropriate
+- Do not skip writing tests for new public functions
+- Do not merge code that fails ruff checks or pytest
