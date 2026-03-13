@@ -114,7 +114,6 @@ def _load_dis_schema() -> Schema:
     return schema
 
 
-@pytest.mark.integration
 class TestPipelineWorkflow:
     """End-to-end pipeline integration test mirroring the notebook workflow.
 
