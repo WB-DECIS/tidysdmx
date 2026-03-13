@@ -1,0 +1,43 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Claude Code Review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          DIFF=$(git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- '*.py')
+          echo "has_python_changes=$([ -n "$DIFF" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude review
+        if: steps.diff.outputs.has_python_changes == 'true'
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: "claude-sonnet-4-20250514"
+          direct_prompt: |
+            Review this PR. Focus on:
+            1. SDMX correctness — do artefacts conform to the information model?
+            2. pysdmx wrapping — is upstream called where possible instead of reimplemented?
+            3. Type safety — are @typechecked and full annotations present?
+            4. Test coverage — are new/changed public functions tested?
+            5. Google docstrings — are they present and accurate?
+            6. General code quality — bugs, edge cases, simplification opportunities
+
+            Be concise. Only comment on issues that matter.
