@@ -1,7 +1,7 @@
 Country Name,Country Code,Series Name,Series Code,YR2019,YR2020,YR2021
-Ghana,GHA,Coverage rate,SPL_COV_TOT,10.5,,
-Kenya,KEN,Coverage rate,SPL_COV_TOT,20.3,,
-Ghana,GHA,Coverage rate,SPL_COV_TOT,,12.1,
-Kenya,KEN,Coverage rate,SPL_COV_TOT,,22.4,
-Ghana,GHA,Coverage rate,SPL_COV_TOT,,,13.7
-Kenya,KEN,Coverage rate,SPL_COV_TOT,,,24.6
+Ghana,GHA,Total transfer amount,SPL_TR_AMT_RD,10.5,,
+Kenya,KEN,Total transfer amount,SPL_TR_AMT_RD,20.3,,
+Ghana,GHA,Total transfer amount,SPL_TR_AMT_RD,,12.1,
+Kenya,KEN,Total transfer amount,SPL_TR_AMT_RD,,22.4,
+Ghana,GHA,Total transfer amount,SPL_TR_AMT_RD,,,13.7
+Kenya,KEN,Total transfer amount,SPL_TR_AMT_RD,,,24.6
