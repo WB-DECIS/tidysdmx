@@ -1,47 +1,40 @@
-from typing import Dict, List, Sequence, AbstractSet, Union, Optional
-from typeguard import typechecked
+"""SDMX component extraction, mapping rules, and Excel helpers."""
+
+from collections.abc import Sequence, Set
 from pathlib import Path
+
+import pandas as pd
+import pysdmx as px
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from pathlib import Path
-from dateutil.parser import parse as parse_date
-import pysdmx as px
-import pandas as pd
+from pysdmx.model import Schema
+from typeguard import typechecked
 
-# --- Import Official pysdmx Classes ---
-from pysdmx.model import (
-    StructureMap,
-    ComponentMap,
-    FixedValueMap,
-    ImplicitComponentMap,
-    RepresentationMap,
-    ValueMap,
-    Schema
-)
 
 @typechecked
-def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, object]:
+def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, object]:
     """Extract validation information from a given schema.
 
     Args:
-        schema (pysdmx.model.dataflow.Schema object.): The schema object contains all necessary validation information.
+        schema: The schema object containing all necessary validation
+            information.
 
     Returns:
-        dict: A dictionary containing validation information with the following keys:
+        A dictionary containing validation information with the following keys:
             - valid_comp: List of valid component names.
             - mandatory_comp: List of mandatory component names.
             - coded_comp: List of coded component names.
-            - codelist_ids: Dictionary with coded components as keys and list of codelist IDs as values.
+            - codelist_ids: Dictionary with coded components as keys and
+              list of codelist IDs as values.
             - dim_comp: List of dimension component names.
     """
     comp = schema.components
-    # Precompute reusable objects
     valid_comp = [c.id for c in comp]
-    mandatory_comp = [c.id for c in comp if comp[c.id].required]
-    coded_comp = [c.id for c in comp if comp[c.id].local_codes is not None]
-    dim_comp = [c.id for c in comp if comp[c.id].role == px.model.Role.DIMENSION]
+    mandatory_comp = [c.id for c in comp if c.required]
+    coded_comp = [c.id for c in comp if c.local_codes is not None]
+    dim_comp = [c.id for c in comp if c.role == px.model.Role.DIMENSION]
 
-    out = {
+    return {
         "valid_comp": valid_comp,
         "mandatory_comp": mandatory_comp,
         "coded_comp": coded_comp,
@@ -49,25 +42,25 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> Dict[str, objec
         "dim_comp": dim_comp,
     }
 
-    return out
 
 @typechecked
-def get_codelist_ids(comp: px.model.dataflow.Components, coded_comp: List) -> Dict[str, list[str]]:
+def get_codelist_ids(
+    comp: px.model.dataflow.Components, coded_comp: list[str]
+) -> dict[str, list[str]]:
     """Retrieve all codelist IDs for given coded components.
 
     Args:
-        comp (list): List of components.
-        coded_comp (list): List of coded components.
+        comp: A pysdmx Components collection.
+        coded_comp: List of coded component IDs.
 
     Returns:
-        dict: Dictionary with coded components as keys and list of codelist IDs as values.
+        Dictionary with coded component IDs as keys and lists of codelist
+        IDs as values.
     """
-    codelist_dict = {}
-    for component in coded_comp:
-        codes = comp[component].local_codes.items
-        codelist_dict[component] = [code.id for code in codes]
-    
-    return codelist_dict
+    return {
+        component: [code.id for code in comp[component].local_codes.items]
+        for component in coded_comp
+    }
 
 
 @typechecked
@@ -75,10 +68,10 @@ def extract_component_ids(schema: Schema) -> list[str]:
     """Retrieve all component IDs from a given pysdmx Schema.
 
     Args:
-        schema (Schema): A pysdmx Schema object representing an SDMX structure.
+        schema: A pysdmx Schema object representing an SDMX structure.
 
     Returns:
-        list[str]: A list of component IDs contained in the schema.
+        A list of component IDs contained in the schema.
 
     Raises:
         TypeError: If the input is not a Schema instance.
@@ -91,7 +84,7 @@ def extract_component_ids(schema: Schema) -> list[str]:
         >>> schema = Schema(context="datastructure", agency="ECB", id_="EXR",
         ...                 components=Components([comp1, comp2]),
         ...                 version="1.0.0", urns=[])
-        >>> get_component_ids(schema)
+        >>> extract_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """
     if not schema.components or len(schema.components) == 0:
@@ -103,81 +96,61 @@ def extract_component_ids(schema: Schema) -> list[str]:
 def write_excel_mapping_template(
     components: Sequence[str],
     rep_maps: Sequence[str] | None = None,
-    output_path: Path = Path("mapping.xlsx")
+    output_path: Path = Path("mapping.xlsx"),
 ) -> Path:
-    """Generates an Excel file containing a default component mapping tab and optional tabs for representation maps by saving a Workbook object.
+    """Generate an Excel mapping template with component and representation tabs.
 
     Args:
-        components (Sequence[str]): An ordered list of unique target component IDs.
-        rep_maps (Sequence[str] | None): A sequence of unique names for which
-            dedicated representation mapping tabs should be created.
-        output_path (Path): The full path where the Excel file will be saved.
+        components: An ordered list of unique target component IDs.
+        rep_maps: A sequence of unique names for which dedicated
+            representation mapping tabs should be created.
+        output_path: The full path where the Excel file will be saved.
 
     Returns:
-        Path: The file path to the saved Excel workbook.
+        The file path to the saved Excel workbook.
 
     Raises:
         ValueError: If `components` validation fails (delegated to helper).
-        FileNotFoundError: If the parent directory for `output_path` does not exist.
-        RuntimeError: If saving the workbook fails due to I/O issues or if
-            workbook creation fails (delegated to helper).
-
-    Examples:
-        >>> from pathlib import Path
-        >>> # Setup a temporary file path
-        >>> file_path = Path("temp_mapping_final.xlsx")
-        >>> try:
-        ...     write_excel_mapping_template(["C1", "C2"], ["C1"], file_path)
-        ...     print(f"File created: {file_path.exists()}")
-        ... finally:
-        ...     if file_path.exists():
-        ...         file_path.unlink() # Clean up
-        File created: True
+        FileNotFoundError: If the parent directory for `output_path` does not
+            exist.
+        RuntimeError: If saving the workbook fails due to I/O issues.
     """
-    # 1. Validate environment
     if output_path.parent != Path(".") and not output_path.parent.exists():
         raise FileNotFoundError(
             f"Directory {output_path.parent} does not exist. Please create it first."
         )
 
-    # 2. Build Workbook
     wb = build_excel_workbook(components, rep_maps)
 
-    # 3. Save Workbook
     try:
         wb.save(str(output_path))
     except Exception as e:
-        # Catch I/O error or other unexpected save failures
-        raise RuntimeError(f"Failed to save Excel workbook to {output_path}: {e}") from e
+        raise RuntimeError(
+            f"Failed to save Excel workbook to {output_path}: {e}"
+        ) from e
 
     return output_path
+
 
 @typechecked
 def create_mapping_rules(
     components: Sequence[str],
-    rep_maps: AbstractSet[str] | None = None,
+    rep_maps: Set[str] | None = None,
 ) -> list[str]:
-    """Create Excel-style hyperlink formulas for SDMX dataflow components.
-
-    Creates a list of Excel-style hyperlink formulas for SDMX dataflow components
-    that have corresponding representation maps, or an empty string otherwise.
-
-    This utility is typically used when generating structured metadata output (e.g.,
-    a DSD specification to Excel) where a component linking to a separate sheet
-    (named after the component) indicates a custom mapping exists.
+    """Create Excel hyperlink formulas for components with representation maps.
 
     Args:
-        components (Sequence[str]): A list or sequence of SDMX component IDs.
-        rep_maps (AbstractSet[str] | None): A set of component IDs for which a
-            representation map exists and a hyperlink should be generated.
+        components: A list or sequence of SDMX component IDs.
+        rep_maps: A set of component IDs for which a representation map
+            exists and a hyperlink should be generated.
 
     Returns:
-        list[str]: A list of strings, where each element is either an Excel
-        formula string (=HYPERLINK("#COMPONENT_ID!A1","COMPONENT_ID")) or an
-        empty string ("").
+        A list of strings, where each element is either an Excel hyperlink
+        formula or an empty string.
 
     Raises:
-        TypeError: If any input argument fails type validation via @typechecked.
+        TypeError: If any input argument fails type validation via
+            @typechecked.
 
     Examples:
         >>> components = ["FREQ", "REF_AREA", "SEX", "OBS_VALUE"]
@@ -191,19 +164,6 @@ def create_mapping_rules(
         >>> create_mapping_rules([], {"ANY"})
         []
     """
-    # Defensive check: ensure all components are non-empty strings before processing,
-    # though strict string type is covered by typechecked.
-    if not all(isinstance(c, str) and c for c in components):
-        invalid_components = [c for c in components if not (isinstance(c, str) and c)]
-        if invalid_components:
-            # Note: This is a defensive check; the typechecker handles non-string types.
-            # This catches non-truthy strings like "".
-            raise ValueError(
-                f"Component IDs must be non-empty strings, but found invalid values: {invalid_components}"
-            )
-
-    # Simplified logic using a list comprehension. Handles None and empty set/list
-    # for rep_maps efficiently.
     if not rep_maps:
         return [""] * len(components)
 
@@ -212,125 +172,109 @@ def create_mapping_rules(
         for comp in components
     ]
 
+
 @typechecked
 def build_excel_workbook(
     components: Sequence[str],
     rep_maps: Sequence[str] | None = None,
 ) -> Workbook:
-    """Construct an openpyxl Workbook containing the default component mapping sheet and optional template sheets for representation maps.
+    """Build a Workbook with component mapping and representation map sheets.
 
-    The primary sheet 'comp_mapping' contains three columns: 'source', 'target', and 'mapping_rules', with hyperlinks for components having a rep_map.
+    The primary sheet ``comp_mapping`` contains three columns: ``source``,
+    ``target``, and ``mapping_rules``, with hyperlinks for components that
+    have a representation map.
 
     Args:
-        components (Sequence[str]): An ordered list of unique target component IDs.
-        rep_maps (Sequence[str] | None): A sequence of names (matching component
-            IDs) for which dedicated representation mapping tabs should be created.
-            The list is internally deduplicated via conversion to a set.
+        components: An ordered list of unique target component IDs.
+        rep_maps: A sequence of names (matching component IDs) for which
+            dedicated representation mapping tabs should be created.
+            Internally deduplicated via conversion to a set.
 
     Returns:
-        Workbook: An openpyxl Workbook object populated with sheets and headers.
+        An openpyxl Workbook object populated with sheets and headers.
 
     Raises:
-        ValueError: If 'components' validation fails (delegated to helper).
+        ValueError: If ``components`` validation fails (delegated to helper).
         TypeCheckError: If any input argument fails type validation.
         RuntimeError: If sheet creation fails due to invalid sheet names.
     """
-    # 1. Prepare Data
-    # Convert rep_maps to a set early for efficient lookup and guaranteed unique sheet names.
-    rep_map_set: AbstractSet[str] = set(rep_maps) if rep_maps else set()
-    
-    # Leverage helper function
-    mapping_rules: list[str] = create_mapping_rules(components, rep_map_set)
-    
-    comp_mapping_df = pd.DataFrame({
-        "source": [""] * len(components),
-        "target": components,
-        "mapping_rules": mapping_rules
-    })
+    rep_map_set: Set[str] = set(rep_maps) if rep_maps else set()
 
-    # 2. Create and Populate Workbook
+    mapping_rules = create_mapping_rules(components, rep_map_set)
+
+    comp_mapping_df = pd.DataFrame(
+        {
+            "source": [""] * len(components),
+            "target": list(components),
+            "mapping_rules": mapping_rules,
+        }
+    )
+
     wb = Workbook()
-
-    # a. Create sheet for components map
     default_sheet = wb.active
     default_sheet.title = "comp_mapping"
 
-    # Write the header and data rows
     for row in dataframe_to_rows(comp_mapping_df, index=False, header=True):
         default_sheet.append(row)
 
-    # b. Create optional sheets for representation maps
     if rep_map_set:
-        REP_MAP_HEADERS = ["source", "target", "valid_from", "valid_to"]
-        df_rep = pd.DataFrame(columns=REP_MAP_HEADERS)
+        rep_map_headers = ["source", "target", "valid_from", "valid_to"]
+        df_rep = pd.DataFrame(columns=rep_map_headers)
 
         for tab_name in rep_map_set:
             try:
                 ws = wb.create_sheet(title=tab_name)
-                # Write header row only for the empty DataFrame
                 for row in dataframe_to_rows(df_rep, index=False, header=True):
                     ws.append(row)
             except Exception as e:
-                 # Openpyxl raises ValueError/KeyError for invalid or duplicate names.
-                 raise RuntimeError(
-                     f"Failed to create sheet with name: '{tab_name}'. "
-                     f"Check for invalid characters or excessively long names: {e}"
-                 )
+                raise RuntimeError(
+                    f"Failed to create sheet '{tab_name}'. "
+                    f"Check for invalid characters or long names: {e}"
+                ) from e
 
     return wb
 
 
 @typechecked
-def parse_mapping_template_wb(path: Union[str, Path]) -> dict[str, pd.DataFrame]:
-    """Read an Excel workbook containing mapping templates and return all sheets as DataFrames.
+def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
+    """Read an Excel mapping template and return all sheets as DataFrames.
 
     Args:
-        path (Union[str, Path]): Path to the Excel file.
+        path: Path to the Excel file.
 
     Returns:
-        dict[str, pd.DataFrame]: A dictionary where keys are sheet names and values are DataFrames.
+        A dictionary where keys are sheet names and values are DataFrames.
 
     Raises:
         FileNotFoundError: If the provided file path does not exist.
         ValueError: If the file is not an Excel file (.xlsx or .xls).
-        RuntimeError: If reading the Excel file fails for any reason.
-
-    Examples:
-        >>> from pathlib import Path
-        >>> result = parse_mapping_template_wb(Path("mapping_template.xlsx"))
-        >>> isinstance(result, dict)
-        True
-        >>> all(isinstance(df, pd.DataFrame) for df in result.values())
-        True
+        RuntimeError: If reading the Excel file fails.
     """
-    # Validate file path
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix.lower() not in [".xlsx", ".xls"]:
-        raise ValueError(f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx or .xls).")
+    if path.suffix.lower() not in (".xlsx", ".xls"):
+        raise ValueError(
+            f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx or .xls)."
+        )
 
     try:
-        # Read all sheets into a dictionary of DataFrames
-        workbook = pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
-        return workbook
+        return pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
     except Exception as e:
-        raise RuntimeError(f"Failed to read Excel file: {e}")
+        raise RuntimeError(f"Failed to read Excel file: {e}") from e
 
 
+@typechecked
 def fix_sdmx_xml_datatype_tags(
-    input_path: Union[str, Path],
-    output_path: Optional[Union[str, Path]] = None,
+    input_path: str | Path,
+    output_path: str | Path | None = None,
 ) -> Path:
-    """Fix incorrectly written ``SourceCodelist``/``TargetCodelist`` tags in SDMX-ML.
+    """Fix incorrect SourceCodelist/TargetCodelist tags in SDMX-ML.
 
-    The pysdmx XML writer currently emits ``<str:SourceCodelist>String</str:SourceCodelist>``
-    and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a RepresentationMap
-    uses a plain DataType (no codelist). The correct tags in SDMX 3.0 are
+    The pysdmx XML writer emits ``<str:SourceCodelist>String</str:SourceCodelist>``
+    and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
+    RepresentationMap uses a plain DataType. The correct SDMX 3.0 tags are
     ``<str:SourceDataType>`` and ``<str:TargetDataType>``.
-
-    This function performs a targeted string replacement on the serialised XML
-    file to produce a conformant SDMX-ML document.
 
     Args:
         input_path: Path to the SDMX-ML XML file to fix.
@@ -360,4 +304,3 @@ def fix_sdmx_xml_datatype_tags(
     )
     output_path.write_text(content, encoding="utf-8")
     return output_path
-
