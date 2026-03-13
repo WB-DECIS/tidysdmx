@@ -13,14 +13,16 @@ The pipeline steps are:
   5b. Create structure map from mapping template
   5c. Map data using the structure map
   5d. Standardize output for upload
-  6. Final validation of mapped output
+  6. Final validation of mapped output against dissemination schema
   7. Collect artifacts for FMR upload
 """
 
+import pickle as pkl
 import re
 from pathlib import Path
 
 import pandas as pd
+import pysdmx as px
 import pytest
 from pysdmx.model import Schema
 from pysdmx.model.map import (
@@ -42,8 +44,74 @@ from tidysdmx import (
 )
 
 DATA_DIR = Path(__file__).parent / "fixtures" / "data"
+CACHE_DIR = Path(__file__).parent / "fixtures" / "cassettes"
 RAW_CSV = DATA_DIR / "pipeline_raw_sample.csv"
 MAPPING_XLSX = DATA_DIR / "pipeline_mapping_template.xlsx"
+
+# Dissemination schema FMR parameters (matches the notebook)
+DIS_FMR_URL = "https://fmrqa.worldbank.org/FMR/sdmx/v2"
+DIS_AGENCY = "WB.GGH.HSP"
+DIS_STRUCTURE_ID = "DS_ASPIRE"
+DIS_STRUCTURE_VERSION = "1.0.0"
+DIS_ARTEFACT_ID = f"{DIS_AGENCY}:{DIS_STRUCTURE_ID}({DIS_STRUCTURE_VERSION})"
+DIS_SCHEMA_CACHE = CACHE_DIR / "pipeline_dis_schema.pkl"
+
+
+def _load_dis_schema() -> Schema:
+    """Load the dissemination schema from cache, or fetch from FMR.
+
+    On first run (no cache file), calls the FMR API and pickles the
+    response for subsequent runs.  This mirrors the notebook's
+    ``client.get_schema(...)`` call.
+
+    To generate the cache file, run the following snippet with FMR
+    network access::
+
+        import pickle as pkl
+        import pysdmx as px
+        from pathlib import Path
+
+        client = px.api.fmr.RegistryClient(
+            "https://fmrqa.worldbank.org/FMR/sdmx/v2"
+        )
+        schema = client.get_schema(
+            "datastructure",
+            agency="WB.GGH.HSP",
+            id="DS_ASPIRE",
+            version="1.0.0",
+        )
+
+        cache = Path("tests/fixtures/cassettes/pipeline_dis_schema.pkl")
+        cache.parent.mkdir(exist_ok=True)
+        with open(cache, "wb") as f:
+            pkl.dump(schema, f)
+    """
+    if DIS_SCHEMA_CACHE.exists():
+        with open(DIS_SCHEMA_CACHE, "rb") as f:
+            schema = pkl.load(f)
+        assert isinstance(schema, Schema)
+        return schema
+
+    # Attempt real API call — requires FMR network access
+    try:
+        client = px.api.fmr.RegistryClient(DIS_FMR_URL)
+        schema = client.get_schema(
+            "datastructure",
+            agency=DIS_AGENCY,
+            id=DIS_STRUCTURE_ID,
+            version=DIS_STRUCTURE_VERSION,
+        )
+    except Exception as exc:
+        pytest.skip(
+            f"Dissemination schema cache not found at "
+            f"{DIS_SCHEMA_CACHE} and FMR is unreachable: {exc}"
+        )
+
+    CACHE_DIR.mkdir(exist_ok=True)
+    with open(DIS_SCHEMA_CACHE, "wb") as f:
+        pkl.dump(schema, f)
+
+    return schema
 
 
 @pytest.mark.integration
@@ -67,7 +135,6 @@ class TestPipelineWorkflow:
         year_cols = [c for c in raw_df.columns if c.startswith("YR")]
         assert len(year_cols) > 0
 
-        # Store for subsequent steps
         TestPipelineWorkflow.raw_df = raw_df
 
     # -- Step 2: Reshape raw data into tidy format ---------------------------
@@ -189,7 +256,7 @@ class TestPipelineWorkflow:
     def test_step5b_create_structure_map(self):
         """Step 5b: Parse the Excel mapping template and build a StructureMap."""
         mappings = parse_mapping_template_wb(MAPPING_XLSX)
-        target_id = "TEST.AGENCY:DS_TEST(1.0.0)"
+        target_id = DIS_ARTEFACT_ID
         source_id = "WB.DP:DP_SCHEMA(1.0)"
 
         sm = build_structure_map_from_template_wb(
@@ -242,27 +309,21 @@ class TestPipelineWorkflow:
     # -- Step 5d: Standardize output for upload ------------------------------
 
     def test_step5d_standardize_output(self):
-        """Step 5d: Add SDMX reference columns and reorder for upload."""
+        """Step 5d: Add SDMX reference columns and reorder for upload.
+
+        The dissemination schema is loaded from a cached FMR response
+        (see ``_load_dis_schema``). This is the same schema the notebook
+        fetches via ``client.get_schema("datastructure", ...)``.
+        """
         mapped_df = TestPipelineWorkflow.mapped_df
 
-        # Build a dissemination schema from the mapped data
-        # (in the notebook this is fetched from FMR)
-        dis_schema = create_schema_from_table(
-            mapped_df,
-            dimensions=["INDICATOR", "REF_AREA"],
-            time_dimension="TIME_PERIOD",
-            measure="OBS_VALUE",
-            agency_id="TEST.AGENCY",
-            schema_id="DS_TEST",
-            version="1.0.0",
-        )
+        # Load pre-existing dissemination schema (cached FMR response)
+        dis_schema = _load_dis_schema()
 
-        artefact_id = "TEST.AGENCY:DS_TEST(1.0.0)"
-        schema = dis_schema.dsd.to_schema()
         out = standardize_output(
             df=mapped_df,
-            artefact_id=artefact_id,
-            schema=schema,
+            artefact_id=DIS_ARTEFACT_ID,
+            schema=dis_schema,
             action="I",
         )
 
@@ -273,7 +334,7 @@ class TestPipelineWorkflow:
             "ACTION",
         ]
         assert (out["ACTION"] == "I").all()
-        assert (out["STRUCTURE_ID"] == artefact_id).all()
+        assert (out["STRUCTURE_ID"] == DIS_ARTEFACT_ID).all()
 
         TestPipelineWorkflow.standardized_df = out
         TestPipelineWorkflow.dis_schema = dis_schema
@@ -281,11 +342,18 @@ class TestPipelineWorkflow:
     # -- Step 6: Final validation --------------------------------------------
 
     def test_step6_final_validation(self):
-        """Step 6: Standardized output passes dissemination schema validation."""
-        schema = TestPipelineWorkflow.dis_schema.dsd.to_schema()
+        """Step 6: Standardized output passes dissemination schema validation.
+
+        This validates against the pre-existing dissemination schema
+        (from FMR), not a schema derived from the output. This catches
+        real issues like missing dimensions, unexpected columns, or
+        codelist violations.
+        """
+        if not hasattr(TestPipelineWorkflow, "standardized_df"):
+            pytest.skip("Step 5d was skipped (no dissemination schema cache)")
         errors = validate_dataset_local(
             df=TestPipelineWorkflow.standardized_df,
-            schema=schema,
+            schema=TestPipelineWorkflow.dis_schema,
         )
         assert errors.empty, f"Final validation errors:\n{errors.to_string()}"
 
@@ -304,10 +372,14 @@ class TestPipelineWorkflow:
 
     def test_end_to_end_row_count(self):
         """Pipeline preserves the expected number of observations (6)."""
+        if not hasattr(TestPipelineWorkflow, "standardized_df"):
+            pytest.skip("Step 5d was skipped (no dissemination schema cache)")
         assert len(TestPipelineWorkflow.standardized_df) == 6
 
     def test_end_to_end_no_raw_columns_in_output(self):
         """Final output has no leftover raw source columns."""
+        if not hasattr(TestPipelineWorkflow, "standardized_df"):
+            pytest.skip("Step 5d was skipped (no dissemination schema cache)")
         raw_cols = {"COUNTRY_NAME", "COUNTRY_CODE", "SERIES_NAME", "SERIES"}
         remaining = raw_cols & set(TestPipelineWorkflow.standardized_df.columns)
         assert not remaining, f"Unexpected raw columns in output: {remaining}"
