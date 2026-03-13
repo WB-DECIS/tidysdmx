@@ -227,7 +227,7 @@ class TestPipelineWorkflow:
         """Step 4: Filter data to keep only the target series."""
         tidy_raw_df = TestPipelineWorkflow.tidy_raw_df
 
-        constraints = {"SERIES": ["SPL_COV_TOT"]}
+        constraints = {"SERIES": ["SPL_TR_AMT_RD"]}
         constrained = tidy_raw_df.copy()
         for column, valid_values in constraints.items():
             if column in constrained.columns:
@@ -235,7 +235,7 @@ class TestPipelineWorkflow:
         constrained = constrained.reset_index(drop=True)
 
         assert not constrained.empty
-        assert set(constrained["SERIES"].unique()) == {"SPL_COV_TOT"}
+        assert set(constrained["SERIES"].unique()) == {"SPL_TR_AMT_RD"}
 
         TestPipelineWorkflow.constrained_df = constrained
 
@@ -299,7 +299,7 @@ class TestPipelineWorkflow:
 
         # Component map transforms values
         assert mapped["INDICATOR"].notna().all()
-        assert set(mapped["INDICATOR"].unique()) == {"TEST_PIPELINE_SPL_COV_TOT"}
+        assert set(mapped["INDICATOR"].unique()) == {"SPL_TR_AMT_RD"}
 
         # No rows lost during mapping
         assert len(mapped) == len(TestPipelineWorkflow.constrained_df)
