@@ -1,4 +1,5 @@
 # tests/fixtures/fmr_api.py
+
 import pytest
 import pickle as pkl
 from pathlib import Path
@@ -95,3 +96,15 @@ def sdmx_schema():
     schema = Schema(context = "dataflow", agency = agency, id = "tx1", components = components)
     
     return schema
+
+
+client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+schema = client.get_schema(
+    "datastructure",
+    agency="WB.GGH.HSP",
+    id="DS_ASPIRE",
+    version="1.0.0",
+)
+
+with open("tests/fixtures/cassettes/pipeline_dis_schema.pkl", "wb") as f:
+    pkl.dump(schema, f)
