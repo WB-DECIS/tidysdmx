@@ -1,4 +1,4 @@
-# tests/fixtures/fmr_api.py
+# tests/fixtures/fxtr_schemas.py
 
 import pickle as pkl
 from pathlib import Path
@@ -35,17 +35,24 @@ def api_params_schema():
 
 @pytest.fixture(scope="session")
 def ifpri_asti_schema(api_params_schema):
-    """Fixture recording FMR response for DSD schema reuses it later."""
+    """Fixture that loads an FMR DSD schema from a local cassette.
+
+    Falls back to a live FMR call if the cassette is missing.
+    Skips the test if neither the cassette nor the FMR is available.
+
+    Generate the cassette with:
+        python -m tests.fixtures.fxtr_schemas
+    """
     cache_file = CACHE_DIR / "ifpri_asti_schema.pkl"
 
     if cache_file.exists():
-        # Load cached response
         with open(cache_file, "rb") as f:
             schema = pkl.load(f)
         assert isinstance(schema, Schema)
+        return schema
 
-    else:
-        # Make real API call using pysdmx
+    # Cassette missing — try live FMR, skip on failure
+    try:
         client = fmr.RegistryClient(api_params_schema["fmr_url"])
         schema = client.get_schema(
             "datastructure",
@@ -53,10 +60,13 @@ def ifpri_asti_schema(api_params_schema):
             id=api_params_schema["raw_structure_id"],
             version=api_params_schema["raw_structure_version"],
         )
+    except Exception as exc:
+        pytest.skip(
+            f"Cassette {cache_file.name} not found and FMR unavailable: {exc}"
+        )
 
-        # Cache the response
-        with open(cache_file, "wb") as f:
-            pkl.dump(schema, f)
+    with open(cache_file, "wb") as f:
+        pkl.dump(schema, f)
 
     return schema
 
@@ -105,13 +115,33 @@ def sdmx_schema():
 
 
 if __name__ == "__main__":
-    client = fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
-    schema = client.get_schema(
-        "datastructure",
-        agency="WB.GGH.HSP",
-        id="DS_ASPIRE",
-        version="1.0.0",
-    )
+    """Generate all schema cassettes from the live FMR.
 
-    with open("tests/fixtures/cassettes/pipeline_dis_schema.pkl", "wb") as f:
-        pkl.dump(schema, f)
+    Run from repo root:
+        python -m tests.fixtures.fxtr_schemas
+    """
+    base_url = "https://fmrqa.worldbank.org/FMR/sdmx/v2"
+    client = fmr.RegistryClient(base_url)
+
+    cassettes = {
+        "ifpri_asti_schema.pkl": {
+            "context": "datastructure",
+            "agency": "WB",
+            "id": "IFPRI_ASTI",
+            "version": "1.0",
+        },
+        "pipeline_dis_schema.pkl": {
+            "context": "datastructure",
+            "agency": "WB.GGH.HSP",
+            "id": "DS_ASPIRE",
+            "version": "1.0.0",
+        },
+    }
+
+    for filename, params in cassettes.items():
+        path = CACHE_DIR / filename
+        print(f"Fetching {filename} ...")
+        schema = client.get_schema(**params)
+        with open(path, "wb") as f:
+            pkl.dump(schema, f)
+        print(f"  Saved to {path}")

@@ -48,7 +48,7 @@ def map_structures(
     if fixed_value_maps:
         result_df = apply_fixed_value_maps(result_df, fixed_value_maps)
         if verbose:
-            print(f"✅ Applied {len(fixed_value_maps)} FixedValueMap(s).")
+            print(f"[OK] Applied {len(fixed_value_maps)} FixedValueMap(s).")
 
     if implicit_maps:
         result_df = apply_implicit_component_maps(
@@ -123,13 +123,13 @@ def apply_implicit_component_maps(
 
         if source_col not in result_df.columns:
             if verbose:
-                print(f"⚠️ Source column '{source_col}' not found. Skipping.")
+                print(f"[WARN] Source column '{source_col}' not found. Skipping.")
             continue
 
         result_df[target_col] = result_df[source_col]
         if verbose:
             action = "Overwritten" if target_col in df.columns else "Added"
-            print(f"✅ {action} column '{target_col}' from source '{source_col}'.")
+            print(f"[OK] {action} column '{target_col}' from source '{source_col}'.")
 
     return result_df
 
@@ -163,10 +163,12 @@ def apply_component_map(
     result_df[target_col] = result_df[source_col].map(mapping)
 
     if verbose:
-        print(f"✅ Mapped '{source_col}' → '{target_col}' using {len(mapping)} pairs.")
+        print(
+            f"[OK] Mapped '{source_col}' → '{target_col}' using {len(mapping)} pairs."
+        )
         unmapped = result_df[target_col].isna().sum()
         if unmapped > 0:
-            print(f"⚠️ {unmapped} values could not be mapped (set to NaN).")
+            print(f"[WARN] {unmapped} values could not be mapped (set to NaN).")
 
     return result_df
 
@@ -227,11 +229,11 @@ def apply_multi_component_map(
 
     if verbose:
         print(
-            f"✅ Mapped {source_cols} → '{target_col}' "
+            f"[OK] Mapped {source_cols} → '{target_col}' "
             f"using {len(rules)} ordered rules."
         )
         unmapped = result_df[target_col].isna().sum()
         if unmapped > 0:
-            print(f"⚠️ {unmapped} rows could not be mapped (set to NaN).")
+            print(f"[WARN] {unmapped} rows could not be mapped (set to NaN).")
 
     return result_df

@@ -19,26 +19,18 @@ from .utils import extract_component_ids
 logger = logging.getLogger(__name__)
 
 
-def check_dict_keys(dict1: dict, dict2: dict) -> str | None:
-    """Check whether the sorted keys of two dictionaries are the same.
+# NOTE: The following helpers are not part of the public API and are
+# candidates for removal once confirmed unused by downstream consumers.
 
-    Args:
-        dict1: The first dictionary.
-        dict2: The second dictionary.
 
-    Returns:
-        None if the keys are the same, or a formatted message highlighting
-        the difference if they are not.
-    """
+def _check_dict_keys(dict1: dict, dict2: dict) -> str | None:
+    """Check whether the sorted keys of two dictionaries are the same."""
     keys1 = sorted(dict1.keys())
     keys2 = sorted(dict2.keys())
-
     if keys1 == keys2:
         return None
-
     diff1 = set(keys1) - set(keys2)
     diff2 = set(keys2) - set(keys1)
-
     return (
         f"The keys of both dictionaries should be the same.\n"
         f"Keys only in the first dictionary: {diff1}\n"
@@ -46,42 +38,26 @@ def check_dict_keys(dict1: dict, dict2: dict) -> str | None:
     )
 
 
-def remove_extension(key: str) -> str:
-    """Remove the file extension from a key.
-
-    Args:
-        key: The key from which to remove the extension.
-
-    Returns:
-        The key without the file extension.
-    """
+def _remove_extension(key: str) -> str:
+    """Remove the file extension from a key."""
     return key.rsplit(".", 1)[0]
 
 
-def modify_dict_keys(input_dict: dict) -> dict:
-    """Create a new dictionary with file extensions removed from keys.
-
-    Args:
-        input_dict: The input dictionary with keys that may contain file
-            extensions.
-
-    Returns:
-        A new dictionary with the modified keys.
-    """
-    return {remove_extension(key): value for key, value in input_dict.items()}
+def _modify_dict_keys(input_dict: dict) -> dict:
+    """Create a new dictionary with file extensions removed from keys."""
+    return {_remove_extension(key): value for key, value in input_dict.items()}
 
 
-def create_keys_dict(input_dict: dict) -> dict[str, str]:
-    """Create a mapping from extension-stripped keys to original keys.
+def _create_keys_dict(input_dict: dict) -> dict[str, str]:
+    """Create a mapping from extension-stripped keys to original keys."""
+    return {_remove_extension(key): key for key in input_dict}
 
-    Args:
-        input_dict: The input dictionary with keys that may contain file
-            extensions.
 
-    Returns:
-        A dictionary mapping new keys (extensions removed) to original keys.
-    """
-    return {remove_extension(key): key for key in input_dict}
+# Keep old names as aliases for backwards compatibility with existing tests.
+check_dict_keys = _check_dict_keys
+remove_extension = _remove_extension
+modify_dict_keys = _modify_dict_keys
+create_keys_dict = _create_keys_dict
 
 
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
@@ -144,6 +120,7 @@ def fetch_schema(
     return client.get_schema(context, agency, id_part, version)
 
 
+@typechecked
 def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
     """Parse a DSD identifier into its components.
 
@@ -171,7 +148,7 @@ def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
         id_part, version_part = rest.split("(", 1)
         version = version_part.rstrip(")")
         return agency, id_part, version
-    except Exception as err:
+    except (ValueError, AttributeError) as err:
         raise ValueError(
             "Invalid dsd_id format. Expected format: 'agency:id(version)'"
         ) from err
@@ -196,21 +173,22 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
         id_part, version_part = rest.split("(", 1)
         version = version_part.rstrip(")")
         return agency, id_part, version
-    except Exception as err:
+    except (ValueError, AttributeError) as err:
         raise ValueError(
             "Invalid artefact_id format. Expected format: 'agency:id(version)'"
         ) from err
 
 
+@typechecked
 def standardize_sdmx(
-    data: pd.DataFrame,
+    df: pd.DataFrame,
     mapping: dict,
     cat_indicator: bool = False,
 ) -> pd.DataFrame:
     """Standardize a DataFrame by applying column and value transformations.
 
     Args:
-        data: The input DataFrame with raw data.
+        df: The input DataFrame with raw data.
         mapping: A dictionary containing the mapping DataFrame and other
             relevant information.
         cat_indicator: Whether OBS_VALUE is a categorical indicator.
@@ -220,26 +198,27 @@ def standardize_sdmx(
         The standardized DataFrame with columns transformed according to
         the mapping.
     """
-    data = transform_source_to_target(data, mapping)
-    data = map_to_sdmx(data, mapping)
-    data = standardize_data_for_upload(
-        data, dsd=mapping["dsd_id"], cat_indicator=cat_indicator
+    df = transform_source_to_target(df, mapping)
+    df = map_to_sdmx(df, mapping)
+    df = standardize_data_for_upload(
+        df, dsd=mapping["dsd_id"], cat_indicator=cat_indicator
     )
-    return data
+    return df
 
 
+@typechecked
 def transform_source_to_target(
-    raw: pd.DataFrame,
+    df: pd.DataFrame,
     mapping: dict,
 ) -> pd.DataFrame:
     """Transform a raw DataFrame into the format defined by a components map.
 
     Creates a new DataFrame with columns as defined in
     ``mapping["components"]["TARGET"]`` and populates it with data from the
-    raw DataFrame based on the column names in ``["SOURCE"]``.
+    source DataFrame based on the column names in ``["SOURCE"]``.
 
     Args:
-        raw: The input DataFrame with raw data.
+        df: The input DataFrame with raw data.
         mapping: The master mapping dictionary containing a mapping between the
             input file columns and the columns defined in the schema.
 
@@ -263,8 +242,8 @@ def transform_source_to_target(
             source_col = row["SOURCE"]
             target_col = row["TARGET"]
 
-            if source_col in raw.columns:
-                result_df[target_col] = raw[source_col]
+            if source_col in df.columns:
+                result_df[target_col] = df[source_col]
 
         return result_df
 
@@ -276,6 +255,7 @@ def transform_source_to_target(
         ) from e
 
 
+@typechecked
 def vectorized_lookup_ordered_v1(
     series: pd.Series, mapping_df: pd.DataFrame
 ) -> pd.Series:
@@ -321,6 +301,7 @@ def vectorized_lookup_ordered_v1(
     return pd.Series(result, index=series.index)
 
 
+@typechecked
 def vectorized_lookup_ordered_v2(
     series: pd.Series, mapping_df: pd.DataFrame
 ) -> pd.Series:
@@ -377,6 +358,7 @@ def vectorized_lookup_ordered_v2(
     return pd.Series(result, index=series.index)
 
 
+@typechecked
 def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     """Map DataFrame columns to SDMX values using a lookup mapping.
 
@@ -407,6 +389,7 @@ def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     Raises:
         ValueError: If the schema version is unsupported.
     """
+    df = df.copy()
     schema_version = mapping["schema_version"]
     representation_mapping = mapping.get("representation", {})
     total_items = len(representation_mapping)
@@ -450,6 +433,7 @@ def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df
 
 
+@typechecked
 def add_sdmx_reference_cols(
     df: pd.DataFrame,
     dsd: str,
@@ -459,7 +443,7 @@ def add_sdmx_reference_cols(
     """Add SDMX reference columns to a DataFrame.
 
     .. deprecated::
-        Use :func:`_add_sdmx_reference_cols` instead.
+        Use :func:`standardize_output` instead.
 
     Args:
         df: The input DataFrame to which the columns will be added.
@@ -472,7 +456,7 @@ def add_sdmx_reference_cols(
     """
     warnings.warn(
         "add_sdmx_reference_cols is deprecated and will be removed "
-        "in a future release. Please use _add_sdmx_reference_cols instead.",
+        "in a future release. Please use standardize_output instead.",
         FutureWarning,
         stacklevel=2,
     )
@@ -483,6 +467,7 @@ def add_sdmx_reference_cols(
     return df
 
 
+@typechecked
 def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
     """Fix the INDICATOR column to be uppercase and prefixed with dataset ID.
 
@@ -515,10 +500,11 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
             id_column = col
             break
 
+    df = df.copy()
     dataset_id = df[id_column].unique()
     if len(dataset_id) != 1:
         raise ValueError(
-            f"The 'DATABASE_ID' column has {len(dataset_id)} unique values. "
+            f"The '{id_column}' column has {len(dataset_id)} unique values. "
             "Expected exactly 1 unique value."
         )
     dataset_id = str(dataset_id[0])
@@ -534,6 +520,7 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@typechecked
 def standardize_data_for_upload(
     df: pd.DataFrame,
     dsd: str,
@@ -733,6 +720,7 @@ def _add_sdmx_reference_cols(
 # region Functions to handle mapping files
 
 
+@typechecked
 def read_mapping(path: str) -> dict:
     """Read a JSON mapping file and parse its content into DataFrames.
 
