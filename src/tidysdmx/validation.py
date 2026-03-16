@@ -4,7 +4,7 @@ import pandas as pd
 from pysdmx.model.dataflow import Schema
 from typeguard import typechecked
 
-from tidysdmx.utils import extract_validation_info
+from .utils import extract_validation_info
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
