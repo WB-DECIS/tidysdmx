@@ -41,16 +41,15 @@ from .validation import (
     validate_no_missing_values
     ) 
 from .structures import (
-    build_fixed_map, 
-    build_implicit_component_map, 
-    build_date_pattern_map, 
+    build_fixed_map,
+    build_implicit_component_map,
+    build_date_pattern_map,
     build_value_map,
     build_value_map_list,
     build_multi_value_map_list,
     build_representation_map,
     build_multi_representation_map,
     build_single_component_map,
-    build_structure_map,
     create_schema_from_table,
     build_structure_map_from_template_wb,
     sanitize_variable,
@@ -110,7 +109,6 @@ __all__ = [
     "create_mapping_rules",
     "build_excel_workbook",
     "write_excel_mapping_template",
-    "build_structure_map",
     "create_schema_from_table",
     "build_structure_map_from_template_wb",
     "sanitize_variable",

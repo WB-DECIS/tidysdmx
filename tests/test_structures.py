@@ -1,54 +1,51 @@
-from typeguard import TypeCheckError
-from datetime import datetime, timezone
-from typing import Sequence
-from pysdmx.model import (
-    DataType,
-    Role,
-    ItemReference
-)
-from pysdmx.model.map import (
-    FixedValueMap, 
-    ImplicitComponentMap, 
-    DatePatternMap, 
-    ValueMap, 
-    MultiValueMap, 
-    RepresentationMap,
-    ComponentMap,
-    MultiRepresentationMap
-    )
-import pandas as pd
-import numpy as np
-import pytest
 import re
+from collections.abc import Sequence
+from datetime import UTC, datetime
+
+import numpy as np
+import pandas as pd
+import pytest
+from pysdmx.model import DataType, ItemReference, Role
+from pysdmx.model.map import (
+    ComponentMap,
+    DatePatternMap,
+    FixedValueMap,
+    ImplicitComponentMap,
+    MultiRepresentationMap,
+    MultiValueMap,
+    RepresentationMap,
+    ValueMap,
+)
+from typeguard import TypeCheckError
+
 # Import tidysdmx functions
-from tidysdmx.structures import ( 
-    build_fixed_map, 
-    build_implicit_component_map, 
+from tidysdmx.structures import (
+    _collect_mapping_rules_errors,
+    _collect_required_sheet_errors,
+    _extract_all_artefact_ids,
+    _extract_artefact_id,
+    _extract_mapping_rule,
+    _extract_metadata_from_info_sheet,
+    _extract_representation_map,
+    _is_missing_token,
+    _match_column_name,
+    _parse_comp_mapping_sheet,
+    _parse_info_sheet,
+    _parse_rep_mapping_sheet,
+    _resolve_representation_ref,
+    _validate_mapping_template_wb,
     build_date_pattern_map,
-    build_value_map,
-    build_value_map_list,
+    build_fixed_map,
+    build_implicit_component_map,
+    build_multi_representation_map,
     build_multi_value_map_list,
     build_representation_map,
     build_single_component_map,
-    create_schema_from_table,
-    _parse_info_sheet,
-    _parse_comp_mapping_sheet,
-    _parse_rep_mapping_sheet,
-    _match_column_name,
-    build_multi_representation_map,
-    _extract_artefact_id,
-    _validate_mappings,
     build_structure_map_from_template_wb,
-    _extract_all_artefact_ids,
-    _extract_metadata_from_info_sheet,
-    _extract_mapping_rule,
-    _is_missing_token,
-    _extract_representation_map,
-    _validate_mapping_template_wb,
-    _collect_required_sheet_errors,
-    _collect_mapping_rules_errors,
-    _resolve_representation_ref
-    )
+    build_value_map,
+    build_value_map_list,
+    create_schema_from_table,
+)
 
 # region fixtures
 
@@ -282,13 +279,13 @@ class TestBuildValueMap:  # noqa: D101
             build_value_map("BE", "")
 
     def test_build_value_map_invalid_source_type(self):
-        """Non-string source raises TypeError."""
-        with pytest.raises(TypeError):
+        """Non-string source raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
             build_value_map(123, "BEL")
 
     def test_build_value_map_invalid_target_type(self):
-        """Non-string target raises TypeError."""
-        with pytest.raises(TypeError):
+        """Non-string target raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
             build_value_map("BE", 456)
 
     def test_build_value_map_whitespace_source(self):
@@ -752,10 +749,10 @@ class TestBuildRepresentationMap:  # noqa: D101
         for vm in rm.maps:
             if vm.valid_from:
                 assert isinstance(vm.valid_from, datetime)
-                assert vm.valid_from.tzinfo == timezone.utc or vm.valid_from.tzinfo is None
+                assert vm.valid_from.tzinfo == UTC or vm.valid_from.tzinfo is None
             if vm.valid_to:
                 assert isinstance(vm.valid_to, datetime)
-                assert vm.valid_to.tzinfo == timezone.utc or vm.valid_to.tzinfo is None
+                assert vm.valid_to.tzinfo == UTC or vm.valid_to.tzinfo is None
 
     def test_defaults_to_string_dtype_when_no_codelist(self, value_map_df_mandatory_cols):
         """When source_cl and target_cl are omitted, source/target default to 'String'."""
@@ -882,7 +879,7 @@ class TestBuildSingleComponentMap:  # noqa: D101
         assert cm.values.version == "2.0"
         assert cm.values.description == "Test Description"
 
-class TestBuildMultiRepresentationMap: # noqa: D101
+class TestBuildMultiRepresentationMap:
     """Tests for the build_multi_representation_map function."""
 
     @pytest.fixture
@@ -964,126 +961,6 @@ class TestBuildMultiRepresentationMap: # noqa: D101
         assert first_map.valid_from == datetime.fromisoformat("2020-01-01")
         assert first_map.valid_to == datetime.fromisoformat("2025-12-31")
 
-# class TestExtractMappingDefinitions:  # noqa: D101
-#     @pytest.fixture
-#     def mock_empty_workbook(self) -> Workbook:
-#         """Fixture returning a simple empty workbook."""
-#         wb = Workbook()
-#         return wb
-
-#     @pytest.fixture
-#     def mock_populated_workbook(self, mock_empty_workbook: Workbook) -> Workbook:
-#         """Fixture returning a mock workbook with multiple sheets."""
-#         wb = mock_empty_workbook
-        
-#         # Mandatory comp_mapping sheet
-#         ws = wb.active
-#         ws.title = "comp_mapping"
-#         ws.append(["Source", "Target", "Mapping_Rules"]) # Case insensitive header test
-#         ws.append(["", "T1_FIXED", "fixed:A"])
-#         ws.append(["SRC_2", "T2_IMPLICIT", "implicit"])
-#         ws.append(["", "T3_REP", "T3_REP"])
-#         ws.append(["SRC_4", "T4_REP", "T4_REP"]) # Rep map with explicit source
-#         ws.append([None, None, None]) # Empty row
-        
-#         # Referenced Rep Map sheets (T3 is empty, T4 has data)
-#         ws_rep_3 = wb.create_sheet("T3_REP")
-#         ws_rep_3.append(["source", "target", "valid_from", "valid_to"]) # Empty rows below header
-        
-#         ws_rep_4 = wb.create_sheet("T4_REP")
-#         ws_rep_4.append(["source", "target", "valid_from", "valid_to"])
-#         ws_rep_4.append(["S1", "T1", "", ""])
-        
-#         return wb
-
-
-#     def test_read_comp_mapping_sheet_success(self, mock_populated_workbook: Workbook):
-#         """Tests if the sheet is loaded, headers normalized, and empty values handled."""
-#         df = _read_comp_mapping_sheet(mock_populated_workbook)
-        
-#         assert isinstance(df, pd.DataFrame)
-#         assert list(df.columns) == ["source", "target", "mapping_rules"]
-#         assert len(df) == 4 # Empty row has been removed
-#         assert df.iloc[0]["mapping_rules"] == "fixed:A"
-
-
-#     def test_read_comp_mapping_sheet_key_error(self, mock_empty_workbook: Workbook):
-#         """Tests KeyError when the sheet is missing."""
-#         mock_empty_workbook.active.title = "WrongName"
-#         with pytest.raises(KeyError, match="comp_mapping"):
-#             _read_comp_mapping_sheet(mock_empty_workbook)
-
-
-#     def test_create_fixed_definition_success(self):
-#         """Tests successful creation of a FixedValueMap definition."""
-#         definition = _create_fixed_definition(pd.Series(), "T_FIX", "fixed:MY_VALUE")
-#         assert definition.map_type == "fixed"
-#         assert definition.fixed_value == "MY_VALUE"
-#         assert definition.target == "T_FIX"
-
-
-#     def test_create_fixed_definition_empty_value_raises_value_error(self):
-#         """Tests validation for empty fixed value."""
-#         with pytest.raises(ValueError, match="cannot be empty"):
-#             _create_fixed_definition(pd.Series(), "T_FIX", "fixed:")
-
-
-#     def test_create_implicit_definition_success(self):
-#         """Tests successful creation of an ImplicitComponentMap definition."""
-#         definition = _create_implicit_definition(pd.Series(), "T_IMP", "S_IMP")
-#         assert definition.map_type == "implicit"
-#         assert definition.source == "S_IMP"
-#         assert definition.target == "T_IMP"
-
-
-#     def test_create_implicit_definition_missing_source_raises_value_error(self):
-#         """Tests validation for missing source in implicit mapping."""
-#         with pytest.raises(ValueError, match="requires a 'source'"):
-#             _create_implicit_definition(pd.Series(), "T_IMP", "")
-
-
-#     def test_create_representation_definition_success(self, mock_populated_workbook: Workbook):
-#         """Tests successful creation of a RepresentationMap definition including sheet loading."""
-#         definition = _create_representation_definition(mock_populated_workbook, "T4_REP", "SRC_4")
-#         assert definition.map_type == "representation"
-#         assert definition.source == "SRC_4"
-#         assert definition.target == "T4_REP"
-#         assert isinstance(definition.representation_df, pd.DataFrame)
-#         assert len(definition.representation_df) == 1 # Check data rows exist
-
-#     def test_create_representation_definition_source_inference(self, mock_populated_workbook: Workbook):
-#         """Tests source inference when source is empty."""
-#         definition = _create_representation_definition(mock_populated_workbook, "T3_REP", "")
-#         assert definition.source == "T3_REP" # Inferred source is target
-#         assert len(definition.representation_df) == 0 # Check empty sheet handling
-
-
-#     def test_extract_mapping_definitions_integration(self, mock_populated_workbook: Workbook):
-#         """Tests the main function's dispatch logic."""
-#         definitions = _extract_mapping_definitions(mock_populated_workbook)
-        
-#         assert len(definitions) == 4 # Should ignore empty row and invalid rules if any
-        
-#         # T1_FIXED (Fixed)
-#         assert definitions[0].map_type == "fixed"
-        
-#         # T2_IMPLICIT (Implicit)
-#         assert definitions[1].map_type == "implicit"
-        
-#         # T3_REP (Representation - empty DF)
-#         assert definitions[2].map_type == "representation"
-        
-#         # T4_REP (Representation - data DF)
-#         assert definitions[3].map_type == "representation"
-#         assert definitions[3].source == "SRC_4"
-
-#     def test_extract_mapping_definitions_invalid_rule_raises_value_error(self, mock_populated_workbook: Workbook):
-#         """Tests invalid rule check."""
-#         ws = mock_populated_workbook["comp_mapping"]
-#         ws.append(["", "T_BAD", "unknown_type"])
-        
-#         with pytest.raises(ValueError, match="Unknown mapping rule"):
-#             _extract_mapping_definitions(mock_populated_workbook)
 
 class TestCreateSchemaFromTable:  # noqa: D101
     def test_create_schema_time_period_standardization(self) -> None:
@@ -1545,96 +1422,15 @@ class TestMatchColumnName: #noqa: D101
         # In this isolated mock, we check for a general TypeError/AttributeError if the code runs.
         
         # Passing None for target_name should raise a type error
-        with pytest.raises((TypeCheckError)):
+        with pytest.raises(TypeCheckError):
             _match_column_name(None, self.AVAILABLE_COLUMNS)
 
         # Passing a non-list for available_columns should raise a type error
         with pytest.raises((TypeCheckError, AttributeError)):
             _match_column_name("Test", "NotAList")
 
-# class TestBuildStructureMap: #noqa: D101
-#     """Tests for build_structure_map() converting Excel workbook to StructureMap."""
-#     @pytest.fixture
-#     def workbook_with_valid_data(self):
-#         """Creates a valid workbook with comp_mapping and representation sheets."""
-#         wb = Workbook()
-#         # comp_mapping sheet
-#         ws_comp = wb.create_sheet("comp_mapping")
-#         ws_comp.append(["source", "target", "mapping_rules"])
-#         ws_comp.append(["SRC1", "TGT1", "fixed:VAL1"])
-#         ws_comp.append(["SRC2", "TGT2", "implicit"])
-#         ws_comp.append(["SRC3", "TGT3", "TGT3"])  # representation map
-#         # representation sheet for TGT3
-#         ws_rep = wb.create_sheet("TGT3")
-#         ws_rep.append(["source", "target", "valid_from", "valid_to"])
-#         ws_rep.append(["A", "B", "", ""])
-#         return wb
 
-#     @pytest.fixture
-#     def workbook_missing_comp_mapping(self):
-#         """Workbook without comp_mapping sheet."""
-#         wb = Workbook()
-#         wb.create_sheet("Sheet1")
-#         return wb
-
-#     @pytest.fixture
-#     def workbook_with_invalid_rule(self):
-#         """Workbook with an invalid mapping rule."""
-#         wb = Workbook()
-#         ws_comp = wb.create_sheet("comp_mapping")
-#         ws_comp.append(["source", "target", "mapping_rules"])
-#         ws_comp.append(["SRC", "TGT", "unknown_rule"])
-#         return wb
-
-#     def test_valid_workbook_returns_structure_map(self, workbook_with_valid_data):
-#         """Tests that a valid workbook returns a StructureMap with correct maps."""
-#         structure_map = build_structure_map(workbook_with_valid_data)
-#         assert structure_map.id == "GENERATED_STRUCTURE_MAP"
-#         assert len(structure_map.maps) == 3  # fixed, implicit, representation
-#         assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
-
-#     def test_missing_comp_mapping_raises_keyerror(self, workbook_missing_comp_mapping):
-#         """Tests that missing comp_mapping sheet raises KeyError."""
-#         with pytest.raises(KeyError, match="Mandatory sheet 'comp_mapping' not found"):
-#             build_structure_map(workbook_missing_comp_mapping)
-
-#     def test_invalid_mapping_rule_raises_valueerror(self, workbook_with_invalid_rule):
-#         """Tests that an unknown mapping rule raises ValueError."""
-#         with pytest.raises(ValueError, match="Unknown mapping rule"):
-#             build_structure_map(workbook_with_invalid_rule)
-
-#     def test_empty_representation_sheet_skips_map(self):
-#         """Tests that empty representation sheet is skipped without error."""
-#         wb = Workbook()
-#         ws_comp = wb.create_sheet("comp_mapping")
-#         ws_comp.append(["source", "target", "mapping_rules"])
-#         ws_comp.append(["SRC", "TGT", "TGT"])
-#         wb.create_sheet("TGT")  # empty representation sheet
-#         structure_map = build_structure_map(wb)
-#         assert len(structure_map.maps) == 0  # skipped due to empty DF
-
-#     def test_fixed_value_missing_raises_valueerror(self):
-#         """Tests that missing fixed value raises ValueError."""
-#         wb = Workbook()
-#         ws_comp = wb.create_sheet("comp_mapping")
-#         ws_comp.append(["source", "target", "mapping_rules"])
-#         ws_comp.append(["SRC", "TGT", "fixed:"])
-#         with pytest.raises(ValueError, match="Fixed value for target 'TGT' cannot be empty"):
-#             build_structure_map(wb)
-    
-    
-#     def test_implicit_missing_source_raises_valueerror(self):
-#         """Tests that implicit mapping without source raises ValueError."""
-#         wb = Workbook()
-#         ws_comp = wb.create_sheet("comp_mapping")
-#         ws_comp.append(["source", "target", "mapping_rules"])
-#         ws_comp.append(["", "TGT", "implicit"])  # Missing source for implicit map
-
-#         # Act & Assert
-#         with pytest.raises(ValueError):
-#             build_structure_map(wb)
-
-class TestExtractArtefactId: #noqa: D101
+class TestExtractArtefactId:
     """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO sheet DataFrame."""
 
     @pytest.fixture
@@ -1805,61 +1601,6 @@ class TestBuildStructureMapFromTemplateWb:
         )
         assert sm.source == ""
         assert sm.target == ""
-
-class TestValidateMappings: #noqa: D101
-    def test_validate_mappings_valid_input(self):
-        """Valid input with all required keys and DataFrames should pass without error."""
-        mappings = {
-            "INFO": pd.DataFrame(),
-            "COMP_MAPPING": pd.DataFrame(),
-            "REP_MAPPING": pd.DataFrame()
-        }
-        # Should not raise any exception
-        _validate_mappings(mappings)
-
-
-    def test_validate_mappings_missing_key(self):
-        """Missing one required key should raise ValueError."""
-        mappings = {
-            "INFO": pd.DataFrame(),
-            "COMP_MAPPING": pd.DataFrame()
-            # REP_MAPPING is missing
-        }
-        with pytest.raises(ValueError) as exc_info:
-            _validate_mappings(mappings)
-        assert "Missing required sheet 'REP_MAPPING'" in str(exc_info.value)
-
-
-    def test_validate_mappings_invalid_type(self):
-        """Invalid type for one of the keys should raise ValueError."""
-        mappings = {
-            "INFO": pd.DataFrame(),
-            "COMP_MAPPING": "not_a_dataframe",  # Invalid type
-            "REP_MAPPING": pd.DataFrame()
-        }
-        with pytest.raises(ValueError) as exc_info:
-            _validate_mappings(mappings)
-        assert "must be a pandas DataFrame" in str(exc_info.value)
-
-
-    def test_validate_mappings_empty_dict(self):
-        """Empty dictionary should raise ValueError for missing keys."""
-        mappings = {}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_mappings(mappings)
-        assert "Missing required sheet 'INFO'" in str(exc_info.value)
-
-
-    def test_validate_mappings_partial_invalid_type(self):
-        """One valid key and one invalid type should raise ValueError."""
-        mappings = {
-            "INFO": pd.DataFrame(),
-            "COMP_MAPPING": pd.DataFrame(),
-            "REP_MAPPING": 123  # Invalid type
-        }
-        with pytest.raises(ValueError) as exc_info:
-            _validate_mappings(mappings)
-        assert "must be a pandas DataFrame" in str(exc_info.value)
 
 class TestExtractAllArtefactIds: #noqa: D101
     
