@@ -3,6 +3,7 @@ from pandas.testing import assert_frame_equal
 from pysdmx.model import Schema, Components
 from typeguard import TypeCheckError
 from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
@@ -425,16 +426,23 @@ class TestCreateKeysDict:
         assert create_keys_dict(input_dict) == expected_output
 
 class TestFetchSchema:
-    def test_fetch_schema_valid(self):
-        # This is a placeholder test. In a real scenario, you would mock the network call.
-        base_url = "https://fmrqa.worldbank.org/"
-        artefact_id = "WB.DATA360:DS_DATA360(1.3)"
-        context = "datastructure"
-        try:
-            schema = fetch_schema(base_url, artefact_id, context)
-            assert schema is not None 
-        except Exception as e:
-            pytest.fail(f"Unexpected exception raised: {e}")
+    def test_fetch_schema_valid(self, sdmx_schema):
+        """Test that fetch_schema calls RegistryClient correctly and returns a Schema."""
+        mock_client = MagicMock()
+        mock_client.get_schema.return_value = sdmx_schema
+
+        with patch("tidysdmx.tidysdmx.fmr.RegistryClient", return_value=mock_client):
+            schema = fetch_schema(
+                "https://fmrqa.worldbank.org/",
+                "WB.DATA360:DS_DATA360(1.3)",
+                "datastructure",
+            )
+
+        assert schema is not None
+        assert isinstance(schema, Schema)
+        mock_client.get_schema.assert_called_once_with(
+            "datastructure", "WB.DATA360", "DS_DATA360", "1.3"
+        )
 
 class TestTransformSourceToTarget:
     """Unit tests for the transform_source_to_target function."""
