@@ -1,19 +1,32 @@
 """Utility functions for writing complete StructureMaps with dependencies."""
 
-from typeguard import typechecked
 from pysdmx.model.__base import MaintainableArtefact
 from pysdmx.model.map import (
     ComponentMap,
+    DatePatternMap,
+    FixedValueMap,
+    ImplicitComponentMap,
     MultiComponentMap,
     MultiRepresentationMap,
     RepresentationMap,
     StructureMap,
 )
+from typeguard import typechecked
 
 from .structures import gen_urn
 
-@typechecked
-def _get_embedded_rep_map(map_rule):
+MapRule = (
+    ComponentMap
+    | DatePatternMap
+    | FixedValueMap
+    | ImplicitComponentMap
+    | MultiComponentMap
+)
+
+
+def _get_embedded_rep_map(
+    map_rule: MapRule,
+) -> RepresentationMap | MultiRepresentationMap | None:
     """Return the embedded RepresentationMap/MultiRepresentationMap, or None."""
     if isinstance(map_rule, ComponentMap) and isinstance(
         map_rule.values, RepresentationMap
@@ -25,8 +38,8 @@ def _get_embedded_rep_map(map_rule):
         return map_rule.values
     return None
 
-@typechecked
-def _replace_values_with_urn(map_rule):
+
+def _replace_values_with_urn(map_rule: MapRule) -> MapRule:
     """Return a copy of the map rule with the embedded rep map replaced by its URN.
 
     If the map rule has no embedded rep map, returns it unchanged.
@@ -36,32 +49,32 @@ def _replace_values_with_urn(map_rule):
     rep_map = _get_embedded_rep_map(map_rule)
     if rep_map is None:
         return map_rule
-    urn = rep_map.urn if rep_map.urn else gen_urn(
-                        artefact_type = type(rep_map).__name__, 
-                        agency = rep_map.agency, 
-                        artefact_id = rep_map.id, 
-                        version = rep_map.version
-                        )
-    return type(map_rule)(
-        source=map_rule.source, target=map_rule.target, values=urn
+    urn = rep_map.urn or gen_urn(
+        artefact_type=type(rep_map).__name__,
+        agency=rep_map.agency,
+        artefact_id=rep_map.id,
+        version=rep_map.version,
     )
+    return type(map_rule)(source=map_rule.source, target=map_rule.target, values=urn)
 
-@typechecked
-def _validate_rep_map_fields(rep_map):
+
+def _validate_rep_map_fields(
+    rep_map: RepresentationMap | MultiRepresentationMap,
+) -> list[str]:
     """Validate that a RepresentationMap has required fields populated.
 
     Returns a list of issue descriptions (empty if valid).
     """
     issues = []
-    if not rep_map.source or str(rep_map.source) == "None":
+    if rep_map.source is None or rep_map.source == "":
         issues.append("source is None or empty")
-    if not rep_map.target or str(rep_map.target) == "None":
+    if rep_map.target is None or rep_map.target == "":
         issues.append("target is None or empty")
     if not rep_map.maps:
         issues.append("no value mappings defined")
     return issues
 
-@typechecked
+
 def _convert_to_urn_references(
     structure_map: StructureMap,
 ) -> StructureMap:
@@ -77,27 +90,8 @@ def _convert_to_urn_references(
         A new StructureMap with URN references instead of objects.
     """
     new_maps = [_replace_values_with_urn(m) for m in structure_map.maps]
+    return structure_map.__replace__(maps=new_maps)
 
-    # Create a new StructureMap with URN references
-    return StructureMap(
-        id=structure_map.id,
-        name=structure_map.name,
-        agency=structure_map.agency,
-        version=structure_map.version,
-        source=structure_map.source,
-        target=structure_map.target,
-        maps=new_maps,
-        description=structure_map.description,
-        annotations=structure_map.annotations,
-        urn=structure_map.urn,
-        uri=structure_map.uri,
-        valid_from=structure_map.valid_from,
-        valid_to=structure_map.valid_to,
-        is_final=structure_map.is_final,
-        is_external_reference=structure_map.is_external_reference,
-        service_url=structure_map.service_url,
-        structure_url=structure_map.structure_url,
-    )
 
 @typechecked
 def collect_structure_map_artifacts(
@@ -120,10 +114,10 @@ def collect_structure_map_artifacts(
     Example:
         >>> from pysdmx.io import write_sdmx
         >>> from pysdmx.io.format import Format
-        >>> 
+        >>>
         >>> # Collect all artifacts
         >>> artifacts = collect_structure_map_artifacts(my_structure_map)
-        >>> 
+        >>>
         >>> # Write them all together
         >>> xml = write_sdmx(
         ...     artifacts,
@@ -146,6 +140,7 @@ def collect_structure_map_artifacts(
     artifacts.append(structure_map)
 
     return artifacts
+
 
 @typechecked
 def validate_structure_map_references(structure_map: StructureMap) -> None:
@@ -197,23 +192,24 @@ def validate_structure_map_references(structure_map: StructureMap) -> None:
                 )
 
     errors = []
-    
+
     if unresolved:
         errors.append(
             "StructureMap contains unresolved RepresentationMap references. "
             "These will only be written as URN strings, not full objects:\n"
             + "\n".join(f"  - {ref}" for ref in unresolved)
         )
-    
+
     if invalid_rep_maps:
         errors.append(
             "StructureMap contains invalid RepresentationMaps. "
             "These will cause errors when uploading to FMR:\n"
             + "\n".join(f"  - {ref}" for ref in invalid_rep_maps)
         )
-    
+
     if errors:
         raise ValueError("\n\n".join(errors))
+
 
 @typechecked
 def prepare_structure_map_for_upload(
@@ -237,12 +233,14 @@ def prepare_structure_map_for_upload(
         ValueError: If validate=True and unresolved references are found.
 
     Example:
-        >>> from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
+        >>> from pysdmx.api.fmr.maintenance import (
+        ...     RegistryMaintenanceClient, StructureAction,
+        ... )
         >>> from tidysdmx.structure_map_writer import prepare_structure_map_for_upload
-        >>> 
+        >>>
         >>> # Prepare artifacts
         >>> artifacts = prepare_structure_map_for_upload(my_structure_map)
-        >>> 
+        >>>
         >>> # Upload to FMR
         >>> client = RegistryMaintenanceClient(
         ...     api_endpoint="https://your-fmr/sdmx/v2/",
