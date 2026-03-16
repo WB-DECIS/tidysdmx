@@ -3,8 +3,8 @@
 import pickle as pkl
 from pathlib import Path
 
-import pysdmx as px
 import pytest
+from pysdmx.api import fmr
 from pysdmx.model import (
     Code,
     Codelist,
@@ -46,7 +46,7 @@ def ifpri_asti_schema(api_params_schema):
 
     else:
         # Make real API call using pysdmx
-        client = px.api.fmr.RegistryClient(api_params_schema["fmr_url"])
+        client = fmr.RegistryClient(api_params_schema["fmr_url"])
         schema = client.get_schema(
             "datastructure",
             agency=api_params_schema["raw_structure_agency"],
@@ -104,13 +104,14 @@ def sdmx_schema():
     return schema
 
 
-client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
-schema = client.get_schema(
-    "datastructure",
-    agency="WB.GGH.HSP",
-    id="DS_ASPIRE",
-    version="1.0.0",
-)
+if __name__ == "__main__":
+    client = fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+    schema = client.get_schema(
+        "datastructure",
+        agency="WB.GGH.HSP",
+        id="DS_ASPIRE",
+        version="1.0.0",
+    )
 
-with open("tests/fixtures/cassettes/pipeline_dis_schema.pkl", "wb") as f:
-    pkl.dump(schema, f)
+    with open("tests/fixtures/cassettes/pipeline_dis_schema.pkl", "wb") as f:
+        pkl.dump(schema, f)

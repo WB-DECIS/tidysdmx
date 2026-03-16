@@ -279,13 +279,13 @@ class TestBuildValueMap:  # noqa: D101
             build_value_map("BE", "")
 
     def test_build_value_map_invalid_source_type(self):
-        """Non-string source raises TypeError."""
-        with pytest.raises(TypeError):
+        """Non-string source raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
             build_value_map(123, "BEL")
 
     def test_build_value_map_invalid_target_type(self):
-        """Non-string target raises TypeError."""
-        with pytest.raises(TypeError):
+        """Non-string target raises TypeCheckError."""
+        with pytest.raises(TypeCheckError):
             build_value_map("BE", 456)
 
     def test_build_value_map_whitespace_source(self):

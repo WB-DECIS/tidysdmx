@@ -2,8 +2,8 @@
 import pytest
 import pickle as pkl
 from pathlib import Path
-import pysdmx as px
 from datetime import datetime
+from pysdmx.api import fmr
 from pysdmx.model import (
     StructureMap
 )
@@ -35,7 +35,7 @@ def ifpri_asti_sm(api_params_sm):
 
     else:
         # Make real API call using pysdmx
-        client = px.api.fmr.RegistryClient(api_params_sm["fmr_url"])
+        client = fmr.RegistryClient(api_params_sm["fmr_url"])
         sm = client.get_mapping(agency=api_params_sm["raw_structure_agency"], 
                                 id=api_params_sm["raw_structure_map"])
 

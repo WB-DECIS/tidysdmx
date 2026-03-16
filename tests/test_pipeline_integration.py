@@ -22,8 +22,8 @@ import re
 from pathlib import Path
 
 import pandas as pd
-import pysdmx as px
 import pytest
+from pysdmx.api import fmr
 from pysdmx.model import Schema
 from pysdmx.model.map import (
     ComponentMap,
@@ -71,7 +71,7 @@ def _load_dis_schema() -> Schema:
         import pysdmx as px
         from pathlib import Path
 
-        client = px.api.fmr.RegistryClient(
+        client = fmr.RegistryClient(
             "https://fmrqa.worldbank.org/FMR/sdmx/v2"
         )
         schema = client.get_schema(
@@ -94,7 +94,7 @@ def _load_dis_schema() -> Schema:
 
     # Attempt real API call — requires FMR network access
     try:
-        client = px.api.fmr.RegistryClient(DIS_FMR_URL)
+        client = fmr.RegistryClient(DIS_FMR_URL)
         schema = client.get_schema(
             "datastructure",
             agency=DIS_AGENCY,
