@@ -13,7 +13,6 @@ from tidysdmx.tidysdmx import (
     vectorized_lookup_ordered_v1,
     vectorized_lookup_ordered_v2,
     create_keys_dict,
-    fetch_schema,
     transform_source_to_target,
     _extract_artefact_type,
     _add_sdmx_reference_cols,
@@ -423,32 +422,6 @@ class TestCreateKeysDict:
             "another.file.with.periods": "another.file.with.periods.json",
         }
         assert create_keys_dict(input_dict) == expected_output
-
-class TestFetchSchema:
-    def test_fetch_schema_valid(self, sdmx_schema, monkeypatch):
-        """Test that fetch_schema calls RegistryClient correctly and returns a Schema."""
-        calls: list[tuple] = []
-
-        class FakeClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def get_schema(self, context, agency, id, version):
-                calls.append((context, agency, id, version))
-                return sdmx_schema
-
-        monkeypatch.setattr("tidysdmx.tidysdmx.fmr.RegistryClient", FakeClient)
-
-        schema = fetch_schema(
-            "https://fmrqa.worldbank.org/",
-            "WB.DATA360:DS_DATA360(1.3)",
-            "datastructure",
-        )
-
-        assert schema is not None
-        assert isinstance(schema, Schema)
-        assert len(calls) == 1
-        assert calls[0] == ("datastructure", "WB.DATA360", "DS_DATA360", "1.3")
 
 class TestTransformSourceToTarget:
     """Unit tests for the transform_source_to_target function."""
