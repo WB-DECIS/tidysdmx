@@ -3,7 +3,6 @@ from pandas.testing import assert_frame_equal
 from pysdmx.model import Schema, Components
 from typeguard import TypeCheckError
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
@@ -426,23 +425,30 @@ class TestCreateKeysDict:
         assert create_keys_dict(input_dict) == expected_output
 
 class TestFetchSchema:
-    def test_fetch_schema_valid(self, sdmx_schema):
+    def test_fetch_schema_valid(self, sdmx_schema, monkeypatch):
         """Test that fetch_schema calls RegistryClient correctly and returns a Schema."""
-        mock_client = MagicMock()
-        mock_client.get_schema.return_value = sdmx_schema
+        calls: list[tuple] = []
 
-        with patch("tidysdmx.tidysdmx.fmr.RegistryClient", return_value=mock_client):
-            schema = fetch_schema(
-                "https://fmrqa.worldbank.org/",
-                "WB.DATA360:DS_DATA360(1.3)",
-                "datastructure",
-            )
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def get_schema(self, context, agency, id, version):
+                calls.append((context, agency, id, version))
+                return sdmx_schema
+
+        monkeypatch.setattr("tidysdmx.tidysdmx.fmr.RegistryClient", FakeClient)
+
+        schema = fetch_schema(
+            "https://fmrqa.worldbank.org/",
+            "WB.DATA360:DS_DATA360(1.3)",
+            "datastructure",
+        )
 
         assert schema is not None
         assert isinstance(schema, Schema)
-        mock_client.get_schema.assert_called_once_with(
-            "datastructure", "WB.DATA360", "DS_DATA360", "1.3"
-        )
+        assert len(calls) == 1
+        assert calls[0] == ("datastructure", "WB.DATA360", "DS_DATA360", "1.3")
 
 class TestTransformSourceToTarget:
     """Unit tests for the transform_source_to_target function."""
