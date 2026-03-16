@@ -1,828 +1,804 @@
-import pandas as pd
-import numpy as np
-import pysdmx as px
-from typeguard import typechecked
+"""Core: fetch schemas from FMR, standardise/map SDMX data."""
+
 import json
-
-from .qa_utils import *
+import logging
 import warnings
-
-from pysdmx.io.format import StructureFormat # To extract json format
-from pysdmx.api import fmr # CLient to connect to FMR
-from urllib.parse import urljoin
 from typing import Literal
-from pysdmx.model import Schema
+from urllib.parse import urljoin
 
+import numpy as np
+import pandas as pd
+from pysdmx.api import fmr
+from pysdmx.io.format import StructureFormat
+from pysdmx.model import Schema
+from typeguard import typechecked
+
+from .qa_utils import qa_coerce_numeric, qa_remove_duplicates
 from .utils import extract_component_ids
 
-def check_dict_keys(dict1, dict2):
-	"""Checks whether the sorted keys of two dictionaries are the same.
-
-	Args:
-		dict1 (dict): The first dictionary.
-		dict2 (dict): The second dictionary.
-
-	Returns:
-		`None` if the keys are the same or can be made the same by removing file extensions, or a formatted message highlighting the difference if the keys are not the same.
-	"""
-
-	keys1 = sorted(dict1.keys())
-	keys2 = sorted(dict2.keys())
-
-	if keys1 == keys2:
-		return None
-
-	diff1 = set(keys1) - set(keys2)
-	diff2 = set(keys2) - set(keys1)
-
-	return (
-		f"The keys of both dictionaries should be the same.\n"
-		f"Keys only in the first dictionary: {diff1}\n"
-		f"Keys only in the second dictionary: {diff2}"
-	)
-
-def remove_extension(key):
-	"""Removes the file extension from a key by removing the last period and everything after it.
-
-	Args:
-		key (str): The key from which to remove the extension.
-
-	Returns:
-		str: The key without the file extension.
-	"""
-	return key.rsplit(".", 1)[0]
+logger = logging.getLogger(__name__)
 
 
-def modify_dict_keys(input_dict):
-	"""Modifies the keys of a dictionary by removing the file extensions.
+def check_dict_keys(dict1: dict, dict2: dict) -> str | None:
+    """Check whether the sorted keys of two dictionaries are the same.
 
-	Args:
-		input_dict (dict): The input dictionary with keys that may contain file extensions.
+    Args:
+        dict1: The first dictionary.
+        dict2: The second dictionary.
 
-	Returns:
-		dict: A new dictionary with the modified keys.
-	"""
-	return {remove_extension(key): value for key, value in input_dict.items()}
+    Returns:
+        None if the keys are the same, or a formatted message highlighting
+        the difference if they are not.
+    """
+    keys1 = sorted(dict1.keys())
+    keys2 = sorted(dict2.keys())
+
+    if keys1 == keys2:
+        return None
+
+    diff1 = set(keys1) - set(keys2)
+    diff2 = set(keys2) - set(keys1)
+
+    return (
+        f"The keys of both dictionaries should be the same.\n"
+        f"Keys only in the first dictionary: {diff1}\n"
+        f"Keys only in the second dictionary: {diff2}"
+    )
 
 
-def create_keys_dict(input_dict):
-	"""Creates a dictionary where the keys are the new keys (with extensions removed) and the values are the old keys (with extensions).
+def remove_extension(key: str) -> str:
+    """Remove the file extension from a key.
 
-	Args:
-		input_dict (dict): The input dictionary with keys that may contain file extensions.
+    Args:
+        key: The key from which to remove the extension.
 
-	Returns:
-		dict: A new dictionary with the new keys as keys and the old keys as values.
-	"""
-	keys_dict = {remove_extension(key): key for key in input_dict.keys()}
-	return keys_dict
+    Returns:
+        The key without the file extension.
+    """
+    return key.rsplit(".", 1)[0]
 
-def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id):
-	"""Fetches the Data Structure Definition (DSD) schema from a given Fusion Metadata Registry (FMR) URL.
 
-	DEPRECATION:
-		This function is deprecated and will be removed in a future release.
-		Use `fetch_schema` instead.
+def modify_dict_keys(input_dict: dict) -> dict:
+    """Create a new dictionary with file extensions removed from keys.
 
-	Args:
-		fmr_params (dict): It has base url and endpoints to access FMR's API.
-		env (str): FMR Environment to get the data from. It could be 'sandbox', 'qa', 'dev' or 'prod'.
-		dsd_id (str): The identifier of the Data Structure Definition, typically in the format "agency:id(version)".
+    Args:
+        input_dict: The input dictionary with keys that may contain file
+            extensions.
 
-	Returns:
-		dict: The schema of the requested Data Structure Definition.
+    Returns:
+        A new dictionary with the modified keys.
+    """
+    return {remove_extension(key): value for key, value in input_dict.items()}
 
-	Raises:
-		ValueError: If the URL is not syntactically valid.
-		aiohttp.ClientError: If there is an issue with the HTTP request.
-		px.io.exceptions.FormatError: If there is an issue with the format of the response.
 
-	Examples:
-		>>> schema = fetch_dsd_schema("https://example.com/fmr", "WB:WDI(1.0)")
-	"""
-	
-	warnings.warn(
-		"fetch_dsd_schema is deprecated and will be removed in a future release. "
-		"Please use fetch_schema instead.",
-		FutureWarning,
-		stacklevel=2,
-	)
+def create_keys_dict(input_dict: dict) -> dict[str, str]:
+    """Create a mapping from extension-stripped keys to original keys.
 
-	format = px.io.format.StructureFormat.FUSION_JSON
+    Args:
+        input_dict: The input dictionary with keys that may contain file
+            extensions.
 
-	fmr_url = fmr_params[env]["url"]
+    Returns:
+        A dictionary mapping new keys (extensions removed) to original keys.
+    """
+    return {remove_extension(key): key for key in input_dict}
 
-	# Ensure the URL is syntactically valid
-	base_url = urljoin(fmr_url, "/FMR/sdmx/v2/")
 
-	client = fmr.RegistryClient(
-		base_url,
-		format=format,
-	)
+def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
+    """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
 
-	agency, id, version = parse_dsd_id(dsd_id)
-	schema = client.get_schema("datastructure", agency, id, version)
-	return schema
+    .. deprecated::
+        Use :func:`fetch_schema` instead.
 
+    Args:
+        fmr_params: Base URL and endpoints to access FMR's API.
+        env: FMR environment (e.g. ``'sandbox'``, ``'qa'``, ``'dev'``,
+            ``'prod'``).
+        dsd_id: The DSD identifier in the format ``"agency:id(version)"``.
+
+    Returns:
+        The schema of the requested Data Structure Definition.
+
+    Raises:
+        ValueError: If the URL is not syntactically valid.
+    """
+    warnings.warn(
+        "fetch_dsd_schema is deprecated and will be removed in a future release. "
+        "Please use fetch_schema instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+    structure_format = StructureFormat.FUSION_JSON
+    fmr_url = fmr_params[env]["url"]
+    base_url = urljoin(fmr_url, "/FMR/sdmx/v2/")
+
+    client = fmr.RegistryClient(base_url, format=structure_format)
+
+    agency, id_part, version = parse_dsd_id(dsd_id)
+    return client.get_schema("datastructure", agency, id_part, version)
+
+
+@typechecked
 def fetch_schema(
-		base_url:str,
-		artefact_id: str,
-		context: Literal["dataflow", "datastructure", "provisionagreement"]
-	):
-	"""Fetches the schema of a specified artefact from an SDMX registry.
-	
-	Args:
-		base_url (str): The base URL of the FMR.
-		artefact_id (str): The identifier of the artefact, typically in the format "agency:id(version)".
-		context (Literal["dataflow", "datastructure", "provisionagreement"]): The context of the artefact to fetch.
-		
-	Returns:
-		schema: The fetched schema object.
-	"""
-	format = StructureFormat.FUSION_JSON
+    base_url: str,
+    artefact_id: str,
+    context: Literal["dataflow", "datastructure", "provisionagreement"],
+) -> Schema:
+    """Fetch the schema of a specified artefact from an SDMX registry.
 
-	# Ensure the URL is syntactically valid
-	base_url = urljoin(base_url, "/FMR/sdmx/v2/")
+    Args:
+        base_url: The base URL of the FMR.
+        artefact_id: The identifier of the artefact, typically in the format
+            ``"agency:id(version)"``.
+        context: The context of the artefact to fetch.
 
-	# Initialize the client
-	client = fmr.RegistryClient(
-		base_url,
-		format=format,
-	)
+    Returns:
+        The fetched schema object.
+    """
+    structure_format = StructureFormat.FUSION_JSON
+    base_url = urljoin(base_url, "/FMR/sdmx/v2/")
+    client = fmr.RegistryClient(base_url, format=structure_format)
 
-	# Parse the artefact ID
-	agency, id, version = parse_artefact_id(artefact_id)
-
-	# Fetch the schema
-	schema = client.get_schema(context, agency, id, version)
-	
-	return schema
+    agency, id_part, version = parse_artefact_id(artefact_id)
+    return client.get_schema(context, agency, id_part, version)
 
 
-def parse_dsd_id(dsd_id):
-	"""
-	Parses the Data Structure Definition (DSD) identifier into its components.
+def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
+    """Parse a DSD identifier into its components.
 
-	DEPRECATION:
-		This function is deprecated and will be removed in a future release.
-		Use `parse_artefact_id` instead.
+    .. deprecated::
+        Use :func:`parse_artefact_id` instead.
 
-	Args:
-		dsd_id (str): The identifier of the Data Structure Definition, typically in the format "agency:id(version)".
+    Args:
+        dsd_id: The DSD identifier in the format ``"agency:id(version)"``.
 
-	Returns:
-		tuple: A tuple containing the agency, id, and version.
+    Returns:
+        A tuple containing the agency, id, and version.
 
-	Raises:
-		ValueError: If the dsd_id is not in the expected format.
-	"""
+    Raises:
+        ValueError: If the dsd_id is not in the expected format.
+    """
+    warnings.warn(
+        "parse_dsd_id is deprecated and will be removed in a future release. "
+        "Please use parse_artefact_id instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
 
-	warnings.warn(
-		"parse_dsd_id is deprecated and will be removed in a future release. "
-		"Please use parse_artefact_id instead.",
-		FutureWarning,
-		stacklevel=2,
-	)
+    try:
+        agency, rest = dsd_id.split(":", 1)
+        id_part, version_part = rest.split("(", 1)
+        version = version_part.rstrip(")")
+        return agency, id_part, version
+    except Exception as err:
+        raise ValueError(
+            "Invalid dsd_id format. Expected format: 'agency:id(version)'"
+        ) from err
 
-	try:
-		agency, rest = dsd_id.split(":", 1)
-		id_part, version_part = rest.split("(", 1)
-		version = version_part.rstrip(")")
-		return agency, id_part, version
-	except Exception:
-		raise ValueError("Invalid dsd_id format. Expected format: 'agency:id(version)'")
-	
 
+@typechecked
 def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
-	"""Parses artefact identifier (DSD, Dataflow, Codelist, etc) into its components: agency, id and version.
+    """Parse an artefact identifier into its components: agency, id and version.
 
-	Args:
-		artefact_id (str): The identifier of the artefact, typically in the format "agency:id(version)".
+    Args:
+        artefact_id: The identifier of the artefact, typically in the format
+            ``"agency:id(version)"``.
 
-	Returns:
-		tuple[str, str, str]: A tuple containing the agency, id, and version.
+    Returns:
+        A tuple containing the agency, id, and version.
 
-	Raises:
-		ValueError: If the artefact_id is not in the expected format.
-	"""
+    Raises:
+        ValueError: If the artefact_id is not in the expected format.
+    """
+    try:
+        agency, rest = artefact_id.split(":", 1)
+        id_part, version_part = rest.split("(", 1)
+        version = version_part.rstrip(")")
+        return agency, id_part, version
+    except Exception as err:
+        raise ValueError(
+            "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+        ) from err
 
-	try:
-		agency, rest = artefact_id.split(":", 1)
-		id_part, version_part = rest.split("(", 1)
-		version = version_part.rstrip(")")
-		return agency, id_part, version
-	except Exception:
-		raise ValueError("Invalid artefact_id format. Expected format: 'agency:id(version)'")
-	
+
 def standardize_sdmx(
-		data: pd.DataFrame, 
-		mapping: dict,
-		cat_indicator: bool = False
-	) -> pd.DataFrame:
-	"""Standardizes a DataFrame by applying transform_source_to_target and other transformations using the provided mapping.
+    data: pd.DataFrame,
+    mapping: dict,
+    cat_indicator: bool = False,
+) -> pd.DataFrame:
+    """Standardize a DataFrame by applying column and value transformations.
 
-	Args:
-		data (pd.DataFrame): The input DataFrame with raw data.
-		mapping (dict): A dictionary containing the mapping DataFrame and other relevant information.
-		cat_indicator (bool): Whether OBS_VALUE is categorical indicator. Default is False.
+    Args:
+        data: The input DataFrame with raw data.
+        mapping: A dictionary containing the mapping DataFrame and other
+            relevant information.
+        cat_indicator: Whether OBS_VALUE is a categorical indicator.
+            Default is False.
 
-	Returns:
-		pd.DataFrame: The standardized DataFrame with columns transformed according to the mapping.
-	"""
-	data = transform_source_to_target(data, mapping)
-	data = map_to_sdmx(data, mapping)
-	data = standardize_data_for_upload(data, dsd=mapping["dsd_id"], 
-									cat_indicator=cat_indicator)
+    Returns:
+        The standardized DataFrame with columns transformed according to
+        the mapping.
+    """
+    data = transform_source_to_target(data, mapping)
+    data = map_to_sdmx(data, mapping)
+    data = standardize_data_for_upload(
+        data, dsd=mapping["dsd_id"], cat_indicator=cat_indicator
+    )
+    return data
 
-	return data
 
 def transform_source_to_target(
-		raw: pd.DataFrame, 
-		mapping: dict
-	) -> pd.DataFrame:
-	"""Transforms raw DataFrame into the format defined by components_map.
-	
-	This function creates a new dataframe with columns as defined in components_map['TARGET'] and populates it with data from the raw DataFrame based on the columns names in the ['SOURCE'].
-
-	Args:
-		raw (pd.DataFrame): The input DataFrame with raw data.
-		mapping (dict): The master mapping dictionary containing a mapping between the input file columns, and the columns defined in the schema.
-
-	Returns:
-		pd.DataFrame: The transformed DataFrame with columns as defined in components_map['TARGET'].
-	"""
-	# If there is no " components" key in the mapping, raise return None
-	try: 
-		# Create an empty DataFrame with columns as defined in components_map['TARGET']
-		components_map = mapping["components"]
-
-		# If the components_map is a list, create a dataframe with source and target columns
-		if isinstance(components_map, list):
-			components_map = pd.DataFrame(components_map)
-		
-		# Create an empty DataFrame with target columns
-		result_df = pd.DataFrame(columns=components_map["TARGET"].values)
-
-		# Iterate over the components_map DataFrame and map the columns
-		for _, row in components_map.iterrows():
-			source_col = row["SOURCE"]
-			target_col = row["TARGET"]
-
-			# If source_col exists in raw, populate the corresponding column in result_df
-			if source_col in raw.columns:
-				result_df[target_col] = raw[source_col]
-
-		return result_df
-	
-	except KeyError as e:
-		raise KeyError("The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty.") from e
-
-def vectorized_lookup_ordered_v1(series, mapping_df):
-	"""Apply ordered regex matching to a Pandas Series.
-
-	For each regex pattern (except the last one) in mapping_df,
-	check if the value in series matches the pattern. The corresponding
-	TARGET is assigned when a match is found, and later rules are skipped.
-	Any cell that does not match any of the earlier patterns is assigned
-	the last rule's TARGET (catch-all).
-
-	Args:
-		series (pd.Series): The input data series (e.g., a DataFrame column).
-		mapping_df (pd.DataFrame): A DataFrame with at least two columns:
-
-			- 'SOURCE': regex patterns (ordered by priority)
-			- 'TARGET': corresponding replacement values
-
-	Returns:
-		pd.Series: A new series with values replaced according to the first matching regex, or the last rule's TARGET if no match is found.
-	"""
-	# Convert the series to strings for regex operations.
-	series_str = series.astype(str)
-
-	# If there are no mapping rules, return the original series.
-	if mapping_df.empty:
-		return series
-
-	# Sort mapping by length of SOURCE descending
-	mapping_df = mapping_df.copy()
-	mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
-	mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(columns="SOURCE_LEN")
-	
-	conditions = []
-	choices = []
-
-	# Build conditions for all rules.
-	for _, row in mapping_df.iterrows():
-		# Each condition is a boolean Series where the pattern is found.
-		conditions.append(series_str.str.contains(row["SOURCE"], regex=True))
-		choices.append(row["TARGET"])
-
-	# Use the original value as the default if no match is found.
-	default_value = series_str
-
-	# np.select will choose the first condition that is True for each element,
-	# and use the default_value if none match.
-	result = np.select(conditions, choices, default=default_value)
-
-	return pd.Series(result, index=series.index)
-
-def vectorized_lookup_ordered_v2(series, mapping_df):
-	"""Apply ordered matching (regex or exact) to a Pandas Series based on the "IS_REGEX" column.
-
-	For each row in mapping_df:
-
-		- If "IS_REGEX" is True, perform regex matching.
-		- If "IS_REGEX" is False, perform exact string matching.
-	
-	The corresponding TARGET is assigned when a match is found, and later rules are skipped.
-	Any cell that does not match any of the earlier rules is assigned the last rule's TARGET (catch-all).
-
-	Args:
-		series (pd.Series): The input data series (e.g., a DataFrame column).
-		mapping_df (pd.DataFrame): A DataFrame with at least three columns:
-
-			- 'SOURCE': regex patterns or exact strings (ordered by priority),
-			- 'TARGET': corresponding replacement values,
-			- 'IS_REGEX': boolean indicating whether 'SOURCE' is a regex pattern.
-
-	Returns:
-		pd.Series: A new series with values replaced according to the first matching rule, or the last rule's TARGET if no match is found.
-	"""
-	# Convert the series to strings for matching operations.
-	series_str = series.astype(str)
-
-	# If there are no mapping rules, return the original series.
-	if mapping_df.empty:
-		return series
-	# Sort mapping by length of SOURCE descending
-	mapping_df = mapping_df.copy()
-	mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
-	mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(columns="SOURCE_LEN")
-	
-	conditions = []
-	choices = []
-
-	# Build conditions for all rules.
-	for _, row in mapping_df.iterrows():
-		source = row["SOURCE"]
-		is_regex = row["IS_REGEX"]
-
-		if is_regex:
-			# Regex matching
-			conditions.append(series_str.str.contains(source, regex=True))
-		else:
-			# Exact string matching
-			conditions.append(series_str == source)
-
-		choices.append(row["TARGET"])
-
-	# Use the original value as the default if no match is found.
-	default_value = series_str
-
-	# np.select will choose the first condition that is True for each element,
-	# and use the default_value if none match.
-	result = np.select(conditions, choices, default=default_value)
-
-	return pd.Series(result, index=series.index)
-
-def map_to_sdmx(df, mapping):
-	"""Map DataFrame columns to SDMX values using a lookup mapping.
-
-	This function transforms the given pandas DataFrame columns to conform
-	to the SDMX representation by applying either a fixed mapping or an ordered,
-	regex-based mapping. For each key present in the DataFrame:
-
-		- Fixed Mapping: 
-			If the mapping for a key contains a "TARGET" column but no "SOURCE" column, then the entire column is replaced with the fixed value provided by "TARGET".
-
-		- Regex-based Mapping: 
-			If the mapping for a key contains both "SOURCE" and "TARGET" columns, the function applies ordered regex-based matching. For each cell in the DataFrame column, the regex patterns are evaluated in order using the first-match-wins strategy. If no match is found in the earlier rules, the last rule's TARGET is applied.
-
-	Args:
-		df (pandas.DataFrame): The input DataFrame containing the data to be mapped.
-		mapping (dict): The lookup mapping in JSON format (as a dict). Each key represents an SDMX component and its value is expected to be either a list of dictionaries (with keys "SOURCE" and "TARGET") or a pandas DataFrame with those columns.
-
-	Returns:
-		pandas.DataFrame: The transformed DataFrame with mapped column values.
-	"""
-	# Extract schema version
-	schema_version = mapping["schema_version"]
-	# Remove the "components" key from mapping if present.
-	representation_mapping = mapping.get("representation", {})
-
-	# Get the total number of items in the mapping.
-	total_items = len(representation_mapping)
-
-	# Iterate over each key in the mapping dictionary.
-	for index, (key, mapping_value) in enumerate(representation_mapping.items(), start=1):
-		print(f"Processing {index}/{total_items}: {key}")
-
-		# Skip empty mappings
-		if not mapping_value:
-			print(f"Skipping '{key}' because mapping is empty")
-			continue
-
-		# Skip if column not in DataFrame
-		if key not in df.columns:
-			print(f"Skipping '{key}' because column not in DataFrame")
-			continue
-
-		# Ensure mapping_value is a DataFrame
-		if not isinstance(mapping_value, pd.DataFrame):
-			mapping_value = pd.DataFrame(mapping_value)
-
-		# Fixed mapping: no SOURCE column
-		if "TARGET" in mapping_value.columns and "SOURCE" not in mapping_value.columns:
-			df[key] = mapping_value["TARGET"].iloc[0]
-
-		# Regex / ordered lookup mapping: both SOURCE and TARGET exist
-		elif "SOURCE" in mapping_value.columns and "TARGET" in mapping_value.columns:
-			if schema_version == "v1":
-				df[key] = vectorized_lookup_ordered_v1(df[key], mapping_value)
-			elif schema_version == "v2":
-				df[key] = vectorized_lookup_ordered_v2(df[key], mapping_value)
-			else:
-				raise ValueError(f"Unsupported schema version: {schema_version}")
-
-		else:
-			# This catches unexpected structures
-			print(f"Skipping '{key}': invalid mapping structure (expected SOURCE and TARGET columns)")
-
-	return df
-
-def add_sdmx_reference_cols(df, dsd, structure="datastructure", action="I"):
-	"""Adds necessary columns for a successful upload into an SDMX database.
-
-	Args:
-		df (pd.DataFrame): The input DataFrame to which the columns will be added.
-		structure (str): The structure type. Default is 'datastructure'. Potential options accepted by SDMX for structure include:
-
-			- 'datastructure': Represents a data structure definition.
-			- 'metadataflow': Represents a metadata flow definition.
-			- 'dataflow': Represents a data flow definition.
-		dsd (str): The Data Structure Definition (DSD) identifier.
-		action (str): The action type. Default is 'I'. Potential options accepted by SDMX for action include:
-			
-			- 'I': Insert
-			- 'U': Update
-			- 'D': Delete
-
-	Returns:
-		pd.DataFrame: The DataFrame with the added SDMX reference columns.
-	"""
-	warnings.warn(
-		"add_sdmx_reference_cols is deprecated and will be removed in a future release. "
-		"Please use _add_sdmx_reference_cols instead.",
-		FutureWarning,
-		stacklevel=2,
-	)
-	df["STRUCTURE"] = structure
-	df["STRUCTURE_ID"] = dsd
-	df["ACTION"] = action
-
-	return df
-
-def standardize_indicator_id(df):
-	"""Fixes the 'INDICATOR' column by ensuring all values are upper case and start with dataset_id.
-
-	Args:
-		df (pd.DataFrame): The DataFrame to modify.
-
-	Returns:
-		pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values.
-
-	Examples:
-
-		- Input DataFrame:
-		
-			| row |   DATABASE_ID   | INDICATOR                 |
-			| --  | ------------------------ | ------------------------- |
-			| 0   | WB.DATA360      | indicator.one  |
-			| 1   | WB.DATA360      | indicator.two  |
-
-		- Output DataFrame:
-		
-			| row |   DATABASE_ID   | INDICATOR                 |
-			| --  | ------------------------ | --------------------------------------------------- |
-			| 0   | WB.DATA360      | WB_DATA360_INDICATOR_ONE  |
-			| 1   | WB.DATA360      | WB_DATA360_INDICATOR_TWO  |
-			
-	"""
-	# Extract the unique values of the 'DATASET_ID'/'DATABASE_ID' column
-	id_column = None
-	for col in ["DATABASE_ID", "DATASET_ID"]:
-		if col in df.columns:
-			id_column = col
-			break
-
-	# Extract unique values
-	dataset_id = df[id_column].unique()
-	if len(dataset_id) != 1:
-		raise ValueError(
-			f"The 'DATABASE_ID' column has {len(dataset_id)} unique values. Expected exactly 1 unique value."
-		)
-	dataset_id = dataset_id[0]
-	# Ensure INDICATOR IDs matches conventions
-	df["INDICATOR"] = df["INDICATOR"].astype(str)
-	dataset_id = str(dataset_id)
-
-	if not df["INDICATOR"].str.startswith(dataset_id).all():
-		df["INDICATOR"] = dataset_id + "_" + df["INDICATOR"]
-	if not df["INDICATOR"].str.isupper().all():
-		df["INDICATOR"] = df["INDICATOR"].str.upper()
-	df["INDICATOR"] = df["INDICATOR"].str.replace(r"\.+", "_", regex=True)
-
-	return df
-
-def standardize_data_for_upload(df, 
-								dsd, 
-								structure="datastructure", 
-								action="I",
-								cat_indicator: bool = False):
-	"""Standardizes the DataFrame for SDMX upload.
-
-	Finalizes the DataFrame for a successful upload into an SDMX database by fixing the 'INDICATOR' values, adding necessary reference columns, and reordering the columns.
-
-	Args:
-		df (pd.DataFrame): The input DataFrame to modify.
-		dataset_id (str): The dataset identifier to prepend to the 'INDICATOR' values.
-		dsd (str): The Data Structure Definition (DSD) identifier.
-		structure (str): The structure type. Default is 'datastructure'. Potential options accepted by SDMX for structure include:
-		cat_indicator (bool): Whether OBS_VALUE is categorical indicator. Default is False.
-			
-			- 'datastructure': Represents a data structure definition.
-			- 'metadataflow': Represents a metadata flow definition.
-			- 'dataflow': Represents a data flow definition.
-		
-		action (str): The action type. Default is 'I'. Potential options accepted by SDMX for action include:
-	
-			- 'I': Insert
-			- 'U': Update
-			- 'D': Delete
-
-	Returns:
-		pd.DataFrame: The modified DataFrame with corrected 'INDICATOR' values, added reference columns, and reordered columns.
-	"""
-	warnings.warn(
-		"standardize_data_for_upload is deprecated and will be removed in a future release. "
-		"Please use standardize_output instead.",
-		FutureWarning,
-		stacklevel=2,
-	)
-	# QUALITY ASSURANCE OPERATION
-	# WILL BE MOVED INTO THERE OWN NODES
-	if not cat_indicator:
-		df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
-	df = qa_remove_duplicates(df)
-
-	df = standardize_indicator_id(df=df)
-	df = add_sdmx_reference_cols(df=df, dsd=dsd, structure=structure, action=action)
-
-	# Reorder columns because `STRUCTURE` and `STRUCTURE_ID` should always be first
-	# Columns to move to the beginning
-	cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-
-	# Create a new order for the columns
-	new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
-
-	# Reindex the DataFrame to the new column order
-	df = df[new_order]
-
-
-	return df
+    raw: pd.DataFrame,
+    mapping: dict,
+) -> pd.DataFrame:
+    """Transform a raw DataFrame into the format defined by a components map.
+
+    Creates a new DataFrame with columns as defined in
+    ``mapping["components"]["TARGET"]`` and populates it with data from the
+    raw DataFrame based on the column names in ``["SOURCE"]``.
+
+    Args:
+        raw: The input DataFrame with raw data.
+        mapping: The master mapping dictionary containing a mapping between the
+            input file columns and the columns defined in the schema.
+
+    Returns:
+        The transformed DataFrame with columns as defined in the components
+        map's TARGET.
+
+    Raises:
+        KeyError: If the mapping does not contain a ``"components"`` key or its
+            value is empty.
+    """
+    try:
+        components_map = mapping["components"]
+
+        if isinstance(components_map, list):
+            components_map = pd.DataFrame(components_map)
+
+        result_df = pd.DataFrame(columns=components_map["TARGET"].values)
+
+        for _, row in components_map.iterrows():
+            source_col = row["SOURCE"]
+            target_col = row["TARGET"]
+
+            if source_col in raw.columns:
+                result_df[target_col] = raw[source_col]
+
+        return result_df
+
+    except KeyError as e:
+        raise KeyError(
+            "The mapping file should contain 'components' key or its value "
+            "should not be empty. Please make sure the mapping file has this "
+            "key and its value is not empty."
+        ) from e
+
+
+def vectorized_lookup_ordered_v1(
+    series: pd.Series, mapping_df: pd.DataFrame
+) -> pd.Series:
+    """Apply ordered regex matching to a Pandas Series.
+
+    For each regex pattern in mapping_df, check if the value in series matches
+    the pattern. The corresponding TARGET is assigned when a match is found,
+    and later rules are skipped. Any cell that does not match any pattern
+    retains its original value.
+
+    Args:
+        series: The input data series (e.g., a DataFrame column).
+        mapping_df: A DataFrame with at least two columns:
+
+            - ``SOURCE``: regex patterns (ordered by priority)
+            - ``TARGET``: corresponding replacement values
+
+    Returns:
+        A new series with values replaced according to the first matching
+        regex, or the original value if no match is found.
+    """
+    series_str = series.astype(str)
+
+    if mapping_df.empty:
+        return series
+
+    mapping_df = mapping_df.copy()
+    mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
+    mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(
+        columns="SOURCE_LEN"
+    )
+
+    conditions = []
+    choices = []
+
+    for _, row in mapping_df.iterrows():
+        conditions.append(series_str.str.contains(row["SOURCE"], regex=True))
+        choices.append(row["TARGET"])
+
+    default_value = series_str
+    result = np.select(conditions, choices, default=default_value)
+
+    return pd.Series(result, index=series.index)
+
+
+def vectorized_lookup_ordered_v2(
+    series: pd.Series, mapping_df: pd.DataFrame
+) -> pd.Series:
+    """Apply ordered matching (regex or exact) to a Pandas Series.
+
+    For each row in mapping_df:
+
+        - If ``IS_REGEX`` is True, perform regex matching.
+        - If ``IS_REGEX`` is False, perform exact string matching.
+
+    The corresponding TARGET is assigned when a match is found, and later
+    rules are skipped. Any cell that does not match retains its original value.
+
+    Args:
+        series: The input data series (e.g., a DataFrame column).
+        mapping_df: A DataFrame with at least three columns:
+
+            - ``SOURCE``: regex patterns or exact strings (ordered by priority)
+            - ``TARGET``: corresponding replacement values
+            - ``IS_REGEX``: boolean indicating whether SOURCE is a regex
+
+    Returns:
+        A new series with values replaced according to the first matching
+        rule, or the original value if no match is found.
+    """
+    series_str = series.astype(str)
+
+    if mapping_df.empty:
+        return series
+
+    mapping_df = mapping_df.copy()
+    mapping_df["SOURCE_LEN"] = mapping_df["SOURCE"].str.len()
+    mapping_df = mapping_df.sort_values(by="SOURCE_LEN", ascending=False).drop(
+        columns="SOURCE_LEN"
+    )
+
+    conditions = []
+    choices = []
+
+    for _, row in mapping_df.iterrows():
+        source = row["SOURCE"]
+        is_regex = row["IS_REGEX"]
+
+        if is_regex:
+            conditions.append(series_str.str.contains(source, regex=True))
+        else:
+            conditions.append(series_str == source)
+
+        choices.append(row["TARGET"])
+
+    default_value = series_str
+    result = np.select(conditions, choices, default=default_value)
+
+    return pd.Series(result, index=series.index)
+
+
+def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    """Map DataFrame columns to SDMX values using a lookup mapping.
+
+    This function transforms the given DataFrame columns to conform to the
+    SDMX representation by applying either a fixed mapping or an ordered,
+    regex-based mapping. For each key present in the DataFrame:
+
+        - Fixed Mapping:
+            If the mapping for a key contains a ``TARGET`` column but no
+            ``SOURCE`` column, the entire column is replaced with the fixed
+            value provided by ``TARGET``.
+
+        - Regex-based Mapping:
+            If the mapping for a key contains both ``SOURCE`` and ``TARGET``
+            columns, the function applies ordered regex-based matching using
+            a first-match-wins strategy.
+
+    Args:
+        df: The input DataFrame containing the data to be mapped.
+        mapping: The lookup mapping as a dict. Each key represents an SDMX
+            component and its value is expected to be either a list of
+            dictionaries (with keys ``SOURCE`` and ``TARGET``) or a DataFrame
+            with those columns.
+
+    Returns:
+        The transformed DataFrame with mapped column values.
+
+    Raises:
+        ValueError: If the schema version is unsupported.
+    """
+    schema_version = mapping["schema_version"]
+    representation_mapping = mapping.get("representation", {})
+    total_items = len(representation_mapping)
+
+    for index, (key, mapping_value) in enumerate(
+        representation_mapping.items(), start=1
+    ):
+        logger.info("Processing %d/%d: %s", index, total_items, key)
+
+        if not mapping_value:
+            logger.debug("Skipping '%s' because mapping is empty", key)
+            continue
+
+        if key not in df.columns:
+            logger.debug("Skipping '%s' because column not in DataFrame", key)
+            continue
+
+        if not isinstance(mapping_value, pd.DataFrame):
+            mapping_value = pd.DataFrame(mapping_value)
+
+        # Fixed mapping: no SOURCE column
+        if "TARGET" in mapping_value.columns and "SOURCE" not in mapping_value.columns:
+            df[key] = mapping_value["TARGET"].iloc[0]
+
+        # Regex / ordered lookup mapping: both SOURCE and TARGET exist
+        elif "SOURCE" in mapping_value.columns and "TARGET" in mapping_value.columns:
+            if schema_version == "v1":
+                df[key] = vectorized_lookup_ordered_v1(df[key], mapping_value)
+            elif schema_version == "v2":
+                df[key] = vectorized_lookup_ordered_v2(df[key], mapping_value)
+            else:
+                raise ValueError(f"Unsupported schema version: {schema_version}")
+
+        else:
+            logger.warning(
+                "Skipping '%s': invalid mapping structure "
+                "(expected SOURCE and TARGET columns)",
+                key,
+            )
+
+    return df
+
+
+def add_sdmx_reference_cols(
+    df: pd.DataFrame,
+    dsd: str,
+    structure: str = "datastructure",
+    action: str = "I",
+) -> pd.DataFrame:
+    """Add SDMX reference columns to a DataFrame.
+
+    .. deprecated::
+        Use :func:`_add_sdmx_reference_cols` instead.
+
+    Args:
+        df: The input DataFrame to which the columns will be added.
+        dsd: The Data Structure Definition (DSD) identifier.
+        structure: The structure type. Default is ``'datastructure'``.
+        action: The action type. Default is ``'I'`` (Insert).
+
+    Returns:
+        The DataFrame with the added SDMX reference columns.
+    """
+    warnings.warn(
+        "add_sdmx_reference_cols is deprecated and will be removed "
+        "in a future release. Please use _add_sdmx_reference_cols instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+    df["STRUCTURE"] = structure
+    df["STRUCTURE_ID"] = dsd
+    df["ACTION"] = action
+
+    return df
+
+
+def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
+    """Fix the INDICATOR column to be uppercase and prefixed with dataset ID.
+
+    Ensures all values in the ``INDICATOR`` column are upper case, prefixed
+    with the dataset identifier, and have dots replaced with underscores.
+
+    Args:
+        df: The DataFrame to modify. Must contain an ``INDICATOR`` column
+            and either a ``DATABASE_ID`` or ``DATASET_ID`` column.
+
+    Returns:
+        The modified DataFrame with corrected INDICATOR values.
+
+    Raises:
+        ValueError: If the database/dataset ID column contains more than
+            one unique value.
+
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     "DATABASE_ID": ["WB.DATA360", "WB.DATA360"],
+        ...     "INDICATOR": ["indicator.one", "indicator.two"],
+        ... })
+        >>> result = standardize_indicator_id(df)
+        >>> list(result["INDICATOR"])
+        ['WB_DATA360_INDICATOR_ONE', 'WB_DATA360_INDICATOR_TWO']
+    """
+    id_column = None
+    for col in ["DATABASE_ID", "DATASET_ID"]:
+        if col in df.columns:
+            id_column = col
+            break
+
+    dataset_id = df[id_column].unique()
+    if len(dataset_id) != 1:
+        raise ValueError(
+            f"The 'DATABASE_ID' column has {len(dataset_id)} unique values. "
+            "Expected exactly 1 unique value."
+        )
+    dataset_id = str(dataset_id[0])
+
+    df["INDICATOR"] = df["INDICATOR"].astype(str)
+
+    if not df["INDICATOR"].str.startswith(dataset_id).all():
+        df["INDICATOR"] = dataset_id + "_" + df["INDICATOR"]
+    if not df["INDICATOR"].str.isupper().all():
+        df["INDICATOR"] = df["INDICATOR"].str.upper()
+    df["INDICATOR"] = df["INDICATOR"].str.replace(r"\.+", "_", regex=True)
+
+    return df
+
+
+def standardize_data_for_upload(
+    df: pd.DataFrame,
+    dsd: str,
+    structure: str = "datastructure",
+    action: str = "I",
+    cat_indicator: bool = False,
+) -> pd.DataFrame:
+    """Standardize a DataFrame for SDMX upload.
+
+    .. deprecated::
+        Use :func:`standardize_output` instead.
+
+    Finalizes the DataFrame for upload by fixing INDICATOR values, adding
+    reference columns, and reordering columns.
+
+    Args:
+        df: The input DataFrame to modify.
+        dsd: The Data Structure Definition (DSD) identifier.
+        structure: The structure type. Default is ``'datastructure'``.
+            Options: ``'datastructure'``, ``'metadataflow'``, ``'dataflow'``.
+        action: The action type. Default is ``'I'`` (Insert).
+            Options: ``'I'``, ``'U'``, ``'D'``.
+        cat_indicator: Whether OBS_VALUE is a categorical indicator.
+            Default is False.
+
+    Returns:
+        The modified DataFrame with corrected INDICATOR values, added
+        reference columns, and reordered columns.
+    """
+    warnings.warn(
+        "standardize_data_for_upload is deprecated and will be removed "
+        "in a future release. Please use standardize_output instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+    if not cat_indicator:
+        df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
+    df = qa_remove_duplicates(df)
+
+    df = standardize_indicator_id(df=df)
+    df = add_sdmx_reference_cols(df=df, dsd=dsd, structure=structure, action=action)
+
+    cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+    new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
+    df = df[new_order]
+
+    return df
 
 
 @typechecked
 def standardize_output(
-	df: pd.DataFrame,
-	artefact_id: str,
-	schema: Schema,
-	action: Literal["I", "U", "D"] = "I"
+    df: pd.DataFrame,
+    artefact_id: str,
+    schema: Schema,
+    action: Literal["I", "U", "D"] = "I",
 ) -> pd.DataFrame:
-	"""Standardize the output DataFrame by adding SDMX reference columns and reordering columns.
+    """Standardize the output DataFrame by adding SDMX reference columns.
 
-	This function enriches the given DataFrame with SDMX-related metadata columns
-	(`STRUCTURE`, `STRUCTURE_ID`, `ACTION`) based on the provided artefact ID and schema.
-	It then ensures that these columns appear first in the DataFrame.
+    Enriches the given DataFrame with SDMX-related metadata columns
+    (``STRUCTURE``, ``STRUCTURE_ID``, ``ACTION``) based on the provided
+    artefact ID and schema, then ensures these columns appear first.
 
-	Args:
-		df (pd.DataFrame): Input DataFrame containing SDMX data.
-		artefact_id (str): Unique identifier of the SDMX artefact (e.g., Dataflow ID).
-		schema (str): SDMX schema or structure type used to determine artefact type.
-		action (Literal["I", "U", "D"], optional): Action indicator for SDMX operations.
-			Defaults to "I". Allowed values:
-			- "I": Insert
-			- "U": Update
-			- "D": Delete
+    Args:
+        df: Input DataFrame containing SDMX data.
+        artefact_id: Unique identifier of the SDMX artefact (e.g.,
+            Dataflow ID).
+        schema: A pysdmx Schema object used to determine artefact type
+            and filter columns.
+        action: Action indicator for SDMX operations. Defaults to ``"I"``.
+            Allowed values: ``"I"`` (Insert), ``"U"`` (Update),
+            ``"D"`` (Delete).
 
-	Returns:
-		pd.DataFrame: A new DataFrame with SDMX reference columns added and reordered.
+    Returns:
+        A new DataFrame with SDMX reference columns added and reordered.
 
-	Raises:
-		ValueError: If `df` is empty.
-		ValueError: If `artefact_id` or `schema` is empty.
-		TypeError: If `df` is not a pandas DataFrame.
+    Raises:
+        ValueError: If ``df`` is empty or ``artefact_id``/``schema`` is empty.
+        TypeError: If ``df`` is not a pandas DataFrame.
+    """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input `df` must be a pandas DataFrame.")
+    if df.empty:
+        raise ValueError("Input DataFrame `df` cannot be empty.")
+    if not artefact_id or not schema:
+        raise ValueError("Parameters `artefact_id` and `schema` cannot be empty.")
 
-	Examples:
-		>>> import pandas as pd
-		>>> data = {"OBS_VALUE": [100, 200], "TIME_PERIOD": ["2020", "2021"]}
-		>>> df = pd.DataFrame(data)
-		>>> result = standardize_output(df, artefact_id="DF_EXAMPLE", schema="DataStructure")
-		>>> list(result.columns[:3])
-		['STRUCTURE', 'STRUCTURE_ID', 'ACTION']
-	"""
-	# Validate inputs
-	if not isinstance(df, pd.DataFrame):
-		raise TypeError("Input `df` must be a pandas DataFrame.")
-	if df.empty:
-		raise ValueError("Input DataFrame `df` cannot be empty.")
-	if not artefact_id or not schema:
-		raise ValueError("Parameters `artefact_id` and `schema` cannot be empty.")
+    artefact_type = _extract_artefact_type(schema)
 
-	# Extract artefact type from schema
-	artefact_type = _extract_artefact_type(schema)
+    components_to_keep = extract_component_ids(schema)
+    df = df[[col for col in components_to_keep if col in df.columns]]
 
-	# Remove columns that are not part of the schema's components
-	components_to_keep=extract_component_ids(schema)
-	df = df[[col for col in components_to_keep if col in df.columns]]
+    df = _add_sdmx_reference_cols(
+        df=df,
+        artefact_id=artefact_id,
+        artefact_type=artefact_type,
+        action=action,
+    )
 
-	# Add SDMX reference columns
-	df = _add_sdmx_reference_cols(
-		df=df,
-		artefact_id=artefact_id,
-		artefact_type=artefact_type,
-		action=action
-	)
+    if artefact_type == "dataflow":
+        cols_to_move = ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+    elif artefact_type == "datastructure":
+        cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+    else:
+        cols_to_move = [
+            "PROVISIONAGREEMENT",
+            "PROVISION_AGREEMENT_ID",
+            "ACTION",
+        ]
+    new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
+    df = df[new_order]
 
-	# Reorder columns: STRUCTURE, STRUCTURE_ID, ACTION should be first
-	if artefact_type == "dataflow":
-		cols_to_move = ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
-	elif artefact_type == "datastructure":
-		cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-	else:
-		cols_to_move = ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID",
-				  		"ACTION"]
-	new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
-	df = df[new_order]
-
-	return df
+    return df
 
 
 @typechecked
-def _extract_artefact_type(schema: Schema) -> Literal["dataflow", "datastructure", "provisionagreement"]:
-	"""Extract the SDMX artefact type from a pysdmx Schema instance.
+def _extract_artefact_type(
+    schema: Schema,
+) -> Literal["dataflow", "datastructure", "provisionagreement"]:
+    """Extract the SDMX artefact type from a pysdmx Schema instance.
 
-	Args:
-		schema (Schema): A pysdmx Schema object representing allowed content within a context.
+    Args:
+        schema: A pysdmx Schema object representing allowed content within
+            a context.
 
-	Returns:
-		Literal["dataflow", "datastructure", "provisionagreement"]: The artefact type for which the schema applies.
+    Returns:
+        The artefact type for which the schema applies.
 
-	Raises:
-		ValueError: If the schema context is not one of the expected values.
+    Raises:
+        ValueError: If the schema context is not one of the expected values.
 
-	Examples:
-		>>> from pysdmx.model.dataflow import Schema, Components
-		>>> from datetime import datetime, timezone
-		>>> comps = Components([])
-		>>> s = Schema("dataflow", "ECB", "EXR", comps, "1.0", [], generated=datetime.now(timezone.utc))
-		>>> extract_artefact(s)
-		'dataflow'
-	"""
-	valid_contexts = {"dataflow", "datastructure", "provisionagreement"}
-	if schema.context not in valid_contexts:
-		raise ValueError(f"Invalid schema context '{schema.context}'. Must be one of {valid_contexts}.")
-	return schema.context
-
+    Examples:
+        >>> from pysdmx.model.dataflow import Schema, Components
+        >>> from datetime import datetime, timezone
+        >>> comps = Components([])
+        >>> s = Schema("dataflow", "ECB", "EXR", comps, "1.0", [],
+        ...            generated=datetime.now(timezone.utc))
+        >>> _extract_artefact_type(s)
+        'dataflow'
+    """
+    valid_contexts = {"dataflow", "datastructure", "provisionagreement"}
+    if schema.context not in valid_contexts:
+        raise ValueError(
+            f"Invalid schema context '{schema.context}'. "
+            f"Must be one of {valid_contexts}."
+        )
+    return schema.context
 
 
 @typechecked
 def _add_sdmx_reference_cols(
-	df: pd.DataFrame,
-	artefact_id: str,
-	artefact_type: Literal["dataflow", "datastructure", "provisionagreement"],
-	action: Literal["I", "U", "D"] = "I"
+    df: pd.DataFrame,
+    artefact_id: str,
+    artefact_type: Literal["dataflow", "datastructure", "provisionagreement"],
+    action: Literal["I", "U", "D"] = "I",
 ) -> pd.DataFrame:
-	"""Add SDMX reference columns to a DataFrame based on artefact type and action.
+    """Add SDMX reference columns to a DataFrame based on artefact type.
 
-	Args:
-		df (pd.DataFrame): Input DataFrame.
-		artefact_id (str): Identifier for the SDMX artefact.
-		artefact_type (Literal["dataflow", "datastructure", "provisionagreement"]): Artefact type.
-		action (Literal["I", "U", "D"], optional): Action type. Defaults to "I".
+    Args:
+        df: Input DataFrame.
+        artefact_id: Identifier for the SDMX artefact.
+        artefact_type: Artefact type.
+        action: Action type. Defaults to ``"I"``.
 
-	Returns:
-		pd.DataFrame: DataFrame with added SDMX reference columns.
+    Returns:
+        DataFrame with added SDMX reference columns.
 
-	Raises:
-		ValueError: If artefact_type or action is invalid, or artefact_id is empty.
-		TypeError: If df is not a pandas DataFrame.
+    Raises:
+        TypeError: If df is not a pandas DataFrame.
 
-	Examples:
-		>>> import pandas as pd
-		>>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
-		>>> result = add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
-		>>> print(result.columns)
-		Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
-	"""
-	# Work on a copy to avoid SettingWithCopyWarning
-	df = df.copy()
+    Examples:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
+        >>> result = _add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
+        >>> print(result.columns)
+        Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
+    """
+    df = df.copy()
 
-	# Determine column names
-	if artefact_type == "dataflow":
-		structure_col = "DATAFLOW"
-		structure_id_col = "DATAFLOW_ID"
-	elif artefact_type == "datastructure":
-		structure_col = "STRUCTURE"
-		structure_id_col = "STRUCTURE_ID"
-	else:
-		structure_col = "PROVISIONAGREEMENT"
-		structure_id_col = "PROVISION_AGREEMENT_ID"
+    if artefact_type == "dataflow":
+        structure_col = "DATAFLOW"
+        structure_id_col = "DATAFLOW_ID"
+    elif artefact_type == "datastructure":
+        structure_col = "STRUCTURE"
+        structure_id_col = "STRUCTURE_ID"
+    else:
+        structure_col = "PROVISIONAGREEMENT"
+        structure_id_col = "PROVISION_AGREEMENT_ID"
 
-	# Use .loc for assignment
-	df.loc[:, structure_col] = artefact_type
-	df.loc[:, structure_id_col] = artefact_id
-	df.loc[:, "ACTION"] = action
+    df.loc[:, structure_col] = artefact_type
+    df.loc[:, structure_id_col] = artefact_id
+    df.loc[:, "ACTION"] = action
 
-	return df
+    return df
 
 
+# region Functions to handle mapping files
 
-# region Funtions to handle mapping files
-def read_mapping(path):
-	"""
-	Reads a JSON file and parses its content into DataFrames.
 
-	The function processes the JSON data with four main keys:
+def read_mapping(path: str) -> dict:
+    """Read a JSON mapping file and parse its content into DataFrames.
 
-		1. "schema_version": This key contains the version of the schema.
-		2. "dsd_id": This key contains the Data Structure Definition ID.
-		3. "components": This key is expected to contain a flat structure, which is converted into a single DataFrame named "components".
-		4. "representation": This key contains multiple sub-keys, each of which is associated with a flat structure. Each valid sub-key is converted into a separate DataFrame. Sub-keys with empty or invalid content are skipped.
+    The function processes JSON data with four main keys:
 
-	Additionally, all occurrences of the string "NA" in the JSON data are
-	converted to missing values (pd.NA) in the resulting DataFrames.
+        1. ``schema_version``: The version of the mapping schema.
+        2. ``dsd_id``: The Data Structure Definition ID.
+        3. ``components``: A flat structure converted into a DataFrame.
+        4. ``representation``: Multiple sub-keys, each converted into a
+           separate DataFrame. Empty sub-keys are skipped.
 
-	Args:
-		path (str): The file path to the JSON file to be parsed.
+    All occurrences of the string ``"NA"`` are converted to ``pd.NA``.
 
-	Returns:
-		dict: A dictionary where:
-			- The "schema_version" value is stored under the key 'schema_version'.
-			- The "dsd_id" value is stored under the key 'dsd_id'.
-			- The "components" DataFrame is stored under the key 'components'.
-			- Each valid sub-key in "representation" is stored as a DataFrameunder its corresponding key.
+    Args:
+        path: The file path to the JSON file to be parsed.
 
-	Raises:
-		ValueError: If the "components" key is missing, the "representation" key is invalid, or a sub-key in "representation" has an unexpected format.
-	"""
-	# Load JSON data from file
-	with open(path, "r") as file:
-		data = json.load(file)
+    Returns:
+        A dictionary where:
 
-	# Initialize the result structure
-	result = {}
+            - ``schema_version`` is stored under key ``'schema_version'``.
+            - ``dsd_id`` is stored under key ``'dsd_id'``.
+            - The components DataFrame is stored under key ``'components'``.
+            - Each valid representation sub-key is stored as a DataFrame
+              under its corresponding key.
 
-	# Process 'schema_version' key
-	schema_version = data.get("schema_version")
-	if schema_version:
-		result["schema_version"] = schema_version
-	else:
-		raise ValueError("Missing 'schema_version' key in JSON mapping file")
+    Raises:
+        ValueError: If required keys are missing or have unexpected formats.
+    """
+    with open(path) as file:
+        data = json.load(file)
 
-	# Process 'dsd_id' key
-	dsd_id = data.get("dsd_id")
-	if dsd_id:
-		result["dsd_id"] = dsd_id
-	else:
-		raise ValueError("Missing 'dsd_id' key in JSON mapping file")
+    result = {}
 
-	# Process 'components' key into a DataFrame
-	components_data = data.get("components")
-	if components_data:
-		df_components = pd.DataFrame(components_data).replace("NA", pd.NA)
-		result["components"] = df_components
-	else:
-		raise ValueError("Missing 'components' key in JSON mapping file")
+    schema_version = data.get("schema_version")
+    if schema_version:
+        result["schema_version"] = schema_version
+    else:
+        raise ValueError("Missing 'schema_version' key in JSON mapping file")
 
-	# Process 'representation' key into multiple DataFrames
-	representation_data = data.get("representation")
-	if representation_data and isinstance(representation_data, dict):
-		for sub_key, sub_value in representation_data.items():
-			if isinstance(sub_value, list):
-				# Convert list to DataFrame and replace "NA" with pd.NA
-				df_representation = pd.DataFrame(sub_value).replace("NA", pd.NA)
-				result[sub_key] = df_representation
-			elif not sub_value:
-				# Skip empty sub-keys
-				continue
-			else:
-				raise ValueError(
-					f"Unexpected data format for representation sub-key: {sub_key}"
-				)
-	else:
-		raise ValueError("Missing or invalid 'representation' key in JSON mapping file")
+    dsd_id = data.get("dsd_id")
+    if dsd_id:
+        result["dsd_id"] = dsd_id
+    else:
+        raise ValueError("Missing 'dsd_id' key in JSON mapping file")
 
-	return result
+    components_data = data.get("components")
+    if components_data:
+        result["components"] = pd.DataFrame(components_data).replace("NA", pd.NA)
+    else:
+        raise ValueError("Missing 'components' key in JSON mapping file")
+
+    representation_data = data.get("representation")
+    if representation_data and isinstance(representation_data, dict):
+        for sub_key, sub_value in representation_data.items():
+            if isinstance(sub_value, list):
+                result[sub_key] = pd.DataFrame(sub_value).replace("NA", pd.NA)
+            elif not sub_value:
+                continue
+            else:
+                raise ValueError(
+                    f"Unexpected data format for representation sub-key: {sub_key}"
+                )
+    else:
+        raise ValueError("Missing or invalid 'representation' key in JSON mapping file")
+
+    return result
+
 
 # endregion
