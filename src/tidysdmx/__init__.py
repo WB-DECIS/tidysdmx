@@ -61,6 +61,8 @@ from .structure_map_writer import (
     prepare_structure_map_for_upload
     )
 
+from .fake import generate_fake_dataset
+
 __all__ = [
     "fetch_dsd_schema",
     "fetch_schema", 
@@ -116,5 +118,6 @@ __all__ = [
     "fix_sdmx_xml_datatype_tags",
     "collect_structure_map_artifacts",
     "validate_structure_map_references",
-    "prepare_structure_map_for_upload"
+    "prepare_structure_map_for_upload",
+    "generate_fake_dataset",
     ]

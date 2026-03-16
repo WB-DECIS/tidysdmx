@@ -12,7 +12,10 @@ pysdmx = "^1.13.0"
 pandas = "^2.2.3"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
+pointblank = {version = ">=0.15", optional = true}
 
+[tool.poetry.extras]
+fake = ["pointblank"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
