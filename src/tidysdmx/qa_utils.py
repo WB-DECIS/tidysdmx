@@ -1,59 +1,63 @@
-import pandas as pd
+"""QA helpers: coerce numeric columns and remove duplicate rows."""
 
+import logging
+
+import pandas as pd
+from typeguard import typechecked
+
+logger = logging.getLogger(__name__)
+
+
+@typechecked
 def qa_coerce_numeric(
-        df: pd.DataFrame, 
-        numeric_columns: list[str]
-    ) -> pd.DataFrame:
-    """Coerces values from specified numeric columns to numeric, and removes rows where values cannot be coerced to numeric.
+    df: pd.DataFrame,
+    numeric_columns: list[str],
+) -> pd.DataFrame:
+    """Coerce specified columns to numeric, removing rows with invalid values.
 
     Args:
-        df (pd.DataFrame): The input DataFrame.
-        numeric_columns (list): A list of column names to be coerced to numeric.
+        df: The input DataFrame.
+        numeric_columns: Column names to coerce to numeric.
 
     Returns:
-        pd.DataFrame: The DataFrame with numeric columns coerced to numeric and invalid rows removed.
+        A new DataFrame with numeric columns coerced and invalid rows removed.
     """
+    df = df.copy()
+
     for column in numeric_columns:
-        if column in df.columns:
-            # Coerce column to numeric, setting errors='coerce' will replace invalid parsing with NaN
-            df[column] = pd.to_numeric(df[column], errors="coerce")
+        if column not in df.columns:
+            continue
 
-            # Identify rows with NaN values in the numeric column
-            invalid_rows = df[df[column].isna()]
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+        invalid_rows = df[df[column].isna()]
 
-            if not invalid_rows.empty:
-                # Log information about the rows being deleted
-                print(
-                    f"Removing {len(invalid_rows)} rows from column '{column}' that cannot be coerced to numeric."
-                )
-                print(f"Invalid rows:\n{invalid_rows}")
-
-                # Remove rows with NaN values in the numeric column
-                df = df.dropna(subset=[column])
+        if not invalid_rows.empty:
+            logger.info(
+                "Removing %d rows from column '%s' that cannot be coerced to numeric.",
+                len(invalid_rows),
+                column,
+            )
+            logger.debug("Invalid rows:\n%s", invalid_rows)
+            df = df.dropna(subset=[column])
 
     return df
 
 
+@typechecked
 def qa_remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """Removes duplicate rows from the DataFrame and logs information about the rows being removed.
+    """Remove duplicate rows from a DataFrame.
 
     Args:
-        df (pd.DataFrame): The input DataFrame.
+        df: The input DataFrame.
 
     Returns:
-        pd.DataFrame: The DataFrame with duplicate rows removed.
+        A new DataFrame with duplicate rows removed.
     """
     initial_length = len(df)
-
-    # Remove duplicate rows
     df = df.drop_duplicates()
-
-    final_length = len(df)
-    duplicates_removed = initial_length - final_length
+    duplicates_removed = initial_length - len(df)
 
     if duplicates_removed > 0:
-        # Log information about the rows being removed
-        print(f"Removed {duplicates_removed} duplicate rows.")
+        logger.info("Removed %d duplicate rows.", duplicates_removed)
 
     return df
-

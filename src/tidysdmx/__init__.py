@@ -92,8 +92,6 @@ __all__ = [
     "filter_tidy_raw",
     "map_structures",
     "filter_rows",
-    "infer_schema",
-    "infer_role_dimension",
     "apply_fixed_value_maps",
     "apply_implicit_component_maps",
     "build_fixed_map",
