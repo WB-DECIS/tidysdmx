@@ -1,26 +1,25 @@
 import pytest
 from pysdmx.model.map import (
     ComponentMap,
+    FixedValueMap,
+    ImplicitComponentMap,
     MultiComponentMap,
     MultiRepresentationMap,
+    MultiValueMap,
     RepresentationMap,
     StructureMap,
     ValueMap,
-    MultiValueMap,
-    FixedValueMap,
-    ImplicitComponentMap,
 )
 
 from tidysdmx.structure_map_writer import (
+    _convert_to_urn_references,
     _get_embedded_rep_map,
     _replace_values_with_urn,
     _validate_rep_map_fields,
-    _convert_to_urn_references,
     collect_structure_map_artifacts,
-    validate_structure_map_references,
     prepare_structure_map_for_upload,
+    validate_structure_map_references,
 )
-
 
 
 # Fixtures
@@ -53,7 +52,7 @@ def make_rep_map():
 
 @pytest.fixture
 def make_multi_rep_map():
-    """Factory fixture that builds a minimal MultiRepresentationMap with one MultiValueMap."""
+    """Factory fixture for a minimal MultiRepresentationMap."""
 
     def _factory(
         id: str = "MRM_CTRY",
@@ -117,6 +116,7 @@ def make_structure_map(make_rep_map, make_multi_rep_map):
     return _factory
 
 
+@pytest.mark.unit
 class TestGetEmbeddedRepMap:
     """Tests for _get_embedded_rep_map."""
 
@@ -129,8 +129,10 @@ class TestGetEmbeddedRepMap:
 
         assert result is rep_map
 
-    def test_multi_component_map_with_multi_rep_map_returns_it(self, make_multi_rep_map):
-        """MultiComponentMap with an embedded MultiRepresentationMap should return it."""
+    def test_multi_component_map_with_multi_rep_map_returns_it(
+        self, make_multi_rep_map
+    ):
+        """MultiComponentMap with embedded MultiRepresentationMap returns it."""
         mrm = make_multi_rep_map()
         mcm = MultiComponentMap(
             source=["COUNTRY", "CURRENCY"],
@@ -144,7 +146,10 @@ class TestGetEmbeddedRepMap:
 
     def test_component_map_with_urn_string_returns_none(self):
         """ComponentMap whose values is a URN string should return None."""
-        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=urn)
 
         result = _get_embedded_rep_map(cm)
@@ -153,7 +158,10 @@ class TestGetEmbeddedRepMap:
 
     def test_multi_component_map_with_urn_string_returns_none(self):
         """MultiComponentMap whose values is a URN string should return None."""
-        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:MRM(1.0)"
+        urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:MRM(1.0)"
+        )
         mcm = MultiComponentMap(source=["COUNTRY"], target=["GEO"], values=urn)
 
         result = _get_embedded_rep_map(mcm)
@@ -176,24 +184,8 @@ class TestGetEmbeddedRepMap:
 
         assert result is None
 
-    def test_returns_rep_map_not_copy(self, make_rep_map):
-        """Return value must be the exact same object, not a copy."""
-        rep_map = make_rep_map()
-        cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=rep_map)
 
-        result = _get_embedded_rep_map(cm)
-
-        assert result is rep_map
-
-    def test_returns_multi_rep_map_not_copy(self, make_multi_rep_map):
-        """Return value must be the exact same MultiRepresentationMap object."""
-        mrm = make_multi_rep_map()
-        mcm = MultiComponentMap(source=["A"], target=["B"], values=mrm)
-
-        result = _get_embedded_rep_map(mcm)
-
-        assert result is mrm
-
+@pytest.mark.unit
 class TestReplaceValuesWithUrn:
     """Tests for _replace_values_with_urn with ComponentMap."""
 
@@ -220,7 +212,10 @@ class TestReplaceValuesWithUrn:
 
     def test_uses_existing_urn_when_present(self, make_rep_map):
         """If the RepresentationMap already has a URN, it should be used as-is."""
-        explicit_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        explicit_urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         rep_map = make_rep_map(urn=explicit_urn)
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=rep_map)
 
@@ -266,8 +261,11 @@ class TestReplaceValuesWithUrn:
         assert result.values.startswith("urn:sdmx:org.sdmx.infomodel.")
 
     def test_component_map_with_urn_string_unchanged(self):
-        """ComponentMap whose values is already a URN string should be returned as-is."""
-        existing_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        """ComponentMap with URN string values should be returned as-is."""
+        existing_urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         cm = ComponentMap(source="COUNTRY", target="COUNTRY", values=existing_urn)
 
         result = _replace_values_with_urn(cm)
@@ -306,7 +304,10 @@ class TestReplaceValuesWithUrn:
 
     def test_multi_uses_existing_urn_when_present(self, make_multi_rep_map):
         """If the MultiRepresentationMap has a URN, it should be used as-is."""
-        explicit_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+        explicit_urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+        )
         mrm = make_multi_rep_map(urn=explicit_urn)
         mcm = MultiComponentMap(
             source=["COUNTRY", "CURRENCY"],
@@ -348,7 +349,10 @@ class TestReplaceValuesWithUrn:
 
     def test_multi_component_map_with_urn_string_unchanged(self):
         """MultiComponentMap whose values is already a URN string is returned as-is."""
-        existing_urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:MRM(1.0)"
+        existing_urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:MRM(1.0)"
+        )
         mcm = MultiComponentMap(
             source=["COUNTRY"],
             target=["GEO"],
@@ -359,6 +363,8 @@ class TestReplaceValuesWithUrn:
 
         assert result is mcm
 
+
+@pytest.mark.unit
 class TestValidateRepMapFields:
     """Tests for _validate_rep_map_fields."""
 
@@ -373,7 +379,9 @@ class TestValidateRepMapFields:
     def test_missing_source_reported(self):
         """A RepresentationMap with no source should report it."""
         rep_map = RepresentationMap(
-            id="RM", name="RM", agency="ECB",
+            id="RM",
+            name="RM",
+            agency="ECB",
             source=None,
             target="urn:target",
             maps=[ValueMap(source="A", target="B")],
@@ -386,7 +394,9 @@ class TestValidateRepMapFields:
     def test_missing_target_reported(self):
         """A RepresentationMap with no target should report it."""
         rep_map = RepresentationMap(
-            id="RM", name="RM", agency="ECB",
+            id="RM",
+            name="RM",
+            agency="ECB",
             source="urn:source",
             target=None,
             maps=[ValueMap(source="A", target="B")],
@@ -399,7 +409,9 @@ class TestValidateRepMapFields:
     def test_empty_maps_reported(self):
         """A RepresentationMap with no value mappings should report it."""
         rep_map = RepresentationMap(
-            id="RM", name="RM", agency="ECB",
+            id="RM",
+            name="RM",
+            agency="ECB",
             source="urn:source",
             target="urn:target",
             maps=[],
@@ -423,6 +435,8 @@ class TestValidateRepMapFields:
 
         assert isinstance(issues, list)
 
+
+@pytest.mark.unit
 class TestConvertToUrnReferences:
     """Tests for _convert_to_urn_references."""
 
@@ -472,8 +486,7 @@ class TestConvertToUrnReferences:
     def test_urn_preserved(self, make_rep_map):
         """An explicit URN on the StructureMap must survive URN conversion."""
         explicit_urn = (
-            "urn:sdmx:org.sdmx.infomodel.structuremapping"
-            ".StructureMap=ECB:SM_TEST(1.0)"
+            "urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=ECB:SM_TEST(1.0)"
         )
         sm = StructureMap(
             id="SM_TEST",
@@ -483,9 +496,7 @@ class TestConvertToUrnReferences:
             target="urn:tgt",
             urn=explicit_urn,
             maps=[
-                ComponentMap(
-                    source="COUNTRY", target="GEO", values=make_rep_map()
-                ),
+                ComponentMap(source="COUNTRY", target="GEO", values=make_rep_map()),
             ],
         )
 
@@ -509,9 +520,7 @@ class TestConvertToUrnReferences:
             valid_from=vf,
             valid_to=vt,
             maps=[
-                ComponentMap(
-                    source="COUNTRY", target="GEO", values=make_rep_map()
-                ),
+                ComponentMap(source="COUNTRY", target="GEO", values=make_rep_map()),
             ],
         )
 
@@ -521,6 +530,8 @@ class TestConvertToUrnReferences:
         assert result.valid_from == vf
         assert result.valid_to == vt
 
+
+@pytest.mark.unit
 class TestCollectStructureMapArtifacts:
     """Tests for collect_structure_map_artifacts."""
 
@@ -537,13 +548,15 @@ class TestCollectStructureMapArtifacts:
         artifacts = collect_structure_map_artifacts(sm)
 
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
-        sm_index = next(i for i, a in enumerate(artifacts) if isinstance(a, StructureMap))
+        sm_index = next(
+            i for i, a in enumerate(artifacts) if isinstance(a, StructureMap)
+        )
         for rm in rep_maps:
             assert artifacts.index(rm) < sm_index
 
     def test_embedded_rep_maps_are_extracted(self, make_structure_map):
         """All embedded RepresentationMaps must appear in the result list."""
-        sm = make_structure_map()  # default has one ComponentMap with a RepresentationMap
+        sm = make_structure_map()  # default: one ComponentMap with RepresentationMap
         artifacts = collect_structure_map_artifacts(sm)
 
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
@@ -560,7 +573,7 @@ class TestCollectStructureMapArtifacts:
             assert isinstance(cm.values, str)
 
     def test_convert_to_urns_false_keeps_embedded_objects(self, make_structure_map):
-        """With convert_to_urns=False the returned StructureMap keeps embedded objects."""
+        """convert_to_urns=False keeps embedded objects in StructureMap."""
         sm = make_structure_map()
         artifacts = collect_structure_map_artifacts(sm, convert_to_urns=False)
 
@@ -572,8 +585,11 @@ class TestCollectStructureMapArtifacts:
     def test_no_embedded_rep_maps_returns_only_structure_map(self):
         """A StructureMap with no embedded rep maps should return just itself."""
         sm = StructureMap(
-            id="SM_PLAIN", name="Plain", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM_PLAIN",
+            name="Plain",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[
                 FixedValueMap(target="CONF_STATUS", value="F"),
                 ImplicitComponentMap(source="FREQ", target="FREQUENCY"),
@@ -586,11 +602,22 @@ class TestCollectStructureMapArtifacts:
     def test_multiple_rep_maps_all_extracted(self, make_rep_map):
         """Each ComponentMap with a rep map must contribute one entry to the list."""
         sm = StructureMap(
-            id="SM_MULTI", name="Multi", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM_MULTI",
+            name="Multi",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[
-                ComponentMap(source="COUNTRY", target="GEO", values=make_rep_map(id="RM_A")),
-                ComponentMap(source="SECTOR", target="SECTOR", values=make_rep_map(id="RM_B")),
+                ComponentMap(
+                    source="COUNTRY",
+                    target="GEO",
+                    values=make_rep_map(id="RM_A"),
+                ),
+                ComponentMap(
+                    source="SECTOR",
+                    target="SECTOR",
+                    values=make_rep_map(id="RM_B"),
+                ),
             ],
         )
         artifacts = collect_structure_map_artifacts(sm)
@@ -598,6 +625,8 @@ class TestCollectStructureMapArtifacts:
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
         assert len(rep_maps) == 2
 
+
+@pytest.mark.unit
 class TestValidateStructureMapReferences:
     """Tests for validate_structure_map_references."""
 
@@ -606,11 +635,17 @@ class TestValidateStructureMapReferences:
         validate_structure_map_references(make_structure_map())
 
     def test_unresolved_urn_reference_raises_value_error(self):
-        """A ComponentMap with a URN string instead of an object must raise ValueError."""
-        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        """ComponentMap with URN string instead of object must raise."""
+        urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=urn)],
         )
 
@@ -618,15 +653,21 @@ class TestValidateStructureMapReferences:
             validate_structure_map_references(sm)
 
     def test_rep_map_missing_source_raises_value_error(self):
-        """A ComponentMap whose RepresentationMap has no source must raise ValueError."""
+        """RepresentationMap with no source must raise ValueError."""
         rep_map = RepresentationMap(
-            id="RM", name="RM", agency="ECB",
-            source=None, target="urn:tgt",
+            id="RM",
+            name="RM",
+            agency="ECB",
+            source=None,
+            target="urn:tgt",
             maps=[ValueMap(source="A", target="B")],
         )
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
         )
 
@@ -636,12 +677,19 @@ class TestValidateStructureMapReferences:
     def test_rep_map_empty_maps_raises_value_error(self):
         """A RepresentationMap with no value mappings must raise ValueError."""
         rep_map = RepresentationMap(
-            id="RM", name="RM", agency="ECB",
-            source="urn:src", target="urn:tgt", maps=[],
+            id="RM",
+            name="RM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[],
         )
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
         )
 
@@ -651,8 +699,11 @@ class TestValidateStructureMapReferences:
     def test_non_component_map_rules_are_ignored(self):
         """FixedValueMap and ImplicitComponentMap should not cause any error."""
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[
                 FixedValueMap(target="CONF_STATUS", value="F"),
                 ImplicitComponentMap(source="FREQ", target="FREQUENCY"),
@@ -661,6 +712,8 @@ class TestValidateStructureMapReferences:
 
         validate_structure_map_references(sm)  # must not raise
 
+
+@pytest.mark.unit
 class TestPrepareStructureMapForUpload:
     """Tests for prepare_structure_map_for_upload."""
 
@@ -679,10 +732,16 @@ class TestPrepareStructureMapForUpload:
 
     def test_validate_true_raises_for_unresolved_urn(self):
         """With validate=True, an unresolved URN reference must raise ValueError."""
-        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=urn)],
         )
 
@@ -691,10 +750,16 @@ class TestPrepareStructureMapForUpload:
 
     def test_validate_false_skips_validation(self):
         """With validate=False, an unresolved URN reference must not raise."""
-        urn = "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=ECB:RM_CTRY(1.0)"
+        urn = (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=ECB:RM_CTRY(1.0)"
+        )
         sm = StructureMap(
-            id="SM", name="SM", agency="ECB",
-            source="urn:src", target="urn:tgt",
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=urn)],
         )
 
