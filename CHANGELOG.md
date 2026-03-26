@@ -1,6 +1,13 @@
 # Changelog
 
 <!--next-version-placeholder-->
+## v0.8.0 (26/3/2026)
+### Changed
+
+- Modify artefact generation functions to ensure the artefacts are FMR compliant.
+- Improved error reporting in validate_dataset_local: Refactored validation to return multiple granular errors instead of raising on the first failure. Capped by a new max_errors parameter (default 1000).
+- Various clean-up tasks.
+
 ## v0.7.5 (26/1/2026)
 ### Fixed
 
