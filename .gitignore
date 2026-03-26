@@ -70,6 +70,9 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+# Input for AI agent
+docs/.local-docs
+.pysdmx-src/
 
 # PyBuilder
 target/
@@ -150,10 +153,11 @@ dmypy.json
 *.pem
 
 # Custom
-notebooks/TMP/
-# Ignore everything under scripts/
+TMP/
+config.json
+## Ignore everything under scripts/
 scripts/*
-#But keep the scripts directory itself
+## But keep the scripts directory itself
 !scripts/ 
-# And keep this specific debug script
+## And keep this specific debug script
 !scripts/debug-config-checks.py

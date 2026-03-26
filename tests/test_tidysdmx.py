@@ -13,7 +13,6 @@ from tidysdmx.tidysdmx import (
     vectorized_lookup_ordered_v1,
     vectorized_lookup_ordered_v2,
     create_keys_dict,
-    fetch_schema,
     transform_source_to_target,
     _extract_artefact_type,
     _add_sdmx_reference_cols,
@@ -423,18 +422,6 @@ class TestCreateKeysDict:
             "another.file.with.periods": "another.file.with.periods.json",
         }
         assert create_keys_dict(input_dict) == expected_output
-
-class TestFetchSchema:
-    def test_fetch_schema_valid(self):
-        # This is a placeholder test. In a real scenario, you would mock the network call.
-        base_url = "https://fmrqa.worldbank.org/"
-        artefact_id = "WB.DATA360:DS_DATA360(1.3)"
-        context = "datastructure"
-        try:
-            schema = fetch_schema(base_url, artefact_id, context)
-            assert schema is not None 
-        except Exception as e:
-            pytest.fail(f"Unexpected exception raised: {e}")
 
 class TestTransformSourceToTarget:
     """Unit tests for the transform_source_to_target function."""

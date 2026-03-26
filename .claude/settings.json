@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(poetry run pytest*)",
+      "Bash(poetry run ruff*)",
+      "Bash(poetry install*)",
+      "Bash(poetry run python*)",
+      "Bash(pre-commit run*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)"
+    ]
+  }
+}

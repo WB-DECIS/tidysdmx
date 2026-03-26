@@ -1,4 +1,4 @@
-# tests/fixtures/fmr_api.py
+# tests/fixtures/fxtr_structures.py
 import pytest
 import pickle as pkl
 from pathlib import Path
