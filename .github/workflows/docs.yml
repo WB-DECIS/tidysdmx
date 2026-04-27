@@ -41,7 +41,7 @@ jobs:
     name: "Publish Docs"
     runs-on: ubuntu-latest
     needs: "build-docs"
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/dev'
     permissions:
       pages: write
       id-token: write
