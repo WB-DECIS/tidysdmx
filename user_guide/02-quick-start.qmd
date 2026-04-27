@@ -6,7 +6,7 @@ tags: [Getting Started, Workflow]
 
 # Quick start
 
-This page shows the smallest possible tidysdmx pipeline: tidy DataFrame in, validated SDMX-ready output out. For the full iterative-development walkthrough (with FMR fetch, Excel mapping, and XML export) see the [end-to-end workflow](03-end-to-end-workflow.qmd).
+This page shows the smallest possible tidysdmx pipeline: tidy DataFrame in, validated SDMX-ready output out. A full iterative-development walkthrough (with FMR fetch, Excel mapping, and XML export) is in progress.
 
 ## 1. Describe your tidy raw data as a schema
 
@@ -46,7 +46,7 @@ assert errors.empty
 
 ## 3. Apply a structure map (when you have one)
 
-With a `StructureMap` from pysdmx (or one built via [`build_structure_map_from_template_wb`](06-mapping-templates.qmd)):
+With a `StructureMap` from pysdmx (or one built via `build_structure_map_from_template_wb`):
 
 ```python
 from tidysdmx import map_structures, standardize_output
@@ -65,6 +65,5 @@ out = standardize_output(
 
 ## Where to next?
 
-- The [end-to-end workflow](03-end-to-end-workflow.qmd) walks through every step in detail with a real World Bank dataset.
-- The [recipes](../recipes/index.html) collect copy-pasteable solutions to common tasks.
 - The [API reference](../reference/index.html) documents every public function.
+- A full end-to-end workflow walkthrough and recipe collection are in progress.

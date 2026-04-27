@@ -31,12 +31,8 @@ If you already know pysdmx, you can think of tidysdmx as a set of opinionated co
 
 - [Installation](01-installation.qmd) — install with pip or Poetry and verify your environment.
 - [Quick start](02-quick-start.qmd) — the smallest end-to-end example.
-- [End-to-end workflow](03-end-to-end-workflow.qmd) — a full walkthrough of the iterative-development pipeline, mirroring the [`DEV-pipeline-iterative-development-wb-template.ipynb`](https://github.com/WB-DECIS/tidysdmx/blob/dev/notebooks/tidysdmx/DEV-pipeline-iterative-development-wb-template.ipynb) notebook.
-- [SDMX concepts](04-sdmx-concepts.qmd) — a short refresher on DSDs, codelists, structure maps, and friends.
-- [FMR integration](05-fmr-integration.qmd) — working with the Fusion Metadata Registry from Python.
-- [Mapping templates](06-mapping-templates.qmd) — the World Bank Excel mapping workbook format.
-- [Validation](07-validation.qmd) — catching errors before you upload.
-- [LLMs & agents](08-llms-and-agents.qmd) — downloadable `llms.txt`, `llms-full.txt`, and skill bundle.
+
+More chapters — end-to-end workflow, SDMX concepts, FMR integration, mapping templates, validation, and LLM/agent artefacts — are in progress and will be linked here as they land.
 
 ## Status
 
