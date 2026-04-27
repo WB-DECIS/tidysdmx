@@ -1,0 +1,70 @@
+---
+title: "Quick start"
+description: "The smallest end-to-end tidysdmx example."
+tags: [Getting Started, Workflow]
+---
+
+# Quick start
+
+This page shows the smallest possible tidysdmx pipeline: tidy DataFrame in, validated SDMX-ready output out. For the full iterative-development walkthrough (with FMR fetch, Excel mapping, and XML export) see the [end-to-end workflow](03-end-to-end-workflow.qmd).
+
+## 1. Describe your tidy raw data as a schema
+
+```python
+import pandas as pd
+from tidysdmx import create_schema_from_table
+
+tidy_raw = pd.DataFrame({
+    "SERIES":      ["PER_ALLSP_ADQ_EP_TOT"] * 4,
+    "ECONOMY":     ["GHA", "GHA", "KEN", "KEN"],
+    "TIME_PERIOD": ["2018", "2019", "2018", "2019"],
+    "VALUE":       [12.3, 13.1, 9.8, 10.4],
+})
+
+raw_schema = create_schema_from_table(
+    tidy_raw,
+    dimensions=["SERIES", "ECONOMY"],
+    time_dimension="TIME_PERIOD",
+    measure="VALUE",
+)
+```
+
+`raw_schema` is a pysdmx `Schema` object containing a DSD, a ConceptScheme, and the codelists inferred from your data.
+
+## 2. Validate against that schema
+
+```python
+from tidysdmx import validate_dataset_local
+
+errors = validate_dataset_local(
+    df=tidy_raw,
+    schema=raw_schema.dsd.to_schema(),
+    sdmx_cols=[],
+)
+assert errors.empty
+```
+
+## 3. Apply a structure map (when you have one)
+
+With a `StructureMap` from pysdmx (or one built via [`build_structure_map_from_template_wb`](06-mapping-templates.qmd)):
+
+```python
+from tidysdmx import map_structures, standardize_output
+
+mapped = map_structures(df=tidy_raw, structure_map=sm, verbose=True)
+
+out = standardize_output(
+    df=mapped,
+    artefact_id="WB.GGH.HSP:DS_ASPIRE(1.0.0)",
+    schema=dis_schema,
+    action="I",
+)
+```
+
+`out` is a tidy DataFrame whose columns and codes match the dissemination schema, ready to be written as SDMX-ML or uploaded to FMR.
+
+## Where to next?
+
+- The [end-to-end workflow](03-end-to-end-workflow.qmd) walks through every step in detail with a real World Bank dataset.
+- The [recipes](../recipes/index.html) collect copy-pasteable solutions to common tasks.
+- The [API reference](../reference/index.html) documents every public function.
