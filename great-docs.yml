@@ -1,0 +1,216 @@
+# great-docs.yml — Configuration for the tidysdmx documentation site
+# See https://posit-dev.github.io/great-docs/
+
+# ----------------------------------------------------------------------
+# Package metadata
+# ----------------------------------------------------------------------
+module: tidysdmx
+display_name: tidysdmx
+parser: google
+dynamic: true
+
+# ----------------------------------------------------------------------
+# Repository
+# ----------------------------------------------------------------------
+repo: https://github.com/WB-DECIS/tidysdmx
+github_style: widget
+
+source:
+  enabled: true
+  branch: dev
+  path: src/tidysdmx
+
+# ----------------------------------------------------------------------
+# Theming
+# ----------------------------------------------------------------------
+navbar_style: sky
+content_style: lilac
+dark_mode_toggle: true
+
+# Hero on the landing page
+hero:
+  enabled: true
+  tagline: "A tidy toolbox for SDMX data — schemas, mappings, validation, and FMR integration."
+  starfield: true
+
+# Announcement banner
+announcement:
+  content: "⚠️ tidysdmx is under active development. APIs may change between minor versions — feedback welcome!"
+  type: warning
+  dismissable: true
+
+# ----------------------------------------------------------------------
+# Authors and funding
+# ----------------------------------------------------------------------
+authors:
+  - name: Tony Fujs
+    role: Maintainer
+    affiliation: World Bank — DECGT
+    github: tonyfujs
+  - name: Daniel Gil-Sanchez
+    role: Maintainer
+    affiliation: World Bank — DECGT
+
+funding:
+  name: The World Bank
+  roles:
+    - Copyright holder
+    - funder
+  homepage: https://www.worldbank.org
+
+# ----------------------------------------------------------------------
+# Custom sections
+# ----------------------------------------------------------------------
+sections:
+  - title: Recipes
+    dir: recipes
+    navbar_after: User Guide
+
+# ----------------------------------------------------------------------
+# Sidebar / discoverability
+# ----------------------------------------------------------------------
+sidebar_filter:
+  enabled: true
+  min_items: 8
+
+tags:
+  enabled: true
+  icons:
+    Getting Started: rocket
+    Workflow: workflow
+    SDMX: layers
+    FMR: server
+    Validation: shield-check
+    Mapping: arrow-right-left
+    Schemas: file-code
+    AI/LLM: wand-sparkles
+
+nav_icons:
+  navbar:
+    User Guide: book-open
+    Recipes: chef-hat
+    Reference: code
+    Changelog: clock
+
+# ----------------------------------------------------------------------
+# AI / LLM artefacts
+# ----------------------------------------------------------------------
+# llms.txt and llms-full.txt are generated automatically as part of
+# the build pipeline (step 5). They are emitted at the site root and
+# available for download by package users and AI agents.
+#
+# A hand-written SKILL.md file in assets/ provides a high-quality,
+# domain-aware skill for agents (Claude Code, Cursor, Copilot).
+skill:
+  enabled: true
+  file: assets/SKILL.md
+
+# Generate downloadable .md versions of every page (the
+# "Copy / View as Markdown" feature).
+markdown_pages: true
+
+changelog:
+  enabled: true
+
+# ----------------------------------------------------------------------
+# Site-wide settings
+# ----------------------------------------------------------------------
+site:
+  show_dates: true
+
+# ----------------------------------------------------------------------
+# API reference structure
+# ----------------------------------------------------------------------
+reference:
+  desc: >-
+    Public API of tidysdmx — fetch SDMX schemas from FMR, infer schemas
+    from tidy DataFrames, build structure maps from Excel templates,
+    map data to dissemination schemas, validate datasets, and emit
+    SDMX-ML artefacts ready for FMR upload.
+  sections:
+    - title: FMR & Schemas
+      desc: Fetch and parse SDMX schemas from a Fusion Metadata Registry.
+      contents:
+        - fetch_schema
+        - fetch_dsd_schema
+        - parse_artefact_id
+        - parse_dsd_id
+        - create_schema_from_table
+    - title: Structure Maps
+      desc: Build, parse, validate, and write SDMX structure maps.
+      contents:
+        - parse_mapping_template_wb
+        - build_structure_map_from_template_wb
+        - build_fixed_map
+        - build_implicit_component_map
+        - build_date_pattern_map
+        - build_value_map
+        - build_value_map_list
+        - build_multi_value_map_list
+        - build_representation_map
+        - build_multi_representation_map
+        - build_single_component_map
+        - collect_structure_map_artifacts
+        - validate_structure_map_references
+        - prepare_structure_map_for_upload
+    - title: Mapping
+      desc: Apply structure maps to tidy DataFrames.
+      contents:
+        - map_structures
+        - apply_fixed_value_maps
+        - apply_implicit_component_maps
+        - apply_multi_component_map
+        - map_to_sdmx
+        - transform_source_to_target
+    - title: Standardisation
+      desc: Prepare a mapped DataFrame for SDMX upload.
+      contents:
+        - standardize_output
+        - standardize_sdmx
+        - standardize_data_for_upload
+        - standardize_indicator_id
+        - sanitize_variable
+        - add_sdmx_reference_cols
+    - title: Validation
+      desc: Validate datasets against schemas and codelists.
+      contents:
+        - validate_dataset_local
+        - validate_columns
+        - validate_mandatory_columns
+        - validate_codelist_ids
+        - validate_duplicates
+        - validate_no_missing_values
+    - title: Tidy Raw
+      desc: Filter and shape raw inputs.
+      contents:
+        - filter_tidy_raw
+        - filter_rows
+    - title: Utilities
+      desc: Helpers for codelists, components, Excel templates, and XML.
+      contents:
+        - extract_validation_info
+        - get_codelist_ids
+        - extract_component_ids
+        - create_mapping_rules
+        - build_excel_workbook
+        - write_excel_mapping_template
+        - read_mapping
+        - fix_sdmx_xml_datatype_tags
+        - gen_urn
+    - title: QA
+      desc: Quality-assurance helpers.
+      contents:
+        - qa_coerce_numeric
+        - qa_remove_duplicates
+    - title: Kedro Integration
+      desc: Kedro pipeline node wrappers.
+      contents:
+        - kd_read_mappings
+        - kd_standardize_sdmx
+        - kd_validate_dataset_local
+        - kd_validate_datasets_local
+    - title: Lookups
+      desc: Vectorised lookup helpers.
+      contents:
+        - vectorized_lookup_ordered_v1
+        - vectorized_lookup_ordered_v2

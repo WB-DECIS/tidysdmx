@@ -1,0 +1,39 @@
+---
+title: "Introduction"
+description: "What tidysdmx is, who it's for, and how it relates to pysdmx."
+tags: [Getting Started, SDMX]
+---
+
+# Introduction
+
+**tidysdmx** is a Python toolbox for producing SDMX-conformant data with as little ceremony as possible. It sits on top of [pysdmx](https://py.sdmx.io) and adds higher-level helpers for the workflows that statistical agencies and research teams actually run every day:
+
+- pulling schemas from a Fusion Metadata Registry (FMR);
+- describing messy raw inputs as SDMX schemas;
+- expressing source-to-target mappings in an Excel template;
+- applying those mappings to tidy DataFrames;
+- validating results against the dissemination DSD;
+- emitting SDMX-ML 3.0 artefacts ready for FMR upload.
+
+## Who is this for?
+
+- **Data engineers** wiring up reproducible pipelines that ingest CSVs, Excel files, or database extracts and publish SDMX-conformant outputs.
+- **Statisticians and domain experts** who own a mapping between their raw indicators and an official dissemination schema and want to express it without writing XML.
+- **Platform teams** integrating SDMX production into orchestrators such as Kedro or Airflow.
+
+## How does it relate to pysdmx?
+
+tidysdmx **wraps pysdmx** — it does not reimplement it. Wherever pysdmx already provides a model class, reader, writer, or FMR client, tidysdmx calls it directly. The value tidysdmx adds is concentrated at the boundaries: turning a pandas DataFrame into a pysdmx `Schema`, turning an Excel workbook into a `StructureMap`, and turning a mapped DataFrame into the tabular shape that pysdmx writers expect.
+
+If you already know pysdmx, you can think of tidysdmx as a set of opinionated convenience functions; if you don't, you can use tidysdmx without ever touching pysdmx internals.
+
+## What's covered in this guide?
+
+- [Installation](01-installation.qmd) — install with pip or Poetry and verify your environment.
+- [Quick start](02-quick-start.qmd) — the smallest end-to-end example.
+
+More chapters — end-to-end workflow, SDMX concepts, FMR integration, mapping templates, validation, and LLM/agent artefacts — are in progress and will be linked here as they land.
+
+## Status
+
+tidysdmx is **under active development**. Public APIs are stabilising but may still change between minor versions. Pin a version in production and check the [changelog](../changelog.html) before upgrading.
