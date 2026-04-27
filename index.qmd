@@ -52,40 +52,22 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 
 ```{=html}
 <div class="gd-cta-grid">
-  <a href="user_guide/03-end-to-end-workflow.html" class="gd-cta-card">
-    <span class="gd-cta-icon">🛠️</span>
-    <span class="gd-cta-title">End-to-end workflow</span>
-    <span class="gd-cta-desc">Walk through the full WB ASPIRE pipeline — from raw CSVs to validated SDMX-ML.</span>
-    <span class="gd-cta-arrow">→</span>
-  </a>
   <a href="user_guide/01-installation.html" class="gd-cta-card">
     <span class="gd-cta-icon">📦</span>
     <span class="gd-cta-title">Installation</span>
     <span class="gd-cta-desc">Install tidysdmx with pip or Poetry, set up an FMR client, and sanity-check.</span>
     <span class="gd-cta-arrow">→</span>
   </a>
-  <a href="recipes/index.html" class="gd-cta-card">
-    <span class="gd-cta-icon">🍳</span>
-    <span class="gd-cta-title">Recipes</span>
-    <span class="gd-cta-desc">Bite-sized snippets for common tasks: fetch a schema, validate, export XML.</span>
+  <a href="user_guide/02-quick-start.html" class="gd-cta-card">
+    <span class="gd-cta-icon">🚀</span>
+    <span class="gd-cta-title">Quick start</span>
+    <span class="gd-cta-desc">The smallest end-to-end tidysdmx example — tidy DataFrame in, validated output out.</span>
     <span class="gd-cta-arrow">→</span>
   </a>
   <a href="reference/index.html" class="gd-cta-card">
     <span class="gd-cta-icon">⚙️</span>
     <span class="gd-cta-title">API reference</span>
     <span class="gd-cta-desc">Every public function, parameter, and return type — auto-generated from docstrings.</span>
-    <span class="gd-cta-arrow">→</span>
-  </a>
-  <a href="user_guide/08-llms-and-agents.html" class="gd-cta-card">
-    <span class="gd-cta-icon">🤖</span>
-    <span class="gd-cta-title">For LLMs &amp; agents</span>
-    <span class="gd-cta-desc">Download <code>llms.txt</code>, <code>llms-full.txt</code>, and the agent skill bundle.</span>
-    <span class="gd-cta-arrow">→</span>
-  </a>
-  <a href="user_guide/04-sdmx-concepts.html" class="gd-cta-card">
-    <span class="gd-cta-icon">📚</span>
-    <span class="gd-cta-title">SDMX concepts</span>
-    <span class="gd-cta-desc">A quick orientation to DSDs, codelists, structure maps, and dataflows.</span>
     <span class="gd-cta-arrow">→</span>
   </a>
 </div>

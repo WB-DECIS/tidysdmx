@@ -54,11 +54,11 @@ from tidysdmx import (
 )
 ```
 
-If the imports succeed, you're ready to go. Continue to the [quick start](02-quick-start.qmd) or jump straight to the [end-to-end workflow](03-end-to-end-workflow.qmd).
+If the imports succeed, you're ready to go. Continue to the [quick start](02-quick-start.qmd).
 
 ## Optional: connect to FMR
 
-Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. The `pysdmx` FMR client is bundled with tidysdmx; see [FMR integration](05-fmr-integration.qmd) for authentication, environments, and TLS troubleshooting.
+Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. The `pysdmx` FMR client is bundled with tidysdmx and can be instantiated directly:
 
 ```python
 import pysdmx as px
