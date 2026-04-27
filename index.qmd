@@ -1,0 +1,104 @@
+---
+title: "tidysdmx"
+pagetitle: "tidysdmx — A tidy toolbox for SDMX data"
+---
+
+# tidysdmx
+
+**A tidy toolbox for working with SDMX data.** Fetch schemas from FMR, infer schemas from tidy DataFrames, build structure maps from Excel templates, map data to dissemination schemas, validate, and export SDMX-ML artefacts — all with a Pythonic, pandas-friendly API.
+
+## Three steps to your first SDMX-ready dataset
+
+```bash
+pip install tidysdmx
+```
+
+```python
+import pysdmx as px
+from tidysdmx import (
+    create_schema_from_table,
+    parse_mapping_template_wb,
+    build_structure_map_from_template_wb,
+    map_structures,
+    standardize_output,
+    validate_dataset_local,
+)
+
+# 1. Fetch the dissemination schema from FMR
+client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+dis_schema = client.get_schema(
+    "datastructure",
+    agency="WB.GGH.HSP", id="DS_ASPIRE", version="1.0.0",
+)
+
+# 2. Build a structure map from an Excel mapping template
+mappings = parse_mapping_template_wb("WB_ASPIRE_MAPPING.xlsx")
+sm = build_structure_map_from_template_wb(
+    mappings,
+    target_structure_id="WB.GGH.HSP:DS_ASPIRE(1.0.0)",
+    source_structure_id="WB.DP:DP_SCHEMA(1.0)",
+)
+
+# 3. Map your tidy data and validate the output
+mapped = map_structures(df=tidy_raw_df, structure_map=sm)
+out = standardize_output(df=mapped, artefact_id="WB.GGH.HSP:DS_ASPIRE(1.0.0)",
+                        schema=dis_schema, action="I")
+errors = validate_dataset_local(df=out, schema=dis_schema)
+```
+
+## Built for SDMX practitioners
+
+tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for the day-to-day reality of producing SDMX-conformant data: messy raw inputs, Excel mapping templates, FMR registries, and reproducible pipelines.
+
+```{=html}
+<div class="gd-cta-grid">
+  <a href="user_guide/03-end-to-end-workflow.html" class="gd-cta-card">
+    <span class="gd-cta-icon">🛠️</span>
+    <span class="gd-cta-title">End-to-end workflow</span>
+    <span class="gd-cta-desc">Walk through the full WB ASPIRE pipeline — from raw CSVs to validated SDMX-ML.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+  <a href="user_guide/01-installation.html" class="gd-cta-card">
+    <span class="gd-cta-icon">📦</span>
+    <span class="gd-cta-title">Installation</span>
+    <span class="gd-cta-desc">Install tidysdmx with pip or Poetry, set up an FMR client, and sanity-check.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+  <a href="recipes/index.html" class="gd-cta-card">
+    <span class="gd-cta-icon">🍳</span>
+    <span class="gd-cta-title">Recipes</span>
+    <span class="gd-cta-desc">Bite-sized snippets for common tasks: fetch a schema, validate, export XML.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+  <a href="reference/index.html" class="gd-cta-card">
+    <span class="gd-cta-icon">⚙️</span>
+    <span class="gd-cta-title">API reference</span>
+    <span class="gd-cta-desc">Every public function, parameter, and return type — auto-generated from docstrings.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+  <a href="user_guide/08-llms-and-agents.html" class="gd-cta-card">
+    <span class="gd-cta-icon">🤖</span>
+    <span class="gd-cta-title">For LLMs &amp; agents</span>
+    <span class="gd-cta-desc">Download <code>llms.txt</code>, <code>llms-full.txt</code>, and the agent skill bundle.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+  <a href="user_guide/04-sdmx-concepts.html" class="gd-cta-card">
+    <span class="gd-cta-icon">📚</span>
+    <span class="gd-cta-title">SDMX concepts</span>
+    <span class="gd-cta-desc">A quick orientation to DSDs, codelists, structure maps, and dataflows.</span>
+    <span class="gd-cta-arrow">→</span>
+  </a>
+</div>
+```
+
+## What does tidysdmx give me on top of pysdmx?
+
+- **Schema inference from tidy data** — `create_schema_from_table()` builds a pysdmx `Schema` (with DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe and validate your raw input without writing a line of XML.
+- **Excel-driven structure maps** — `parse_mapping_template_wb()` + `build_structure_map_from_template_wb()` turn the World Bank mapping workbook format into a fully-formed `StructureMap` with all the `FixedValueMap`, `ComponentMap`, and `RepresentationMap` instances pysdmx expects.
+- **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
+- **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
+- **Upload-ready outputs** — `standardize_output()` and `collect_structure_map_artifacts()` prepare both data and structure artefacts for FMR submission.
+
+## License & credits
+
+tidysdmx was created by the **DECGT team at the World Bank** and is released under the [MIT license](https://github.com/WB-DECIS/tidysdmx/blob/dev/LICENSE).
