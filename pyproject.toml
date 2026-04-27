@@ -1,5 +1,8 @@
-[tool.poetry]
+[project]
 name = "tidysdmx"
+dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python"]
+
+[tool.poetry]
 version = "0.7.5"
 description = "A toolbox to work with SDMX data"
 authors = ["Tony Fujs", "Daniel Gil-Sanchez"]

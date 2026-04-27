@@ -59,14 +59,6 @@ funding:
   homepage: https://www.worldbank.org
 
 # ----------------------------------------------------------------------
-# Custom sections
-# ----------------------------------------------------------------------
-sections:
-  - title: Recipes
-    dir: recipes
-    navbar_after: User Guide
-
-# ----------------------------------------------------------------------
 # Sidebar / discoverability
 # ----------------------------------------------------------------------
 sidebar_filter:
@@ -88,7 +80,6 @@ tags:
 nav_icons:
   navbar:
     User Guide: book-open
-    Recipes: chef-hat
     Reference: code
     Changelog: clock
 
@@ -96,14 +87,12 @@ nav_icons:
 # AI / LLM artefacts
 # ----------------------------------------------------------------------
 # llms.txt and llms-full.txt are generated automatically as part of
-# the build pipeline (step 5). They are emitted at the site root and
-# available for download by package users and AI agents.
+# the build pipeline. They are emitted at the site root and available
+# for download by package users and AI agents.
 #
-# A hand-written SKILL.md file in assets/ provides a high-quality,
-# domain-aware skill for agents (Claude Code, Cursor, Copilot).
-skill:
-  enabled: true
-  file: assets/SKILL.md
+# SKILL.md is auto-discovered by great-docs from the package — no
+# explicit config needed. To override with a hand-written file, set
+# `skill.file:` to its path.
 
 # Generate downloadable .md versions of every page (the
 # "Copy / View as Markdown" feature).
