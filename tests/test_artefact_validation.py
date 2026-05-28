@@ -116,6 +116,21 @@ class TestCommonRules:  # noqa: D101
         issues = validate(_codelist(name="   "))
         assert any(i.rule_id == "M003" for i in issues)
 
+    def test_m003_dict_name_ok(self):
+        """Localized i18n dict names pass M003 without crashing."""
+        issues = validate(_codelist(name={"en": "Frequency"}))
+        assert not any(i.rule_id == "M003" for i in issues)
+
+    def test_m003_empty_dict_name_flagged(self):
+        """An empty dict name triggers M003."""
+        issues = validate(_codelist(name={}))
+        assert any(i.rule_id == "M003" for i in issues)
+
+    def test_m003_dict_with_whitespace_values_flagged(self):
+        """A dict name whose values are all blank triggers M003."""
+        issues = validate(_codelist(name={"en": "   "}))
+        assert any(i.rule_id == "M003" for i in issues)
+
 
 class TestCodelist:  # noqa: D101
     def test_populated_codelist_ok(self):
@@ -250,6 +265,16 @@ class TestDataflow:  # noqa: D101
             structure="DataStructure=AGY:DSD(1.0)",
         )
         assert validate(df) == []
+
+    def test_df001_empty_string_structure_flagged(self):
+        """An empty-string structure triggers DF001."""
+        df = Dataflow(id="DF", agency="AGY", name="n", structure="")
+        assert any(i.rule_id == "DF001" for i in validate(df))
+
+    def test_df001_whitespace_structure_flagged(self):
+        """A whitespace-only structure triggers DF001."""
+        df = Dataflow(id="DF", agency="AGY", name="n", structure="   ")
+        assert any(i.rule_id == "DF001" for i in validate(df))
 
 
 class TestValidate:  # noqa: D101

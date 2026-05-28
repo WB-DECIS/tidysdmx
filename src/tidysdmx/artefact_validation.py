@@ -86,13 +86,23 @@ def _issue(
     )
 
 
+def _is_populated_name(name: Any) -> bool:
+    if name is None:
+        return False
+    if isinstance(name, str):
+        return bool(name.strip())
+    if isinstance(name, dict):
+        return any(isinstance(v, str) and v.strip() for v in name.values())
+    return bool(str(name).strip())
+
+
 def _check_common(a: MaintainableArtefact) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not a.id:
         issues.append(_issue("M001", a, "id must be non-empty.", "id"))
     if not a.version:
         issues.append(_issue("M002", a, "version must be non-empty.", "version"))
-    if a.name is None or not a.name.strip():
+    if not _is_populated_name(a.name):
         issues.append(_issue("M003", a, "name must be a non-empty string.", "name"))
     return issues
 
@@ -201,7 +211,11 @@ def _check_dsd(a: DataStructureDefinition) -> list[ValidationIssue]:
 
 
 def _check_dataflow(a: Dataflow) -> list[ValidationIssue]:
-    if a.structure is None:
+    structure = a.structure
+    is_missing = structure is None or (
+        isinstance(structure, str) and not structure.strip()
+    )
+    if is_missing:
         return [
             _issue(
                 "DF001",
