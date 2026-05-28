@@ -197,6 +197,13 @@ class TestValidateCodelistIds:  # noqa: D101
 
 
 class TestValidateDatasetLocal:  # noqa: D101
+    # Existing tests pass a precomputed ``valid`` dict via fixture. That path
+    # is deprecated (see #218 follow-up) and emits FutureWarning. Suppress it
+    # at the class level so the legacy assertions stay focused on validation
+    # output. Tests that specifically assert the warning override this with
+    # ``pytest.warns``.
+    pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+
     @pytest.fixture()
     def valid_info(self):
         """Fixture providing a mock valid dictionary for validation."""
@@ -403,3 +410,63 @@ class TestValidateDatasetLocal:  # noqa: D101
             sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"],
         )
         assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_legacy_valid_dict_without_sdmx_cols_uses_default(self):
+        """Legacy `valid` dicts missing `sdmx_cols` fall back to STRUCTURE."""
+        legacy_valid = {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {},
+            "dim_comp": ["TIME_PERIOD", "AREA"],
+        }
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "STRUCTURE": ["datastructure"],
+                "STRUCTURE_ID": ["X"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, valid=legacy_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_legacy_valid_dict_with_schema_uses_schema_context(self, sdmx_schema):
+        """Legacy `valid` + schema infers reference columns from schema.context."""
+        legacy_valid = {
+            "valid_comp": ["INDICATOR", "TIME_PERIOD", "SEX", "OBS_VALUE"],
+            "mandatory_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+            "codelist_ids": {},
+            "dim_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+        }
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1"],
+                "TIME_PERIOD": ["2020"],
+                "SEX": ["F"],
+                "OBS_VALUE": [100],
+                "DATAFLOW": ["dataflow"],
+                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, schema=sdmx_schema, valid=legacy_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    @pytest.mark.filterwarnings("default::FutureWarning")
+    def test_passing_valid_emits_deprecation_warning(self, valid_info):
+        """The `valid` argument is deprecated and must emit FutureWarning."""
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "INDICATOR": ["RES_FEMALE_TOT_FTE"],
+                "STRUCTURE": ["X"],
+                "STRUCTURE_ID": ["Y"],
+                "ACTION": ["A"],
+            }
+        )
+        with pytest.warns(FutureWarning, match="`valid` argument"):
+            validate_dataset_local(df, valid=valid_info)

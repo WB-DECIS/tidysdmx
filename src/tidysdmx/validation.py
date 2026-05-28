@@ -1,10 +1,12 @@
 """Validate SDMX datasets against schemas and codelists."""
 
+import warnings
+
 import pandas as pd
 from pysdmx.model.dataflow import Schema
 from typeguard import typechecked
 
-from .utils import extract_validation_info
+from .utils import extract_validation_info, sdmx_reference_cols_for
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
@@ -67,14 +69,18 @@ def validate_dataset_local(
 ) -> pd.DataFrame:
     """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
 
-    Either a schema or a precomputed ``valid`` object must be provided to avoid
-    recomputing validation info for multiple datasets.
+    Pass ``schema`` so validation info (including the expected SDMX reference
+    columns) can be inferred. The ``valid`` parameter is retained as a
+    deprecated shim for callers that previously cached the output of
+    :func:`~tidysdmx.utils.extract_validation_info`.
 
     Args:
         df: The DataFrame to be validated.
         schema: The schema object (optional if ``valid`` is provided).
-        valid: Precomputed validation information returned by
-            :func:`~tidysdmx.utils.extract_validation_info` (optional).
+        valid: **Deprecated.** Precomputed validation information returned by
+            :func:`~tidysdmx.utils.extract_validation_info`. This argument
+            will be removed in a future release; pass ``schema`` directly
+            instead.
         sdmx_cols: SDMX reference columns expected in the dataset. When
             omitted, the columns are inferred from the schema's context
             (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
@@ -87,13 +93,31 @@ def validate_dataset_local(
         A DataFrame containing validation errors. Each row is one error, with
         columns ``Validation`` and ``Error``.
     """
+    if valid is not None:
+        warnings.warn(
+            "The `valid` argument of validate_dataset_local is deprecated "
+            "and will be removed in a future release. Pass `schema` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
     if valid is None:
         if schema is None:
             raise ValueError("Either a schema or precomputed 'valid' must be provided.")
         valid = extract_validation_info(schema)
 
     if sdmx_cols is None:
-        sdmx_cols = list(valid["sdmx_cols"])
+        inferred = valid.get("sdmx_cols")
+        if inferred is not None:
+            sdmx_cols = list(inferred)
+        else:
+            # TODO(deprecated): legacy fallback for `valid` dicts built under
+            # the pre-#218 shape (missing the "sdmx_cols" key). Remove once
+            # the deprecated `valid` parameter itself is dropped.
+            if schema is not None:
+                sdmx_cols = sdmx_reference_cols_for(schema.context)
+            else:
+                sdmx_cols = list(_DEFAULT_SDMX_COLS)
 
     error_records: list[dict[str, str]] = []
 
