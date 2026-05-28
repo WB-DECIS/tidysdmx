@@ -75,8 +75,11 @@ def validate_dataset_local(
         schema: The schema object (optional if ``valid`` is provided).
         valid: Precomputed validation information returned by
             :func:`~tidysdmx.utils.extract_validation_info` (optional).
-        sdmx_cols: SDMX reference columns expected in the dataset. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        sdmx_cols: SDMX reference columns expected in the dataset. When
+            omitted, the columns are inferred from the schema's context
+            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
+            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
+            datastructure schema).
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -84,13 +87,13 @@ def validate_dataset_local(
         A DataFrame containing validation errors. Each row is one error, with
         columns ``Validation`` and ``Error``.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
-
     if valid is None:
         if schema is None:
             raise ValueError("Either a schema or precomputed 'valid' must be provided.")
         valid = extract_validation_info(schema)
+
+    if sdmx_cols is None:
+        sdmx_cols = list(valid["sdmx_cols"])
 
     error_records: list[dict[str, str]] = []
 

@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence, Set
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 import pysdmx as px
@@ -9,6 +10,26 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from pysdmx.model import Schema
 from typeguard import typechecked
+
+
+@typechecked
+def sdmx_reference_cols_for(
+    context: Literal["dataflow", "datastructure", "provisionagreement"],
+) -> list[str]:
+    """Return the SDMX reference columns for a given schema context.
+
+    Args:
+        context: The SDMX schema context.
+
+    Returns:
+        The ``[STRUCTURE-like, STRUCTURE_ID-like, "ACTION"]`` column names
+        that an SDMX-CSV dataset is expected to carry for the given context.
+    """
+    if context == "dataflow":
+        return ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+    if context == "datastructure":
+        return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+    return ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"]
 
 
 @typechecked
@@ -27,6 +48,9 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
             - codelist_ids: Dictionary with coded components as keys and
               list of codelist IDs as values.
             - dim_comp: List of dimension component names.
+            - sdmx_cols: SDMX reference columns expected in the dataset,
+              inferred from the schema's context (e.g. ``DATAFLOW`` /
+              ``DATAFLOW_ID`` / ``ACTION`` for a dataflow-context schema).
     """
     comp = schema.components
     valid_comp = [c.id for c in comp]
@@ -40,6 +64,7 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
         "coded_comp": coded_comp,
         "codelist_ids": get_codelist_ids(comp, coded_comp),
         "dim_comp": dim_comp,
+        "sdmx_cols": sdmx_reference_cols_for(schema.context),
     }
 
 

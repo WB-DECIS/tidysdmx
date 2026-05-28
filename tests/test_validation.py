@@ -208,6 +208,7 @@ class TestValidateDatasetLocal:  # noqa: D101
                 "INDICATOR": ["RES_FEMALE_TOT_FTE", "RES_MALE_TOT_FTE"],
             },
             "dim_comp": ["TIME_PERIOD", "AREA"],
+            "sdmx_cols": ["STRUCTURE", "STRUCTURE_ID", "ACTION"],
         }
 
     def test_valid_dataset_returns_empty_df(self, valid_info):
@@ -360,3 +361,45 @@ class TestValidateDatasetLocal:  # noqa: D101
         df = pd.DataFrame({"TIME_PERIOD": ["2020"]})
         with pytest.raises(ValueError):
             validate_dataset_local(df)
+
+    def test_dataflow_schema_accepts_dataflow_columns(self, sdmx_schema):
+        """Dataflow-context schema infers DATAFLOW/DATAFLOW_ID reference columns.
+
+        Regression test for issue #218: validation must not flag DATAFLOW /
+        DATAFLOW_ID as unexpected or report STRUCTURE / STRUCTURE_ID as
+        missing when the schema's context is ``dataflow``.
+        """
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1", "IND3"],
+                "TIME_PERIOD": ["2020", "2021"],
+                "SEX": ["F", "M"],
+                "OBS_VALUE": [100, 200],
+                "DATAFLOW": ["dataflow", "dataflow"],
+                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
+                "ACTION": ["I", "I"],
+            }
+        )
+        result = validate_dataset_local(df, schema=sdmx_schema)
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_explicit_sdmx_cols_overrides_inference(self, sdmx_schema):
+        """Caller-provided sdmx_cols win over schema-inferred ones."""
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1"],
+                "TIME_PERIOD": ["2020"],
+                "SEX": ["F"],
+                "OBS_VALUE": [100],
+                "STRUCTURE": ["datastructure"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(
+            df,
+            schema=sdmx_schema,
+            sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"],
+        )
+        assert result.empty, f"Expected no errors, got:\n{result}"

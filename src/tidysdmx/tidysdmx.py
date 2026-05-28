@@ -14,7 +14,7 @@ from pysdmx.model import Schema
 from typeguard import typechecked
 
 from .qa_utils import qa_coerce_numeric, qa_remove_duplicates
-from .utils import extract_component_ids
+from .utils import extract_component_ids, sdmx_reference_cols_for
 
 logger = logging.getLogger(__name__)
 
@@ -620,16 +620,7 @@ def standardize_output(
         action=action,
     )
 
-    if artefact_type == "dataflow":
-        cols_to_move = ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
-    elif artefact_type == "datastructure":
-        cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-    else:
-        cols_to_move = [
-            "PROVISIONAGREEMENT",
-            "PROVISION_AGREEMENT_ID",
-            "ACTION",
-        ]
+    cols_to_move = sdmx_reference_cols_for(artefact_type)
     new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
     df = df[new_order]
 
@@ -700,15 +691,7 @@ def _add_sdmx_reference_cols(
     """
     df = df.copy()
 
-    if artefact_type == "dataflow":
-        structure_col = "DATAFLOW"
-        structure_id_col = "DATAFLOW_ID"
-    elif artefact_type == "datastructure":
-        structure_col = "STRUCTURE"
-        structure_id_col = "STRUCTURE_ID"
-    else:
-        structure_col = "PROVISIONAGREEMENT"
-        structure_id_col = "PROVISION_AGREEMENT_ID"
+    structure_col, structure_id_col, _ = sdmx_reference_cols_for(artefact_type)
 
     df.loc[:, structure_col] = artefact_type
     df.loc[:, structure_id_col] = artefact_id
