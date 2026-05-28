@@ -23,6 +23,7 @@ from tidysdmx.utils import (
     extract_validation_info,
     get_codelist_ids,
     parse_mapping_template_wb,
+    sdmx_reference_cols_for,
     write_excel_mapping_template,
 )
 
@@ -152,6 +153,7 @@ class TestExtractValidationInfo:  # noqa: D101
             "coded_comp",
             "codelist_ids",
             "dim_comp",
+            "sdmx_cols",
         }
         assert set(result.keys()) == expected_keys
         assert all(
@@ -172,6 +174,7 @@ class TestExtractValidationInfo:  # noqa: D101
             "coded_comp",
             "codelist_ids",
             "dim_comp",
+            "sdmx_cols",
         }
         assert set(result.keys()) == expected_keys
         assert all(
@@ -180,6 +183,38 @@ class TestExtractValidationInfo:  # noqa: D101
             if key != "codelist_ids"
         )
         assert isinstance(result["codelist_ids"], dict)
+
+    def test_sdmx_cols_inferred_from_dataflow_context(self, sdmx_schema):
+        """Dataflow-context schema yields DATAFLOW reference columns."""
+        result = extract_validation_info(sdmx_schema)
+        assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+
+    def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
+        """Datastructure-context schema yields STRUCTURE reference columns."""
+        result = extract_validation_info(ifpri_asti_schema)
+        assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+
+
+class TestSdmxReferenceColsFor:  # noqa: D101
+    @pytest.mark.parametrize(
+        "context, expected",
+        [
+            ("dataflow", ["DATAFLOW", "DATAFLOW_ID", "ACTION"]),
+            ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
+            (
+                "provisionagreement",
+                ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
+            ),
+        ],
+    )
+    def test_returns_expected_columns(self, context, expected):
+        """Each SDMX context maps to its canonical reference columns."""
+        assert sdmx_reference_cols_for(context) == expected
+
+    def test_raises_on_invalid_context(self):
+        """Unknown contexts raise a TypeCheckError (rejected by typeguard)."""
+        with pytest.raises(TypeCheckError):
+            sdmx_reference_cols_for("not_a_context")
 
 
 class TestGetCodelistIds:  # noqa: D101
