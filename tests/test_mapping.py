@@ -103,8 +103,8 @@ class TestApplyImplicitComponentMaps: #noqa: D101
         ]
         apply_implicit_component_maps(sample_df, maps, verbose=True)
         captured = capsys.readouterr()
-        assert "✅ Added column 'NEW_VALUE'" in captured.out
-        assert "⚠️ Source column 'MISSING' not found" in captured.out
+        assert "[OK] Added column 'NEW_VALUE'" in captured.out
+        assert "[WARN] Source column 'MISSING' not found" in captured.out
 
 
     @pytest.mark.parametrize("invalid_df", [None, "not_a_df", 123])

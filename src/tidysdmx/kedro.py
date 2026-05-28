@@ -1,14 +1,32 @@
-from tidysdmx.tidysdmx import *
+"""Kedro pipeline node wrappers for SDMX standardisation and validation."""
+
+import logging
+
+import pandas as pd
+
+from .tidysdmx import (
+    check_dict_keys,
+    create_keys_dict,
+    modify_dict_keys,
+    read_mapping,
+    standardize_sdmx,
+)
+from .utils import extract_validation_info
+from .validation import validate_dataset_local
+
+logger = logging.getLogger(__name__)
+
 
 def kd_read_mappings(mapping_files: dict) -> dict:
-    """
-    Fetch multiple mappings from different files.
+    """Fetch multiple mappings from different files.
 
     Args:
-        mapping_files (dict): A dictionary where keys are dataset specific keys and values are file paths to the mapping files.
+        mapping_files: A dictionary where keys are dataset-specific keys
+            and values are file paths to the mapping files.
 
     Returns:
-        dict: A dictionary where the highest level keys are the dataset specific keys and values are the mappings.
+        A dictionary where keys are dataset-specific keys and values
+        are the mappings.
     """
     mappings = {}
 
@@ -17,27 +35,31 @@ def kd_read_mappings(mapping_files: dict) -> dict:
 
     return mappings
 
+
 def kd_standardize_sdmx(
-        data: dict, 
-        mappings: dict, 
-        boolean: bool = True
-    ) -> dict:
-    """Standardize into SDMX format a partitioned dataset.
-    
-    Creates a partitioned dataset by applying transform_source_to_target to each input dataframe with its corresponding mapping.
+    data: dict,
+    mappings: dict,
+    boolean: bool = True,
+) -> dict:
+    """Standardize a partitioned dataset into SDMX format.
+
+    Applies transform_source_to_target to each input dataframe with its
+    corresponding mapping.
 
     Args:
-        mappings (dict): A dictionary where keys are dataset specific keys and values are mapping DataFrames.
-        data (dict): A dictionary where keys are dataset specific keys and values are input DataFrames.
-        boolean (bool): A boolean flag to force order execution in Kedro.
+        data: A dictionary where keys are dataset-specific keys and values
+            are input DataFrames.
+        mappings: A dictionary where keys are dataset-specific keys and
+            values are mapping DataFrames.
+        boolean: A flag to force order execution in Kedro.
 
     Returns:
-        dict: A dictionary where keys are dataset specific keys and values are transformed DataFrames.
+        A dictionary where keys are dataset-specific keys and values are
+        transformed DataFrames.
     """
     # CASE 1: Single mapping file
     ## subcase 1.a: single mapping received as a dict of the mappings
     if len(mappings) == 1:
-        # Extract the single element from the dictionaries
         single_mapping = next(iter(mappings.values()))
         data = standardize_sdmx(data, single_mapping)
 
@@ -56,81 +78,87 @@ def kd_standardize_sdmx(
         # Ensure that the keys are the same for data and mappings dict
         check_dict_keys(data, mappings)
 
-        # Initialize dictionary that is used to export the partitioned dataset
         partitioned_dataset = {}
 
-        for key in mappings.keys():
+        for key in mappings:
             if key in data:
                 partition_data = data[key]()
                 partition_mapping = mappings[key]
                 partition_data = standardize_sdmx(partition_data, partition_mapping)
                 partitioned_dataset[bckup_keys[key]] = partition_data
 
-        # Combine all elements of partitioned_dataset into a single dataframe
+        # Combine all elements into a single dataframe
         data = pd.concat(partitioned_dataset.values(), ignore_index=True)
 
-    # FINAL STEP: Return a partitioned dataset where each partition is an indicator code
-    out = partition_formatted_data(data)
+    return data
 
-    return out
 
 def kd_validate_dataset_local(
-        df: pd.DataFrame, 
-        schema=None, 
-        valid=None
-    ):
-    """
-    Production validation function for a DataFrame.
+    df: pd.DataFrame,
+    schema=None,
+    valid=None,
+) -> tuple[bool, dict]:
+    """Validate a single DataFrame for SDMX compliance.
 
-    This wrapper calls the interactive validator (validate_dataset_local) to obtain a DataFrame of errors, then logs messages and returns a tuple containing a boolean and an error dictionary, in the same format as the original function.
+    Wrapper that calls validate_dataset_local to obtain a DataFrame of errors,
+    then logs messages and returns a tuple of (success, errors).
 
     Args:
-        df (pd.DataFrame): The DataFrame to be validated.
-        schema: The schema object containing validation information (optional if 'valid' is provided).
+        df: The DataFrame to be validated.
+        schema: The schema object containing validation information
+            (optional if ``valid`` is provided).
         valid: Precomputed validation information (optional).
 
     Returns:
-        tuple: A tuple with two elements. The first element is a bool that indicates `True` if the dataset was validated successfully (i.e., no errors), and False otherwise. The second element is an empty dictionary if there are no errors, or a dictionary with key "ValidationReport" mapping to the list of error messages.
+        A tuple where the first element is True if the dataset passed
+        validation (no errors) and False otherwise, and the second element
+        is an empty dict on success or a dict with key ``ValidationReport``
+        mapping to the list of error messages.
     """
     errors_df = validate_dataset_local(df, schema=schema, valid=valid)
 
     if not errors_df.empty:
-        print(
-            "Validation finished with Errors! JSON report will be exported to working repository"
+        logger.warning(
+            "Validation finished with errors. "
+            "JSON report will be exported to working directory."
         )
-        error_list = errors_df["Error"].tolist()  # Extract the error messages
+        error_list = errors_df["Error"].tolist()
         return False, {"ValidationReport": error_list}
-    else:
-        print("Complete - no errors")
-        return True, {}
+
+    logger.info("Validation complete — no errors.")
+    return True, {}
 
 
 def kd_validate_datasets_local(
     datasets: dict,
-    schema,  #: px.model.dataflow.Schema,
+    schema,
     boolean: bool,
-):
-    """Function to validate multiple datasets for SDMX compliance.
+) -> tuple[dict, dict]:
+    """Validate multiple datasets for SDMX compliance.
 
-    It ensures that each dataset has `STRUCTURE`, `STRUCTURE_ID`, and `ACTION` columns. See this `page for more details. <https://github.com/sdmx-twg/sdmx-csv/blob/master/data-message/docs/sdmx-csv-field-guide.md>`__
+    Ensures each dataset has ``STRUCTURE``, ``STRUCTURE_ID``, and ``ACTION``
+    columns. See the `SDMX-CSV field guide
+    <https://github.com/sdmx-twg/sdmx-csv/blob/master/data-message/docs/sdmx-csv-field-guide.md>`__
+    for more details.
 
     Args:
-        datasets (dict): Dictionary of datasets to be validated.
-        schema (px.model.dataflow.Schema): Schema object containing validation information.
-    
+        datasets: Dictionary of datasets to be validated.
+        schema: Schema object containing validation information.
+        boolean: A flag to force order execution in Kedro.
+
     Returns:
-        tuple: Two dictionaries. The first dictionary returns True or False for each file, and the second dictionary contains errors for each file.
+        A tuple of two dictionaries. The first maps each key to True/False,
+        and the second maps each key to its error dictionary.
     """
-    # Extract validation info from schema
     valid = extract_validation_info(schema)
 
     if boolean:
-        print("Validating files against DSD...")
+        logger.info("Validating files against DSD...")
 
         validated = {}
         error = {}
-        for key in datasets.keys():
-            print(f"Validating {key}")
+        for key in datasets:
+            logger.info("Validating %s", key)
             temp_df = datasets[key]()
             temp_validated, temp_error = kd_validate_dataset_local(
                 df=temp_df, valid=valid
@@ -139,3 +167,5 @@ def kd_validate_datasets_local(
             error[key] = temp_error
 
         return validated, error
+
+    return {}, {}

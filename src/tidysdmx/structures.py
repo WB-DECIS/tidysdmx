@@ -1,53 +1,96 @@
-from typeguard import typechecked
-from dataclasses import dataclass
-from typing import List, Tuple, Union, Optional, Literal, Sequence, Any, Dict, Iterable
-from itertools import combinations
-from datetime import datetime, timezone
-from pysdmx.model.dataflow import Schema, Components, Component
-from pysdmx.model import Concept, Role, DataType, Codelist, Code
-from openpyxl import Workbook, load_workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-from pathlib import Path
-from pysdmx.model.map import (
-    RepresentationMap, 
-    FixedValueMap, 
-    ImplicitComponentMap, 
-    DatePatternMap, 
-    ValueMap, 
-    MultiValueMap,
-    MultiRepresentationMap,
-    ComponentMap,
-    StructureMap
-    )
-import pandas as pd
+"""Build SDMX structure artefacts (StructureMap, ValueMap, Codelist, etc.)."""
+
 import re
-# Import tidysdmx functions
+from collections import namedtuple
+from collections.abc import Iterable, Sequence
+from datetime import datetime
+from typing import Literal
+
+import pandas as pd
+from pysdmx.model import (
+    Code,
+    Codelist,
+    Component,
+    Components,
+    Concept,
+    ConceptScheme,
+    DataStructureDefinition,
+    DataType,
+    Role,
+)
+from pysdmx.model.__base import ItemReference
+from pysdmx.model.map import (
+    ComponentMap,
+    DatePatternMap,
+    FixedValueMap,
+    ImplicitComponentMap,
+    MultiRepresentationMap,
+    MultiValueMap,
+    RepresentationMap,
+    StructureMap,
+    ValueMap,
+)
+from typeguard import typechecked
+
 from .tidysdmx import parse_artefact_id
 
-# region structure map
+
 @typechecked
-def build_fixed_map(target: str, value: str, located_in: Optional[str] = "target") -> FixedValueMap:
+def _resolve_representation_ref(
+    codelist_urn: str | None = None,
+    default_dtype: str = DataType.STRING,
+) -> str:
+    """Resolve a representation reference to either a codelist URN or DataType string.
+
+    When a RepresentationMap maps between codelists, the source/target should
+    contain the codelist URN. When mapping plain strings (no codelist), the
+    source/target should contain a DataType value (e.g. "String").
+
+    Args:
+        codelist_urn: A codelist URN string, or None if no codelist applies.
+        default_dtype: The DataType value to use when no codelist is provided.
+            Defaults to DataType.STRING ("String").
+
+    Returns:
+        The codelist URN if provided, otherwise the default_dtype string value.
+
+    Note:
+        The pysdmx XML writer currently always outputs ``<str:SourceCodelist>``
+        / ``<str:TargetCodelist>`` tags, even when the value is a DataType
+        string. DataType-based RepresentationMaps will not produce fully valid
+        SDMX-ML until pysdmx adds ``<str:SourceDataType>`` /
+        ``<str:TargetDataType>`` support. The JSON writer handles both cases
+        correctly.
+    """
+    if codelist_urn is not None and str(codelist_urn).strip():
+        return str(codelist_urn).strip()
+    return str(default_dtype)
+
+
+# --- Structure map builders ---
+@typechecked
+def build_fixed_map(
+    target: str, value: str, located_in: str | None = "target"
+) -> FixedValueMap:
     """Build a pysdmx FixedValueMap for setting a component to a fixed value.
 
     Args:
-    target (str): The ID of the target component in the structure map.
-    value (str): The fixed value to assign to the target component.
-    located_in (Optional[str]): Indicates whether the mapping is located in 'source' or 'target'.
-        Defaults to 'target'.
+        target: The ID of the target component in the structure map.
+        value: The fixed value to assign to the target component.
+        located_in: Indicates whether the mapping is located in 'source'
+            or 'target'. Defaults to 'target'.
 
     Returns:
-    FixedValueMap: A pysdmx FixedValueMap object representing the fixed mapping.
+        A pysdmx FixedValueMap object representing the fixed mapping.
 
     Raises:
-    ValueError: If `target` or `value` is empty.
-    ValueError: If `located_in` is not 'source' or 'target'.
+        ValueError: If ``target`` or ``value`` is empty.
+        ValueError: If ``located_in`` is not 'source' or 'target'.
 
     Examples:
-    >>> mapping = build_fixed_map("CONF_STATUS", "F")
-    >>> isinstance(mapping, FixedValueMap)
-    True
-    >>> str(mapping)
-    'target: CONF_STATUS, value: F, located_in: target'
+        >>> mapping = build_fixed_map("CONF_STATUS", "F")
+        >>> isinstance(mapping, FixedValueMap)
+        True
     """
     if not target or not value:
         raise ValueError("Both 'target' and 'value' must be non-empty strings.")
@@ -56,28 +99,25 @@ def build_fixed_map(target: str, value: str, located_in: Optional[str] = "target
 
     return FixedValueMap(target=target, value=value, located_in=located_in)
 
+
 @typechecked
 def build_implicit_component_map(source: str, target: str) -> ImplicitComponentMap:
-    """Build a pysdmx ImplicitComponentMap for mapping a source component to a target component using implicit mapping rules (e.g., same representation or concept).
+    """Build a pysdmx ImplicitComponentMap for implicit mapping rules.
 
     Args:
-    source (str): The ID of the source component in the structure map.
-    target (str): The ID of the target component in the structure map.
+        source: The ID of the source component in the structure map.
+        target: The ID of the target component in the structure map.
 
     Returns:
-    ImplicitComponentMap: A pysdmx ImplicitComponentMap object representing the implicit mapping.
+        A pysdmx ImplicitComponentMap object.
 
     Raises:
-    ValueError: If `source` or `target` is empty.
+        ValueError: If ``source`` or ``target`` is empty.
 
     Examples:
-    >>> mapping = build_implicit_component_map("FREQ", "FREQUENCY")
-    >>> isinstance(mapping, ImplicitComponentMap)
-    True
-    >>> mapping.source
-    'FREQ'
-    >>> mapping.target
-    'FREQUENCY'
+        >>> mapping = build_implicit_component_map("FREQ", "FREQUENCY")
+        >>> isinstance(mapping, ImplicitComponentMap)
+        True
     """
     if not source or not target:
         raise ValueError("Both 'source' and 'target' must be non-empty strings.")
@@ -91,27 +131,28 @@ def build_date_pattern_map(
     target: str,
     pattern: str,
     frequency: str,
-    id: Optional[str] = None,
+    id: str | None = None,
     locale: str = "en",
     pattern_type: Literal["fixed", "variable"] = "fixed",
-    resolve_period: Optional[Literal["startOfPeriod", "endOfPeriod", "midPeriod"]] = None
+    resolve_period: Literal["startOfPeriod", "endOfPeriod", "midPeriod"] | None = None,
 ) -> DatePatternMap:
     """Build a DatePatternMap object for mapping date patterns between SDMX components.
 
     Args:
-        source (str): The ID of the source component.
-        target (str): The ID of the target component.
-        pattern (str): The SDMX date pattern describing the source date (e.g., "MMM yy").
-        frequency (str): The frequency code or reference (e.g., "M" for monthly).
-        id (Optional[str]): Optional map ID as defined in the registry.
-        locale (str): Locale for parsing the input date pattern. Defaults to "en".
-        pattern_type (Literal["fixed", "variable"]): Type of date pattern. Defaults to "fixed".
+        source: The ID of the source component.
+        target: The ID of the target component.
+        pattern: The SDMX date pattern describing the source date (e.g., "MMM yy").
+        frequency: The frequency code or reference (e.g., "M" for monthly).
+        id: Optional map ID as defined in the registry.
+        locale: Locale for parsing the input date pattern. Defaults to "en".
+        pattern_type: Type of date pattern. Defaults to "fixed".
             - "fixed": frequency is a fixed value (e.g., "A" for annual).
             - "variable": frequency references a dimension or attribute (e.g., "FREQ").
-        resolve_period (Optional[Literal["startOfPeriod", "endOfPeriod", "midPeriod"]]): Point in time to resolve when mapping from low to high frequency periods.
+        resolve_period: Point in time to resolve when mapping from low to
+            high frequency periods.
 
     Returns:
-        DatePatternMap: A fully constructed DatePatternMap instance.
+        A fully constructed DatePatternMap instance.
 
     Raises:
         ValueError: If any required argument is empty or invalid.
@@ -144,27 +185,27 @@ def build_date_pattern_map(
         id=id,
         locale=locale,
         pattern_type=pattern_type,
-        resolve_period=resolve_period
+        resolve_period=resolve_period,
     )
 
 
-typechecked
+@typechecked
 def build_value_map(
     source: str,
     target: str,
-    valid_from: Optional[datetime] = None,
-    valid_to: Optional[datetime] = None
+    valid_from: datetime | None = None,
+    valid_to: datetime | None = None,
 ) -> ValueMap:
     """Create a pysdmx ValueMap object mapping a source value to a target value.
 
     Args:
-        source (str): The source value to map.
-        target (str): The target value to map to.
-        valid_from (Optional[datetime]): Start of business validity for the mapping.
-        valid_to (Optional[datetime]): End of business validity for the mapping.
+        source: The source value to map.
+        target: The target value to map to.
+        valid_from: Start of business validity for the mapping.
+        valid_to: End of business validity for the mapping.
 
     Returns:
-        ValueMap: A pysdmx ValueMap object representing the mapping.
+        A pysdmx ValueMap object representing the mapping.
 
     Raises:
         ValueError: If source or target is empty.
@@ -184,35 +225,36 @@ def build_value_map(
         >>> vm2.valid_from.year
         2020
     """
-    if not isinstance(source, str) or not isinstance(target, str):
-        raise TypeError("Source and target must be strings.")
     if not source.strip() or not target.strip():
         raise ValueError("Source and target cannot be empty.")
 
-    return ValueMap(source=source, target=target, valid_from=valid_from, valid_to=valid_to)
+    return ValueMap(
+        source=source, target=target, valid_from=valid_from, valid_to=valid_to
+    )
 
-# endregion
 
-# region representation maps
+# --- Representation maps ---
 @typechecked
 def build_value_map_list(
     df: pd.DataFrame,
     source_col: str = "source",
     target_col: str = "target",
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
 ) -> list[ValueMap]:
     """Build a list of ValueMap objects from a pandas DataFrame, optionally including validity periods.
 
     Args:
-        df (pd.DataFrame): DataFrame where each row represents a mapping.
-        source_col (str): Column name for source values.
-        target_col (str): Column name for target values.
-        valid_from_col (str): Optional column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Optional column name for validity end date. Defaults to "valid_to".
+        df: DataFrame where each row represents a mapping.
+        source_col: Column name for source values.
+        target_col: Column name for target values.
+        valid_from_col: Optional column name for validity start date.
+            Defaults to "valid_from".
+        valid_to_col: Optional column name for validity end date.
+            Defaults to "valid_to".
 
     Returns:
-        list[ValueMap]: List of ValueMap objects created from the DataFrame.
+        List of ValueMap objects created from the DataFrame.
 
     Raises:
         ValueError: If DataFrame is empty or required columns are missing.
@@ -238,9 +280,13 @@ def build_value_map_list(
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
     if source_col not in df.columns or target_col not in df.columns:
-        raise ValueError(f"Columns '{source_col}' and '{target_col}' must exist in DataFrame.")
-    if not df[source_col].map(lambda x: isinstance(x, str)).all() or \
-       not df[target_col].map(lambda x: isinstance(x, str)).all():
+        raise ValueError(
+            f"Columns '{source_col}' and '{target_col}' must exist in DataFrame."
+        )
+    if (
+        not df[source_col].map(lambda x: isinstance(x, str)).all()
+        or not df[target_col].map(lambda x: isinstance(x, str)).all()
+    ):
         raise TypeError("Source and target columns must contain only string values.")
 
     has_valid_from = valid_from_col in df.columns
@@ -248,10 +294,7 @@ def build_value_map_list(
 
     value_maps: list[ValueMap] = []
     for _, row in df.iterrows():
-        kwargs = {
-            "source": row[source_col],
-            "target": row[target_col]
-        }
+        kwargs = {"source": row[source_col], "target": row[target_col]}
         if has_valid_from and pd.notna(row.get(valid_from_col)):
             kwargs["valid_from"] = str(row[valid_from_col])
         if has_valid_to and pd.notna(row.get(valid_to_col)):
@@ -275,16 +318,16 @@ def build_multi_value_map_list(
     values from multiple source columns to multiple target columns.
 
     Args:
-        df (pd.DataFrame): DataFrame where each row represents a mapping.
-        source_cols (Sequence[str]): Column names for source values.
-        target_cols (Sequence[str]): Column names for target values.
-        valid_from_col (str): Optional column name for validity start date.
+        df: DataFrame where each row represents a mapping.
+        source_cols: Column names for source values.
+        target_cols: Column names for target values.
+        valid_from_col: Optional column name for validity start date.
             Defaults to "valid_from".
-        valid_to_col (str): Optional column name for validity end date.
+        valid_to_col: Optional column name for validity end date.
             Defaults to "valid_to".
 
     Returns:
-        list[MultiValueMap]: List of MultiValueMap objects created from the DataFrame.
+        List of MultiValueMap objects created from the DataFrame.
 
     Raises:
         ValueError: If DataFrame is empty or required columns are missing.
@@ -381,35 +424,39 @@ def build_multi_value_map_list(
 def build_representation_map(
     df: pd.DataFrame,
     agency: str = "FAKE_AGENCY",
-    id: Optional[str] = None,
-    name: Optional[str] = None,
-    source_cl: Optional[str] = None,
-    target_cl: Optional[str] = None,
+    id: str | None = None,
+    name: str | None = None,
+    source_cl: str | None = None,
+    target_cl: str | None = None,
     version: str = "1.0",
-    description: Optional[str] = None,
+    description: str | None = None,
     source_col: str = "source",
     target_col: str = "target",
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
 ) -> RepresentationMap:
     """Build a RepresentationMap object from a pandas DataFrame using build_value_map_list.
 
     Args:
-        df (pd.DataFrame): DataFrame where each row represents a mapping.
-        agency (str): Agency maintaining the representation map.
-        id (str): Identifier for the representation map.
-        name (str): Name of the representation map.
-        source_cl (str): URN or identifier for the source codelist or data type.
-        target_cl (str): URN or identifier for the target codelist or data type.
-        version (str): Version of the representation map. Defaults to "1.0".
-        description (Optional[str]): Optional description of the representation map.
-        source_col (str): Column name for source values. Defaults to "source".
-        target_col (str): Column name for target values. Defaults to "target".
-        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+        df: DataFrame where each row represents a mapping.
+        agency: Agency maintaining the representation map.
+        id: Identifier for the representation map.
+        name: Name of the representation map.
+        source_cl: URN or identifier for the source codelist or data type.
+        target_cl: URN or identifier for the target codelist or data type.
+        version: Version of the representation map. Defaults to "1.0".
+        description: Optional description of the representation map.
+        source_col: Column name for source values. Defaults to "source".
+        target_col: Column name for target values. Defaults to "target".
+        valid_from_col: Column name for validity start date.
+            Defaults to "valid_from".
+        valid_to_col: Column name for validity end date.
+            Defaults to "valid_to".
+        generate_urn: If True, automatically generate URN. Defaults to True.
 
     Returns:
-        RepresentationMap: A RepresentationMap object containing the mappings.
+        A RepresentationMap object containing the mappings.
 
     Raises:
         ValueError: If DataFrame is empty or required columns are missing.
@@ -434,18 +481,24 @@ def build_representation_map(
         source_col=source_col,
         target_col=target_col,
         valid_from_col=valid_from_col,
-        valid_to_col=valid_to_col
+        valid_to_col=valid_to_col,
     )
+
+    # Generate URN if requested and id is provided
+    urn = None
+    if generate_urn and id:
+        urn = gen_urn("RepresentationMap", agency, id, version)
 
     return RepresentationMap(
         id=id,
         name=name,
         agency=agency,
-        source=source_cl,
-        target=target_cl,
+        source=_resolve_representation_ref(source_cl),
+        target=_resolve_representation_ref(target_cl),
         maps=value_maps,
         description=description,
-        version=version
+        version=version,
+        urn=urn,
     )
 
 
@@ -453,16 +506,16 @@ def build_representation_map(
 def build_multi_representation_map(
     df: pd.DataFrame,
     agency: str = "FAKE_AGENCY",
-    id: Optional[str] = None,
-    name: Optional[str] = None,
-    source_cls: Optional[list[str]] = None,
-    target_cls: Optional[list[str]] = None,
+    id: str | None = None,
+    name: str | None = None,
+    source_cls: list[str] | None = None,
+    target_cls: list[str] | None = None,
     version: str = "1.0",
-    description: Optional[str] = None,
-    source_cols: Optional[list[str]] = None,  # Changed to Optional
-    target_cols: Optional[list[str]] = None,  # Changed to Optional
+    description: str | None = None,
+    source_cols: list[str] | None = None,  # Changed to Optional
+    target_cols: list[str] | None = None,  # Changed to Optional
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
 ) -> MultiRepresentationMap:
     """Build a MultiRepresentationMap object from a pandas DataFrame.
 
@@ -470,21 +523,21 @@ def build_multi_representation_map(
     into a MultiRepresentationMap container.
 
     Args:
-        df (pd.DataFrame): DataFrame where each row represents a multi-mapping.
-        agency (str): Agency maintaining the map. Defaults to "FAKE_AGENCY".
-        id (Optional[str]): Identifier for the map.
-        name (Optional[str]): Name of the map.
-        source_cls (Optional[list[str]]): URNs/IDs for source codelists/types.
-        target_cls (Optional[list[str]]): URNs/IDs for target codelists/types.
-        version (str): Version of the map. Defaults to "1.0".
-        description (Optional[str]): Description of the map.
-        source_cols (Optional[list[str]]): Source columns. Defaults to ["source"].
-        target_cols (Optional[list[str]]): Target columns. Defaults to ["target"].
-        valid_from_col (str): Validity start column. Defaults to "valid_from".
-        valid_to_col (str): Validity end column. Defaults to "valid_to".
+        df: DataFrame where each row represents a multi-mapping.
+        agency: Agency maintaining the map. Defaults to "FAKE_AGENCY".
+        id: Identifier for the map.
+        name: Name of the map.
+        source_cls: URNs/IDs for source codelists/types.
+        target_cls: URNs/IDs for target codelists/types.
+        version: Version of the map. Defaults to "1.0".
+        description: Description of the map.
+        source_cols: Source columns. Defaults to ["source"].
+        target_cols: Target columns. Defaults to ["target"].
+        valid_from_col: Validity start column. Defaults to "valid_from".
+        valid_to_col: Validity end column. Defaults to "valid_to".
 
     Returns:
-        MultiRepresentationMap: The constructed mapping object.
+        The constructed MultiRepresentationMap object.
 
     Raises:
         ValueError: If DataFrame is empty or columns are missing.
@@ -514,7 +567,7 @@ def build_multi_representation_map(
         source_cols=_source_cols,
         target_cols=_target_cols,  # Correct: passes list[str]
         valid_from_col=valid_from_col,
-        valid_to_col=valid_to_col
+        valid_to_col=valid_to_col,
     )
 
     # Instantiate MultiRepresentationMap with CORRECT arguments
@@ -522,11 +575,15 @@ def build_multi_representation_map(
         id=id,
         name=name,
         agency=agency,
-        source=source_cls if source_cls else [], # Fix 1: 'source' not 'sources' + None handling
-        target=target_cls if target_cls else [], # Fix 2: 'target' not 'targets' + None handling
+        source=[_resolve_representation_ref(s) for s in source_cls]
+        if source_cls
+        else [str(DataType.STRING)],
+        target=[_resolve_representation_ref(t) for t in target_cls]
+        if target_cls
+        else [str(DataType.STRING)],
         maps=multi_value_maps,
         description=description,
-        version=version
+        version=version,
     )
 
 
@@ -536,37 +593,43 @@ def build_single_component_map(
     source_component: str,
     target_component: str,
     agency: str = "FAKE_AGENCY",
-    id: Optional[str] = None,
-    name: Optional[str] = None,
-    source_cl: Optional[str] = None,
-    target_cl: Optional[str] = None,
+    id: str | None = None,
+    name: str | None = None,
+    source_cl: str | None = None,
+    target_cl: str | None = None,
     version: str = "1.0",
-    description: Optional[str] = None,
+    description: str | None = None,
     source_col: str = "source",
     target_col: str = "target",
     valid_from_col: str = "valid_from",
-    valid_to_col: str = "valid_to"
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
 ) -> ComponentMap:
     """Build a ComponentMap mapping one source component to one target component using a RepresentationMap built from a pandas DataFrame.
 
     Args:
-        df (pd.DataFrame): DataFrame where each row represents a mapping.
-        source_component (str): ID of the source component.
-        target_component (str): ID of the target component.
-        agency (str): Agency maintaining the representation map. Defaults to "FAKE_AGENCY".
-        id (Optional[str]): Identifier for the representation map.
-        name (Optional[str]): Name of the representation map.
-        source_cl (Optional[str]): URN or identifier for the source codelist or data type.
-        target_cl (Optional[str]): URN or identifier for the target codelist or data type.
-        version (str): Version of the representation map. Defaults to "1.0".
-        description (Optional[str]): Optional description of the representation map.
-        source_col (str): Column name for source values. Defaults to "source".
-        target_col (str): Column name for target values. Defaults to "target".
-        valid_from_col (str): Column name for validity start date. Defaults to "valid_from".
-        valid_to_col (str): Column name for validity end date. Defaults to "valid_to".
+        df: DataFrame where each row represents a mapping.
+        source_component: ID of the source component.
+        target_component: ID of the target component.
+        agency: Agency maintaining the representation map.
+            Defaults to "FAKE_AGENCY".
+        id: Identifier for the representation map.
+        name: Name of the representation map.
+        source_cl: URN or identifier for the source codelist or data type.
+        target_cl: URN or identifier for the target codelist or data type.
+        version: Version of the representation map. Defaults to "1.0".
+        description: Optional description of the representation map.
+        source_col: Column name for source values. Defaults to "source".
+        target_col: Column name for target values. Defaults to "target".
+        valid_from_col: Column name for validity start date.
+            Defaults to "valid_from".
+        valid_to_col: Column name for validity end date.
+            Defaults to "valid_to".
+        generate_urn: If True, generate URN for the RepresentationMap.
+            Defaults to True.
 
     Returns:
-        ComponentMap: A ComponentMap object mapping the source component to the target component.
+        A ComponentMap object mapping the source to the target component.
 
     Raises:
         ValueError: If DataFrame is empty or required columns are missing.
@@ -616,252 +679,26 @@ def build_single_component_map(
         source_col=source_col,
         target_col=target_col,
         valid_from_col=valid_from_col,
-        valid_to_col=valid_to_col
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
     )
 
     # Return ComponentMap
-    return ComponentMap(source=source_component, target=target_component, values=representation_map)
-
-
-# endregion
-
-# region TESTING
-def _sheet_to_df(wb: Workbook, sheet_name: str) -> pd.DataFrame:
-    """Reads an openpyxl sheet into a pandas DataFrame."""
-    if sheet_name not in wb.sheetnames:
-        # Return empty DF with expected columns if sheet is missing to allow graceful failure handling
-        return pd.DataFrame(columns=["source", "target", "valid_from", "valid_to"])
-    
-    ws = wb[sheet_name]
-    data = list(ws.values)
-    
-    if not data:
-        return pd.DataFrame(columns=["source", "target", "valid_from", "valid_to"])
-        
-    cols = data[0]
-    rows = data[1:]
-    
-    return pd.DataFrame(rows, columns=cols)
-
-@dataclass
-class MappingDefinition:
-    """Intermediate representation of a mapping rule parsed from the Excel file.
-
-    It decouples the Excel parsing logic from the SDMX object construction.
-    """
-    target: str
-    map_type: Literal["fixed", "implicit", "representation"]
-    source: Optional[str] = None
-    fixed_value: Optional[str] = None
-    representation_df: Optional[pd.DataFrame] = None
-
-# @typechecked
-# def _read_comp_mapping_sheet(workbook: Workbook) -> pd.DataFrame:
-#     """Loads and validates the structure of the mandatory 'comp_mapping' sheet.
-
-#     Args:
-#         workbook (Workbook): The openpyxl Workbook object.
-
-#     Returns:
-#         pd.DataFrame: The validated DataFrame with normalized headers.
-
-#     Raises:
-#         KeyError: If 'comp_mapping' sheet is missing.
-#         ValueError: If the sheet is empty or headers are incorrect.
-#     """
-#     try:
-#         ws_comp = workbook["comp_mapping"]
-#     except KeyError:
-#         raise KeyError("Mandatory sheet 'COMP_MAPPING' not found in workbook.")
-
-#     data = list(ws_comp.values)
-#     if not data or len(data) < 2:
-#         raise ValueError("The 'COMP_MAPPING' sheet is empty or missing headers.")
-
-#     df_comp = pd.DataFrame(data[1:], columns=data[0])
-    
-#     # Normalize headers
-#     df_comp.columns = [str(c).lower() for c in df_comp.columns]
-#     required_cols = {"source", "target", "mapping_rules"}
-#     if not required_cols.issubset(set(df_comp.columns)):
-#         raise ValueError(f"The 'comp_mapping' sheet must have columns: {required_cols}")
-    
-    
-#     # Remove rows where all values are NaN
-#     df_comp = df_comp.dropna(how='all')
-
-#     return df_comp.fillna("")
-
-
-@typechecked
-def _create_fixed_definition(row: pd.Series, target: str, mapping_rules: str) -> MappingDefinition:
-    """Creates a MappingDefinition for a FixedValueMap."""
-    fixed_val = mapping_rules[len("fixed:"):].strip()
-    if not fixed_val:
-        raise ValueError(f"Fixed value for target '{target}' cannot be empty.")
-    
-    return MappingDefinition(
-        target=target,
-        map_type="fixed",
-        fixed_value=fixed_val
+    return ComponentMap(
+        source=source_component, target=target_component, values=representation_map
     )
 
 
-@typechecked
-def _create_implicit_definition(row: pd.Series, target: str, source: str) -> MappingDefinition:
-    """Creates a MappingDefinition for an ImplicitComponentMap."""
-    if not source:
-        raise ValueError(f"Implicit map rule requires a 'source' for target '{target}'.")
-    
-    return MappingDefinition(
-        target=target,
-        map_type="implicit",
-        source=source
-    )
-
-
-@typechecked
-def _create_representation_definition(
-    workbook: Workbook, target: str, source: str
-) -> MappingDefinition:
-    """Creates a MappingDefinition for a RepresentationMap by loading the dependent sheet."""
-    # Load the referenced sheet immediately
-    df_rep = _sheet_to_df(workbook, target)
-    
-    # Infer source if missing (Identity Map assumption: Source=Target)
-    final_source = source if source else target
-    
-    return MappingDefinition(
-        target=target,
-        map_type="representation",
-        source=final_source,
-        representation_df=df_rep
-    )
-
-# @typechecked
-# def _extract_mapping_definitions(workbook: Workbook) -> list[MappingDefinition]:
-#     """Parses the workbook to extract a list of mapping definitions, delegating parsing logic to focused helper functions.
-
-#     Args:
-#         workbook (Workbook): The openpyxl Workbook object.
-
-#     Returns:
-#         list[MappingDefinition]: A list of intermediate objects describing the maps.
-
-#     Raises:
-#         KeyError: If 'comp_mapping' sheet is missing (from helper).
-#         ValueError: If sheet structure or rules are malformed (from helpers).
-#     """
-#     # 1. Load and Validate Main Mapping Sheet Structure
-#     df_comp = _read_comp_mapping_sheet(workbook)
-    
-#     definitions: list[MappingDefinition] = []
-    
-#     # 2. Iterate and Dispatch Parsing
-#     for _, row in df_comp.iterrows():
-#         source: str = str(row["source"]).strip()
-#         target: str = str(row["target"]).strip()
-#         mapping_rules: str = str(row["mapping_rules"]).strip()
-        
-#         if not target:
-#             continue
-#         if not mapping_rules and not source:
-#             continue
-
-#         if mapping_rules.startswith("fixed:"):
-#             definitions.append(_create_fixed_definition(row, target, mapping_rules))
-            
-#         elif mapping_rules == "implicit":
-#             definitions.append(_create_implicit_definition(row, target, source))
-            
-#         elif mapping_rules == target and mapping_rules:
-#             definitions.append(_create_representation_definition(workbook, target, source))
-            
-#         elif mapping_rules and not mapping_rules.startswith("=HYPERLINK"):
-#              raise ValueError(
-#                 f"Unknown mapping rule for target '{target}': '{mapping_rules}'"
-#             )
-
-#     return definitions
-
-@typechecked
-def build_structure_map(
-    workbook: Workbook, 
-    agency: str = "DEFAULT_AGENCY"
-) -> StructureMap:
-    """Converts a populated Excel Workbook into a pysdmx StructureMap object.
-    
-    This function leverages `_extract_mapping_definitions` to parse the Excel file
-    into intermediate definitions, and then converts those definitions into
-    pysdmx objects.
-    """
-    # 1. Parse Excel to Intermediate Definitions
-    definitions = _extract_mapping_definitions(workbook)
-    
-    maps_list = []
-    
-    # 2. Convert Definitions to pysdmx Objects
-    for definition in definitions:
-        if definition.map_type == "fixed":
-            if not definition.target or not definition.target.strip():
-                raise ValueError(f"Fixed value missing for {definition.target}")
-            if not definition.fixed_value or not definition.fixed_value.strip():
-                raise ValueError(f"Fixed value missing for {definition.target}")
-            maps_list.append(
-                build_fixed_map(target=definition.target, value=definition.fixed_value)
-            )
-            
-        elif definition.map_type == "implicit":
-            if not definition.source or not definition.source.strip():
-                raise ValueError(f"Source missing for implicit map {definition.target}")
-            maps_list.append(
-                build_implicit_component_map(source=definition.source, target=definition.target)
-            )
-            
-        elif definition.map_type == "representation":
-            if definition.representation_df is None:
-                raise ValueError(f"DataFrame missing for representation map {definition.target}")
-            
-            # Safe unwrapping of optional source (logic in extractor ensures it's set, but typing needs check)
-            src = definition.source if definition.source else definition.target
-            
-            try:
-                comp_map = build_single_component_map(
-                    df=definition.representation_df,
-                    source_component=src,
-                    target_component=definition.target,
-                    agency=agency,
-                    id=f"REPMAP_{definition.target}",
-                    name=f"Mapping for {definition.target}",
-                    version="1.0"
-                )
-                maps_list.append(comp_map)
-            except ValueError as e:
-                # Log or handle empty DF errors if necessary
-                if "empty" in str(e):
-                    continue
-                raise e
-
-    # 3. Return Final Artifact
-    return StructureMap(
-        id="GENERATED_STRUCTURE_MAP",
-        agency=agency, 
-        version="1.0",
-        name="Auto-generated Structure Map",
-        maps=maps_list
-    )
-# endregion
-
-# region create_schema_from_table()
+# --- Schema generation from DataFrame ---
 @typechecked
 def _infer_sdmx_type(dtype: object) -> DataType:
     """Infer the SDMX DataType from a pandas/numpy dtype.
 
     Args:
-        dtype (object): The pandas/numpy data type.
+        dtype: The pandas/numpy data type.
 
     Returns:
-        DataType: The corresponding SDMX DataType.
+        The corresponding SDMX DataType.
     """
     dtype_str = str(dtype)
 
@@ -878,158 +715,224 @@ def _infer_sdmx_type(dtype: object) -> DataType:
 
 
 @typechecked
-def _sanitize_sdmx_id(value: Any) -> str:
-    """Sanitize a string to create a valid SDMX Identifier.
-
-    Allowed characters: A-Z, a-z, 0-9, _, -, $, @.
-    This function converts to uppercase and replaces invalid characters with underscores.
-
-    Args:
-        value (Any): The input value to sanitize.
-
-    Returns:
-        str: A valid SDMX ID string.
-    """
-    if value is None:
-        return "UNKNOWN"
-    
-    # Convert to string, strip whitespace, and uppercase
-    s = str(value).strip().upper()
-    
-    # Replace invalid characters with underscore
-    # SDMX Common ID pattern: [A-Za-z0-9_@$-]+
-    s = re.sub(r"[^A-Z0-9_@$-]", "_", s)
-    
-    # Ensure it doesn't start with a number or invalid char if that's a strict requirement,
-    # though strictly the NCName pattern allows some flexibility. 
-    # For robustness, if empty or starts with non-alpha, prefix.
-    if not s or not s[0].isalpha():
-        s = "ID_" + s
-        
-    return s
-
-
-@typechecked
-def _create_concept(concept_id: str, dtype: DataType) -> Concept:
-    """Create a simple SDMX Concept with a specific ID and data type.
-
-    Args:
-        concept_id (str): The unique identifier for the concept.
-        dtype (DataType): The data type of the concept.
-
-    Returns:
-        Concept: An immutable Concept object.
-    """
-    return Concept(
-        id=concept_id,
-        name=concept_id,
-        dtype=dtype,
-        description=f"Concept inferred from column {concept_id}",
+def _concept_ref(
+    agency_id: str, scheme_id: str, version: str, concept_id: str
+) -> tuple[Concept, ItemReference]:
+    """Create a Concept and its ItemReference for use in a ConceptScheme."""
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
+        f"{agency_id}:{scheme_id}({version}).{concept_id}"
     )
+    concept = Concept(id=concept_id, urn=urn)
+    ref = ItemReference(
+        sdmx_type="Concept",
+        agency=agency_id,
+        id=scheme_id,
+        version=version,
+        item_id=concept_id,
+    )
+    return concept, ref
+
+
+_ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
 
 
 @typechecked
-def _create_codelist_from_series(
-    series: pd.Series, 
-    col_name: str, 
-    agency_id: str, 
-    version: str
-) -> Codelist:
-    """Create an SDMX Codelist from the unique values in a pandas Series.
+def _to_identifier(raw: str) -> str:
+    """Convert a raw string to a valid SDMX identifier."""
+    cleaned = _ID_PATTERN.sub("_", raw).strip("_")
+    if not cleaned:
+        raise ValueError(
+            f"Column name {raw!r} cannot be converted to a valid SDMX identifier."
+        )
+    if cleaned[0].isdigit():
+        cleaned = f"_{cleaned}"
+    return cleaned.upper()
+
+
+@typechecked
+def _code_id(raw: str, uppercase: bool = True) -> str:
+    """Sanitize a raw string into an SDMX code ID."""
+    candidate = _to_identifier(str(raw))
+    return (candidate if uppercase else candidate.lower()) or "UNSPECIFIED"
+
+
+@typechecked
+def sanitize_variable(value: str, uppercase: bool = True) -> str:
+    """Sanitize a raw string value into a valid SDMX code ID.
+
+    Applies the same sanitization used internally by ``create_schema_from_table``
+    when building codelist code IDs from DataFrame column values. Use this
+    function during your data cleaning phase to ensure that the values in your
+    DataFrame will match the code IDs generated in the schema.
+
+    The sanitization rules are:
+    - Non-alphanumeric/underscore characters (including dots) are replaced with ``_``.
+    - Leading/trailing underscores are stripped.
+    - IDs starting with a digit are prefixed with ``_``.
+    - Result is uppercased by default (controlled by ``uppercase``).
 
     Args:
-        series (pd.Series): The data column.
-        col_name (str): The name of the column (used for Codelist ID).
-        agency_id (str): The maintenance agency ID.
-        version (str): The version of the codelist.
+        value: The raw string value to sanitize (e.g. ``"per_allsp.adq_ep_preT_tot"``).
+        uppercase: If True (default), the result is uppercased, matching the default
+            behaviour of ``create_schema_from_table``. Set to False if you called
+            ``create_schema_from_table`` with ``uppercase_code_ids=False``.
 
     Returns:
-        Codelist: A Codelist object populated with Codes.
-    """
-    unique_values = series.dropna().unique()
-    codes: list[Code] = []
-    
-    for val in sorted(unique_values, key=lambda x: str(x)):
-        # Generate a safe ID for the code
-        code_id = _sanitize_sdmx_id(val)
-        # Use the original value as the name
-        code_name = str(val)
-        codes.append(Code(id=code_id, name=code_name))
+        A sanitized SDMX-safe identifier string.
 
-    # Generate a Codelist ID, typically prefixed with CL_
-    codelist_id = f"CL_{_sanitize_sdmx_id(col_name)}"
+    Examples:
+        >>> sanitize_variable("per_allsp.adq_ep_preT_tot")
+        'PER_ALLSP_ADQ_EP_PRET_TOT'
+        >>> sanitize_variable("per_allsp.adq_ep_preT_tot", uppercase=False)
+        'per_allsp_adq_ep_pret_tot'
+    """
+    return _code_id(value, uppercase=uppercase)
+
+
+# Create the namedtuple type
+SchemaComponents = namedtuple(
+    "SchemaComponents", ["dsd", "concept_scheme", "codelists"]
+)
+
+
+@typechecked
+def _create_codelist_for_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    comp_id: str,
+    agency_id: str,
+    version: str,
+    uppercase_code_ids: bool = True,
+) -> Codelist:
+    """Create a codelist from unique values in a DataFrame column."""
+    values = dataframe[column].dropna().astype(str).unique()
+    codes = [
+        Code(id=_code_id(value, uppercase=uppercase_code_ids), name=value)
+        for value in values
+    ]
+    cl_id = f"CL_{comp_id}"
+    cl_urn = (
+        f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
+    )
 
     return Codelist(
-        id=codelist_id,
+        id=cl_id,
+        name=f"{column} codelist",
         agency=agency_id,
         version=version,
-        name=f"Codelist for {col_name}",
-        items=codes
+        urn=cl_urn,
+        items=codes,
     )
 
 
 @typechecked
-def _create_component(
-    component_id: str,
-    role: Role,
-    concept: Concept,
-    required: bool = True,
-    attachment_level: Optional[str] = None,
-    codelist: Optional[Codelist] = None,
+def _create_dimension_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept],
+    codelists: list[Codelist],
+    uppercase_code_ids: bool = True,
 ) -> Component:
-    """Create an SDMX Component (Dimension, Measure, or Attribute).
+    """Create a dimension component with its concept and codelist."""
+    comp_id = _to_identifier(column)
+    dtype = _infer_sdmx_type(dataframe[column].dtype)
 
-    Args:
-        component_id (str): The unique identifier for the component.
-        role (Role): The role the component plays.
-        concept (Concept): The Concept defining the component's semantics.
-        required (bool): Whether the component value is mandatory.
-        attachment_level (Optional[str]): Mandatory for Attributes.
-        codelist (Optional[Codelist]): The Codelist restricting the component's values.
-
-    Returns:
-        Component: The constructed Component object.
-    """
-    # Determine the local data type
-    # If a codelist is present, the type is typically STRING (codes are strings)
-    local_dtype = DataType.STRING if codelist else concept.dtype
-
-    return Component(
-        id=component_id,
-        required=required,
-        role=role,
-        concept=concept,
-        attachment_level=attachment_level,
-        local_codes=codelist,
-        local_dtype=local_dtype,
-        name=concept.name,
-        description=concept.description
+    # Create concept reference
+    ref = _mk_concept_helper(
+        column, comp_id, dtype, agency_id, scheme_id, version, concept_items
     )
 
-
-@typechecked
-def _create_time_period_component() -> Component:
-    """Create the standard SDMX Cross Domain Time Period component.
-
-    Returns:
-        Component: The strictly defined TIME_PERIOD component.
-    """
-    time_concept = Concept(
-        id="TIME_PERIOD",
-        urn="urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept=SDMX:CROSS_DOMAIN_CONCEPTS(2.0).TIME_PERIOD",
-        name="Time period",
-        description="Timespan or point in time to which the observation actually refers.",
-        dtype=DataType.STRING,
+    # Create codelist
+    codelist = _create_codelist_for_component(
+        dataframe,
+        column,
+        comp_id,
+        agency_id,
+        version,
+        uppercase_code_ids=uppercase_code_ids,
     )
-    
+    codelists.append(codelist)
+
     return Component(
-        id="TIME_PERIOD",
+        id=comp_id,
+        name=column,
         required=True,
         role=Role.DIMENSION,
-        concept=time_concept,
-        local_dtype=DataType.PERIOD,
-        name="Time period",
-        description="Timespan or point in time to which the observation actually refers.",
+        concept=ref,
+        local_codes=codelist,
+    )
+
+
+@typechecked
+def _create_attribute_component(
+    dataframe: pd.DataFrame,
+    column: str,
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept],
+    codelists: list[Codelist],
+    uppercase_code_ids: bool = True,
+) -> Component:
+    """Create an attribute component with optional codelist."""
+    comp_id = _to_identifier(column)
+    dtype = _infer_sdmx_type(dataframe[column].dtype)
+
+    # Create concept reference
+    ref = _mk_concept_helper(
+        column, comp_id, dtype, agency_id, scheme_id, version, concept_items
+    )
+
+    # Create codelist only for string types
+    local_codes = None
+    if dtype == DataType.STRING:
+        local_codes = _create_codelist_for_component(
+            dataframe,
+            column,
+            comp_id,
+            agency_id,
+            version,
+            uppercase_code_ids=uppercase_code_ids,
+        )
+        codelists.append(local_codes)
+
+    return Component(
+        id=comp_id,
+        name=column,
+        required=False,
+        role=Role.ATTRIBUTE,
+        concept=ref,
+        local_codes=local_codes,
+        attachment_level="O",
+    )
+
+
+@typechecked
+def _mk_concept_helper(
+    column: str,
+    concept_id: str,
+    dtype: DataType | None,
+    agency_id: str,
+    scheme_id: str,
+    version: str,
+    concept_items: list[Concept],
+) -> ItemReference:
+    """Helper to create concept and return reference (extracted from nested function)."""
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
+        f"{agency_id}:{scheme_id}({version}).{concept_id}"
+    )
+    concept_items.append(Concept(id=concept_id, name=column, dtype=dtype, urn=urn))
+    return ItemReference(
+        sdmx_type="Concept",
+        agency=agency_id,
+        id=scheme_id,
+        version=version,
+        item_id=concept_id,
     )
 
 
@@ -1039,161 +942,151 @@ def create_schema_from_table(
     dimensions: list[str],
     measure: str,
     time_dimension: str,
-    attributes: Optional[list[str]] = None,
-    agency_id: str = "SDMX",
-    schema_id: str = "GENERATED_SCHEMA",
+    attributes: list[str] | None = None,
+    agency_id: str = "WB.DP",
+    schema_id: str = "DP_SCHEMA",
     version: str = "1.0",
-) -> Schema:
-    """Create a pysdmx Schema object from a pandas DataFrame, including inferred Codelists.
-
-    This function automatically maps the provided `time_dimension` column to the 
-    standard SDMX `TIME_PERIOD` concept. For other dimensions, it infers a Codelist
-    from the unique values present in the column.
+    uppercase_code_ids: bool = True,
+) -> SchemaComponents:
+    """Create a DSD, ConceptScheme, and Codelists from a DataFrame.
 
     Args:
-        dataframe (pd.DataFrame): The source data.
-        dimensions (list[str]): List of column names to serve as Dimensions.
-        measure (str): The column name to serve as the Measure.
-        time_dimension (str): The column name to serve as the Time Dimension.
-            The resulting component will always be ID='TIME_PERIOD'.
-        attributes (Optional[list[str]]): List of column names to serve as Attributes.
-            Defaults to None.
-        agency_id (str): The Agency ID to assign to the Schema. Defaults to "SDMX".
-        schema_id (str): The ID to assign to the Schema. Defaults to "GENERATED_SCHEMA".
-        version (str): The version string. Defaults to "1.0".
+        dataframe: The source DataFrame.
+        dimensions: Column names to use as SDMX dimensions.
+        measure: Column name to use as the SDMX measure.
+        time_dimension: Column name to use as the SDMX time dimension.
+        attributes: Optional column names to use as SDMX attributes.
+        agency_id: Agency identifier for the generated artefacts.
+        schema_id: Base identifier for the generated DSD and concept scheme.
+        version: Version string for the generated artefacts.
+        uppercase_code_ids: If True (default), codelist code IDs are uppercased.
+            Set to False to preserve the original casing of code values.
 
     Returns:
-        Schema: A pysdmx Schema object containing the generated Components and Codelists.
+        SchemaComponents: A named tuple with ``dsd``, ``concept_scheme``,
+            and ``codelists`` fields.
 
     Raises:
-        ValueError: If specified columns are missing from the dataframe.
-
-    Examples:
-        >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     "FREQ": ["A", "A", "M"],
-        ...     "Year": ["2020", "2021", "2021-01"],
-        ...     "OBS_VALUE": [10.5, 20.0, 15.0],
-        ...     "OBS_STATUS": ["A", "A", "E"]
-        ... })
-        >>> schema = create_schema_from_table(
-        ...     df,
-        ...     dimensions=["FREQ"],
-        ...     time_dimension="Year",
-        ...     measure="OBS_VALUE",
-        ...     attributes=["OBS_STATUS"]
-        ... )
-        >>> # Verify Codelist creation for FREQ
-        >>> freq_comp = schema.components["FREQ"]
-        >>> len(freq_comp.local_codes.items)
-        2
-        >>> freq_comp.local_codes.items[0].id
-        'A'
+        ValueError: If any of the specified column names are missing from
+            the DataFrame.
     """
-    if attributes is None:
-        attributes = []
+    attributes = attributes or []
+    required = dimensions + [measure, time_dimension] + attributes
+    missing = [col for col in required if col not in dataframe.columns]
+    if missing:
+        raise ValueError(f"Columns not found in dataframe: {missing}")
 
-    # Validate that all columns exist in the dataframe
-    all_required_cols = dimensions + [measure] + [time_dimension] + attributes
-    missing_cols = [col for col in all_required_cols if col not in dataframe.columns]
-    
-    if missing_cols:
-        #logger.error("Missing columns in dataframe: %s", missing_cols)
-        raise ValueError(f"Columns not found in dataframe: {missing_cols}")
+    scheme_id = f"{_to_identifier(schema_id)}_CS"
+    concept_items: list[Concept] = []
+    codelists: list[Codelist] = []
+    components: list[Component] = []
 
-    component_list: list[Component] = []
+    # Process dimensions
+    for column in dimensions:
+        component = _create_dimension_component(
+            dataframe,
+            column,
+            agency_id,
+            scheme_id,
+            version,
+            concept_items,
+            codelists,
+            uppercase_code_ids=uppercase_code_ids,
+        )
+        components.append(component)
 
-    # 1. Process Dimensions (with Codelist inference)
-    for col in dimensions:
-        # Determine strict type
-        dtype = _infer_sdmx_type(dataframe[col].dtype)
-        
-        # Create Concept
-        concept = _create_concept(col, dtype)
-        
-        # Generate Codelist for Dimensions (Standard practice is that dimensions are coded)
-        # Note: We use the unique values to build the Codelist
-        codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
-        
-        # Create Component attaching the Codelist
-        comp = _create_component(
-            col, 
-            Role.DIMENSION, 
-            concept, 
+    # Process time dimension
+    time_ref = _mk_concept_helper(
+        time_dimension,
+        "TIME_PERIOD",
+        DataType.PERIOD,
+        agency_id,
+        scheme_id,
+        version,
+        concept_items,
+    )
+    components.append(
+        Component(
+            id="TIME_PERIOD",
+            name=time_dimension,
             required=True,
-            codelist=codelist
+            role=Role.DIMENSION,
+            concept=time_ref,
+            local_dtype=DataType.PERIOD,
         )
-        component_list.append(comp)
+    )
 
-    # 2. Process Time Dimension (Standardized)
-    # Time dimension usually does NOT have a simple enumerated codelist (it uses Period format)
-    time_comp = _create_time_period_component()
-    component_list.append(time_comp)
-
-    # 3. Process Measure (Single, Uncoded)
+    # Process measure
+    meas_id = _to_identifier(measure)
     meas_dtype = _infer_sdmx_type(dataframe[measure].dtype)
-    meas_concept = _create_concept(measure, meas_dtype)
-    meas_comp = _create_component(
-        measure, 
-        Role.MEASURE, 
-        meas_concept, 
-        required=True
+    meas_ref = _mk_concept_helper(
+        measure, meas_id, meas_dtype, agency_id, scheme_id, version, concept_items
     )
-    component_list.append(meas_comp)
-
-    # 4. Process Attributes (Optional Codelist)
-    # For this implementation, we will infer Codelists for attributes if they appear to be categorical (string)
-    # However, to be safe and robust, we often allow attributes to be coded if they are strings.
-    for col in attributes:
-        dtype = _infer_sdmx_type(dataframe[col].dtype)
-        concept = _create_concept(col, dtype)
-        
-        # Heuristic: If string type, create a Codelist. 
-        # If numeric, leave as uncoded value (or user would need to specify).
-        # We will assume string attributes are coded for consistency with Dimensions in this context.
-        attr_codelist = None
-        if dtype == DataType.STRING:
-            attr_codelist = _create_codelist_from_series(dataframe[col], col, agency_id, version)
-
-        comp = _create_component(
-            col, 
-            Role.ATTRIBUTE, 
-            concept, 
-            required=False, 
-            attachment_level="O", # Default to Observation level
-            codelist=attr_codelist
+    components.append(
+        Component(
+            id=meas_id,
+            name=measure,
+            required=True,
+            role=Role.MEASURE,
+            concept=meas_ref,
+            local_dtype=meas_dtype,
         )
-        component_list.append(comp)
-
-    # Construct the Components container
-    components_obj = Components(component_list)
-
-    return Schema(
-        context="dataflow",
-        agency=agency_id,
-        id=schema_id,
-        version=version,
-        components=components_obj,
-        generated=datetime.now(timezone.utc),
-        name=f"Auto-generated schema for {schema_id}",
     )
-# endregion
 
-# region build_schema_from_wb_template
+    # Process attributes
+    for column in attributes:
+        component = _create_attribute_component(
+            dataframe,
+            column,
+            agency_id,
+            scheme_id,
+            version,
+            concept_items,
+            codelists,
+            uppercase_code_ids=uppercase_code_ids,
+        )
+        components.append(component)
+
+    # Create concept scheme and DSD (unchanged)
+    concept_scheme = ConceptScheme(
+        id=scheme_id,
+        name=f"{schema_id} generated concept scheme",
+        agency=agency_id,
+        version=version,
+        urn=f"urn:sdmx:org.sdmx.infomodel.conceptscheme.ConceptScheme={agency_id}:{scheme_id}({version})",
+        items=concept_items,
+    )
+
+    dsd = DataStructureDefinition(
+        id=_to_identifier(schema_id),
+        name=f"{schema_id} generated DSD",
+        agency=agency_id,
+        version=version,
+        urn=f"urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure={agency_id}:{_to_identifier(schema_id)}({version})",
+        components=Components(components),
+    )
+
+    return SchemaComponents(dsd=dsd, concept_scheme=concept_scheme, codelists=codelists)
+
+
+# --- Excel template parsing ---
 @typechecked
-def _parse_info_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO") -> pd.DataFrame:
-    """Parses the INFO sheet from a dictionary of DataFrames, extracting key-value metadata.
+def _parse_info_sheet(
+    sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO"
+) -> pd.DataFrame:
+    """Parse the INFO sheet from a dictionary of DataFrames, extracting key-value metadata.
 
-    This function extracts a specific DataFrame from the provided dictionary. It handles arbitrary
-    layouts by treating headers as potential data, unless the headers appear to be auto-generated
-    (RangeIndex). It filters for rows containing exactly two non-empty values.
+    Extracts a specific DataFrame from the provided dictionary. Handles arbitrary
+    layouts by treating headers as potential data, unless the headers appear to be
+    auto-generated (RangeIndex). Filters for rows containing exactly two non-empty
+    values.
 
     Args:
-        sheets (dict[str, pd.DataFrame]): Dictionary containing DataFrames, typically from pd.read_excel.
-        sheet_name (str): Name of the sheet to parse. Defaults to "INFO".
+        sheets: Dictionary containing DataFrames, typically from pd.read_excel.
+        sheet_name: Name of the sheet to parse. Defaults to "INFO".
 
     Returns:
-        pd.DataFrame: A DataFrame with columns ['Key', 'Value'] containing the extracted metadata.
+        A DataFrame with columns ['Key', 'Value'] containing the extracted metadata.
 
     Raises:
         ValueError: If the specified sheet_name is not found in the dictionary.
@@ -1212,7 +1105,7 @@ def _parse_info_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO")
         all_rows = df.values.tolist()
     else:
         all_rows = [df.columns.tolist()] + df.values.tolist()
-    
+
     cleaned_rows: list[list[str]] = []
 
     for row in all_rows:
@@ -1221,15 +1114,13 @@ def _parse_info_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO")
             # Basic validation: check for NaN/None
             if pd.isna(cell):
                 continue
-            
+
             s_cell = str(cell).strip()
-            
+
             # Check for empty strings, 'nan' string literals, and pandas 'Unnamed' artifacts
-            if (s_cell == "" or 
-                s_cell.lower() == "nan" or 
-                s_cell.startswith("Unnamed:")):
+            if s_cell == "" or s_cell.lower() == "nan" or s_cell.startswith("Unnamed:"):
                 continue
-                
+
             valid_cells.append(s_cell)
 
         if not valid_cells:
@@ -1248,21 +1139,24 @@ def _parse_info_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO")
 
     return pd.DataFrame(cleaned_rows, columns=["Key", "Value"])
 
-@typechecked
-def _parse_comp_mapping_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str = "COMP_MAPPING") -> pd.DataFrame:
-    """Parses the COMP_MAPPING sheet, validating strict structure conformance.
 
-    This function expects the sheet to contain specific headers: 'SOURCE', 'TARGET', 
-    and 'MAPPING_RULES'. It extracts these columns, removes completely empty rows, 
-    and returns the resulting DataFrame. Rows with partial data (e.g., missing 'SOURCE') 
-    are preserved as they are valid mapping rules.
+@typechecked
+def _parse_comp_mapping_sheet(
+    sheets: dict[str, pd.DataFrame], sheet_name: str = "COMP_MAPPING"
+) -> pd.DataFrame:
+    """Parse the COMP_MAPPING sheet, validating strict structure conformance.
+
+    Expects the sheet to contain specific headers: 'SOURCE', 'TARGET',
+    and 'MAPPING_RULES'. Extracts these columns, removes completely empty rows,
+    and returns the resulting DataFrame. Rows with partial data (e.g., missing
+    'SOURCE') are preserved as they are valid mapping rules.
 
     Args:
-        sheets (dict[str, pd.DataFrame]): Dictionary containing DataFrames, typically from pd.read_excel.
-        sheet_name (str): Name of the sheet to parse. Defaults to "COMP_MAPPING".
+        sheets: Dictionary containing DataFrames, typically from pd.read_excel.
+        sheet_name: Name of the sheet to parse. Defaults to "COMP_MAPPING".
 
     Returns:
-        pd.DataFrame: A DataFrame containing 'SOURCE', 'TARGET', and 'MAPPING_RULES' columns.
+        A DataFrame containing 'SOURCE', 'TARGET', and 'MAPPING_RULES' columns.
 
     Raises:
         ValueError: If the sheet is missing or does not contain the required columns.
@@ -1272,18 +1166,27 @@ def _parse_comp_mapping_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str =
 
     df = sheets[sheet_name]
 
-    expected_columns = ["SOURCE", "TARGET", "MAPPING_RULES"]
-    
+    required_columns = ["SOURCE", "TARGET", "MAPPING_RULES"]
+    optional_columns = ["SOURCE_CL", "TARGET_CL"]
+
     # Validate that required columns exist
-    missing_columns = [col for col in expected_columns if col not in df.columns]
+    missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(
             f"Sheet '{sheet_name}' is missing required columns: {missing_columns}. "
             f"Found: {df.columns.tolist()}"
         )
 
-    # Extract only the relevant columns to ignore potential artifacts (e.g., 'Unnamed: X')
-    result_df = df[expected_columns]
+    # Extract required columns + any optional columns that exist
+    cols_to_extract = required_columns + [
+        c for c in optional_columns if c in df.columns
+    ]
+    result_df = df[cols_to_extract].copy()
+
+    # Ensure optional columns exist in output (fill with None if absent from sheet)
+    for col in optional_columns:
+        if col not in result_df.columns:
+            result_df[col] = None
 
     # Remove rows where ALL columns are NaN/None (empty rows)
     # We do not use how='any' because some mapping rules might have an empty SOURCE
@@ -1291,15 +1194,15 @@ def _parse_comp_mapping_sheet(sheets: dict[str, pd.DataFrame], sheet_name: str =
 
     return result_df
 
+
 @typechecked
 def _parse_rep_mapping_sheet(
-    sheets: dict[str, pd.DataFrame], 
-    sheet_name: str = "REP_MAPPING"
+    sheets: dict[str, pd.DataFrame], sheet_name: str = "REP_MAPPING"
 ) -> dict[str, pd.DataFrame]:
     """Parses the REP_MAPPING sheet to split columns into Source and Target DataFrames.
 
-    The function expects column headers to be prefixed with "S:" for source columns and 
-    "T:" for target columns. Columns without these prefixes are ignored. The prefixes 
+    The function expects column headers to be prefixed with "S:" for source columns and
+    "T:" for target columns. Columns without these prefixes are ignored. The prefixes
     are removed in the output DataFrames.
 
     Args:
@@ -1307,7 +1210,8 @@ def _parse_rep_mapping_sheet(
         sheet_name (str): Name of the sheet to parse. Defaults to "REP_MAPPING".
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: A tuple containing (source_df, target_df).
+        dict[str, pd.DataFrame]: A dict with keys ``"source"`` and ``"target"``,
+            each containing a DataFrame with the prefix stripped from column names.
 
     Raises:
         ValueError: If the sheet is missing, or if no Source/Target columns are found.
@@ -1322,10 +1226,14 @@ def _parse_rep_mapping_sheet(
     target_cols = [col for col in df.columns if str(col).startswith("T:")]
 
     if not source_cols:
-        raise ValueError(f"No source columns (prefixed with 'S:') found in '{sheet_name}'.")
-    
+        raise ValueError(
+            f"No source columns (prefixed with 'S:') found in '{sheet_name}'."
+        )
+
     if not target_cols:
-        raise ValueError(f"No target columns (prefixed with 'T:') found in '{sheet_name}'.")
+        raise ValueError(
+            f"No target columns (prefixed with 'T:') found in '{sheet_name}'."
+        )
 
     # Create distinct DataFrames
     source_df = df[source_cols]
@@ -1337,52 +1245,57 @@ def _parse_rep_mapping_sheet(
 
     return {"source": source_df, "target": target_df}
 
+
 @typechecked
 def _extract_artefact_id(
-    info_df: pd.DataFrame, 
-    structure_type: Literal["dataflow", "dsd", "provision-agreement"]
+    info_df: pd.DataFrame,
+    structure_type: Literal["dataflow", "dsd", "provision-agreement"],
 ) -> str:
-    """Extracts the SDMX ID for a specific structure type from the parsed INFO DataFrame.
+    """Extract the SDMX ID for a specific structure type from the parsed INFO DataFrame.
 
-    This function searches the provided DataFrame (output of `_parse_info_sheet`) for specific
-    keys corresponding to the requested structure type. It handles standard SDMX reference 
-    formats like 'Agency:ID(Version)' by parsing out just the 'ID' component.
+    Searches the provided DataFrame (output of ``_parse_info_sheet``) for specific
+    keys corresponding to the requested structure type. Handles standard SDMX
+    reference formats like 'Agency:ID(Version)' by parsing out just the 'ID'.
 
     Args:
-        info_df (pd.DataFrame): DataFrame containing metadata with 'Key' and 'Value' columns.
-        structure_type (str): The type of artefact to extract. Must be one of:
-                              'dataflow', 'dsd', 'provision-agreement'.
+        info_df: DataFrame containing metadata with 'Key' and 'Value' columns.
+        structure_type: The type of artefact to extract. Must be one of:
+            'dataflow', 'dsd', 'provision-agreement'.
 
     Returns:
-        str: The extracted SDMX ID.
+        The extracted SDMX ID.
 
     Raises:
-        ValueError: If the `structure_type` is invalid, the key is not found, 
+        ValueError: If the `structure_type` is invalid, the key is not found,
                     or the value is empty/null.
     """
     # Map friendly structure types to the actual keys found in the Excel/CSV
     # We use a case-insensitive match strategy in logic, but these are the expected targets.
-    # Based on the file snippets: 
+    # Based on the file snippets:
     # 'dsd' -> 'datastructure'
     # 'dataflow' -> 'dataflow'
     # 'provision-agreement' -> 'provisionagreement'
     type_map = {
         "dataflow": "dataflow",
         "dsd": "datastructure",
-        "provision-agreement": "provisionagreement"
+        "provision-agreement": "provisionagreement",
     }
 
     if structure_type not in type_map:
-        raise ValueError(f"Invalid structure_type '{structure_type}'. Must be one of {list(type_map.keys())}.")
+        raise ValueError(
+            f"Invalid structure_type '{structure_type}'. Must be one of {list(type_map.keys())}."
+        )
 
     target_key = type_map[structure_type]
-    
+
     # Perform case-insensitive search for the key
     # Create a mask for matching keys
     mask = info_df["Key"].astype(str).str.strip().str.lower() == target_key.lower()
-    
+
     if not mask.any():
-        raise ValueError(f"Could not find metadata key '{target_key}' for structure type '{structure_type}'.")
+        raise ValueError(
+            f"Could not find metadata key '{target_key}' for structure type '{structure_type}'."
+        )
 
     # Get the value associated with the key
     raw_value = info_df.loc[mask, "Value"].iloc[0]
@@ -1395,18 +1308,20 @@ def _extract_artefact_id(
 
     return artefact_id
 
-@typechecked
-def _match_column_name(target_name: str, available_columns: List[str]) -> str:
-    """Matches a business name from COMP_MAPPING to the cleaned column names in REP_MAPPING.
 
-    This handles discrepancies like 'Series code' (business name) vs 'Series' (Excel header).
+@typechecked
+def _match_column_name(target_name: str, available_columns: list[str]) -> str:
+    """Match a business name from COMP_MAPPING to cleaned column names in REP_MAPPING.
+
+    Handles discrepancies like 'Series code' (business name) vs 'Series'
+    (Excel header).
 
     Args:
-        target_name (str): The name to look for (e.g., 'Series code').
-        available_columns (List[str]): The list of available column headers.
+        target_name: The name to look for (e.g., 'Series code').
+        available_columns: The list of available column headers.
 
     Returns:
-        str: The matching column name.
+        The matching column name.
 
     Raises:
         ValueError: If no suitable match is found.
@@ -1417,45 +1332,30 @@ def _match_column_name(target_name: str, available_columns: List[str]) -> str:
 
     # 2. Normalized match (ignore case, spaces, underscores)
     norm_target = target_name.replace(" ", "").replace("_", "").lower()
-    
+
     for col in available_columns:
         norm_col = col.replace(" ", "").replace("_", "").lower()
         # Check for containment (e.g., 'Series' in 'SeriesCode')
-        if norm_col == norm_target or norm_col in norm_target or norm_target in norm_col:
+        if (
+            norm_col == norm_target
+            or norm_col in norm_target
+            or norm_target in norm_col
+        ):
             return col
 
-    raise ValueError(f"Could not find a column in REP_MAPPING matching '{target_name}'. Available: {available_columns}")
+    raise ValueError(
+        f"Could not find a column in REP_MAPPING matching '{target_name}'. Available: {available_columns}"
+    )
 
-
-@typechecked
-def _validate_mappings(mappings: Dict[str, pd.DataFrame]) -> None:
-    """Validate that mappings contain required sheets and each is a DataFrame.
-
-    Args:
-        mappings (Dict[str, pd.DataFrame]): Dictionary of sheet names to DataFrames.
-
-    Raises:
-        ValueError: If required keys are missing or values are not DataFrames.
-
-    Examples:
-        >>> _validate_mappings({"INFO": pd.DataFrame(), "COMP_MAPPING": pd.DataFrame(), "REP_MAPPING": pd.DataFrame()})
-        # No exception raised
-    """
-    required_keys = ["INFO", "COMP_MAPPING", "REP_MAPPING"]
-    for key in required_keys:
-        if key not in mappings:
-            raise ValueError(f"Missing required sheet '{key}'.")
-        if not isinstance(mappings[key], pd.DataFrame):
-            raise ValueError(f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}.")
 
 @typechecked
 def _collect_required_sheet_errors(
     mappings: dict[str, pd.DataFrame],
     required_keys: Iterable[str],
-) -> List[str]:
+) -> list[str]:
     """Collect validation errors related to missing required sheets."""
-    errors: List[str] = []
-    
+    errors: list[str] = []
+
     # Check that mandatory sheets are present
     for sheet_name in required_keys:
         if sheet_name not in mappings:
@@ -1468,10 +1368,10 @@ def _collect_required_sheet_errors(
 @typechecked
 def _collect_mapping_rules_errors(
     comp_mapping: pd.DataFrame,
-    *, # Ensures following args are keyword-only
+    *,  # Ensures following args are keyword-only
     valid_rules: Iterable[str],
     valid_prefixes: Iterable[str],
-) -> List[str]:
+) -> list[str]:
     """Collect validation errors for the MAPPING_RULES column in COMP_MAPPING.
 
     Rules:
@@ -1480,11 +1380,11 @@ def _collect_mapping_rules_errors(
             - one of valid_rules
             - or start with one of valid_prefixes followed by a non-empty value.
     """
-    errors: List[str] = []
+    errors: list[str] = []
 
     if "MAPPING_RULES" not in comp_mapping.columns:
         msg = "COMP_MAPPING sheet is missing required 'MAPPING_RULES' column."
-        # logger.debug("Validation error: %s", msg)
+
         errors.append(msg)
         return errors
 
@@ -1517,7 +1417,7 @@ def _collect_mapping_rules_errors(
                     f"Rule '{matched_prefix}' must be followed by a non-empty value, "
                     f"e.g. '{matched_prefix}A'."
                 )
-                # logger.debug("Validation error: %s", msg)
+
                 errors.append(msg)
             # either way, we handled a recognized prefix (valid or invalid)
             continue
@@ -1529,10 +1429,11 @@ def _collect_mapping_rules_errors(
             f"{sorted(valid_set)!r} "
             f"or a string starting with one of {list(prefixes)!r}."
         )
-        # logger.debug("Validation error: %s", msg)
+
         errors.append(msg)
 
     return errors
+
 
 @typechecked
 def _validate_mapping_template_wb(
@@ -1547,15 +1448,19 @@ def _validate_mapping_template_wb(
     If any validation fails, raises ValueError listing all issues.
     """
     # Ensure functions arguments are of the expected type
-    for key in mappings.keys():
+    for key in mappings:
         # All keys should be strings
         if not isinstance(key, str):
-            raise ValueError(f"All keys must be strings. Key: '{key}' is of type {type(key).__name__}.")
+            raise ValueError(
+                f"All keys must be strings. Key: '{key}' is of type {type(key).__name__}."
+            )
         # Values should be dataframes
         if not isinstance(mappings[key], pd.DataFrame):
-            raise ValueError(f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}.")
+            raise ValueError(
+                f"Sheet '{key}' must be a pandas DataFrame, got {type(mappings[key]).__name__}."
+            )
 
-    errors: List[str] = []
+    errors: list[str] = []
 
     # 1) Check required sheet presence and type validity
     errors.extend(_collect_required_sheet_errors(mappings, required_keys))
@@ -1579,32 +1484,95 @@ def _validate_mapping_template_wb(
         raise ValueError(full_message)
 
 
-# Region: Main Function
+# --- Main template builder ---
+
+STRUCTURE_TYPE_TO_ARTEFACT: dict[str, str] = {
+    "datastructure": "DataStructure",
+    "dataflow": "Dataflow",
+    "provisionagreement": "ProvisionAgreement",
+}
+
+SDMX_PACKAGE_MAP: dict[str, str] = {
+    "StructureMap": "structuremapping",
+    "RepresentationMap": "structuremapping",
+    "MultiRepresentationMap": "structuremapping",
+    "Codelist": "codelist",
+    "ConceptScheme": "conceptscheme",
+    "DataStructure": "datastructure",
+    "DataStructureDefinition": "datastructure",
+    "Dataflow": "datastructure",
+    "AgencyScheme": "base",
+    "ProvisionAgreement": "registry",
+}
+
+
+@typechecked
+def gen_urn(
+    artefact_type: str, agency: str, artefact_id: str, version: str = "1.0"
+) -> str:
+    """Generate a full SDMX URN for any maintainable artefact.
+
+    Args:
+        artefact_type: The type of artefact (e.g., "StructureMap", "RepresentationMap")
+        agency: The agency ID
+        artefact_id: The artefact ID
+        version: The version (default "1.0")
+
+    Returns:
+        Full URN string
+
+    Example:
+        >>> gen_urn("StructureMap", "BIS", "SM_TEST", "1.0")
+        'urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=BIS:SM_TEST(1.0)'
+    """
+    package = SDMX_PACKAGE_MAP.get(artefact_type, "base")
+    urn = (
+        f"urn:sdmx:org.sdmx.infomodel.{package}.{artefact_type}"
+        f"={agency}:{artefact_id}({version})"
+    )
+    return urn
 
 
 @typechecked
 def build_structure_map_from_template_wb(
-    mappings: Dict[str, pd.DataFrame],
+    mappings: dict[str, pd.DataFrame],
     agency: str = "SDMX",
     structure_map_id: str = "WB_STRUCTURE_MAP",
-    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
+    structure_type: Literal[
+        "datastructure", "dataflow", "provisionagreement"
+    ] = "datastructure",
     version: str = "1.0",
     required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
     valid_rules: Iterable[str] = ("representation", "implicit"),
-    valid_prefixes: Iterable[str] = ("fixed:",)
+    valid_prefixes: Iterable[str] = ("fixed:",),
+    generate_urns: bool = True,
+    source_structure_id: str | None = None,
+    target_structure_id: str | None = None,
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
     Args:
-        mappings (Dict[str, pd.DataFrame]): Dictionary of DataFrames containing all sheets.
-        agency (str): Fallback agency ID if not found in INFO.
-        structure_map_id (str): ID for the resulting StructureMap.
-        structure_type (Literal["datastructure", "dataflow", "provisionagreement"]):
-            The type of artefact to extract from INFO.
-        version (str): Fallback version if not found in INFO.
+        mappings: Dictionary of DataFrames containing all sheets.
+        agency: Fallback agency ID if not found in INFO.
+        structure_map_id: ID for the resulting StructureMap.
+        structure_type: The type of artefact to extract from INFO.
+        version: Fallback version if not found in INFO.
+        required_keys: Required sheet names to validate.
+        valid_rules: Valid literal mapping rules.
+        valid_prefixes: Valid prefixes for parameterized mapping rules.
+        generate_urns: If True, automatically generate URNs for StructureMap
+            and nested RepresentationMaps. Defaults to True.
+        source_structure_id: Optional source structure reference in
+            ``"AGENCY:ID(VERSION)"`` format (e.g. ``"WB:DSD_ASPIRE(1.0)"``).
+            When provided and ``generate_urns`` is True, a full SDMX URN is
+            built and set as the StructureMap's ``source``.
+        target_structure_id: Optional target structure reference in
+            ``"AGENCY:ID(VERSION)"`` format (e.g. ``"WB:DSD_WDI(1.0)"``).
+            When provided and ``generate_urns`` is True, a full SDMX URN is
+            built and set as the StructureMap's ``target``.
 
     Returns:
-        StructureMap: A valid pysdmx StructureMap object.
+        A valid pysdmx StructureMap object.
 
     Raises:
         ValueError: If mandatory sheets/columns are missing or mapping rules are invalid.
@@ -1620,39 +1588,42 @@ def build_structure_map_from_template_wb(
         True
     """
     # Validate mappings upfront
-    _validate_mapping_template_wb(mappings,
-            required_keys = required_keys,
-            valid_rules = valid_rules,
-            valid_prefixes = valid_prefixes)
+    _validate_mapping_template_wb(
+        mappings,
+        required_keys=required_keys,
+        valid_rules=valid_rules,
+        valid_prefixes=valid_prefixes,
+    )
 
     # 1. Extract Metadata (Agency & Version)
     info_df = _parse_info_sheet(mappings)
     current_agency, current_version, artefact_ref = _extract_metadata_from_info_sheet(
-        info_df = info_df, 
-        agency = agency,
-        version = version,
-        structure_type = structure_type)
+        info_df=info_df, agency=agency, version=version, structure_type=structure_type
+    )
 
     # 2. Parse Component Mappings Rules
     comp_df = _parse_comp_mapping_sheet(mappings)
 
     # 3. Prepare Representation Data
-    rep_data: Dict[str, pd.DataFrame] = {}
+    rep_data: dict[str, pd.DataFrame] = {}
     try:
         rep_data = _parse_rep_mapping_sheet(mappings)
     except ValueError:
         # Ignore invalid REP_MAPPING; validation will fail only if used.
         pass
 
-    generated_maps: List[Union[FixedValueMap, ImplicitComponentMap, ComponentMap]] = []
+    generated_maps: list[FixedValueMap | ImplicitComponentMap | ComponentMap] = []
+
+    # Track RepresentationMap IDs to avoid duplicates
+    rep_map_counter = {}
 
     # 4. Generate structure map elements
     for _, row in comp_df.iterrows():
         try:
             parsed = _extract_mapping_rule(row)
             mapping_rule = parsed["mapping_rule"]
-            source_id = parsed["source_id"] or ""   # normalize to str
-            target_id = parsed["target_id"] or ""   # normalize to str
+            source_id = parsed["source_id"] or ""  # normalize to str
+            target_id = parsed["target_id"] or ""  # normalize to str
 
             if mapping_rule == "skip":
                 continue
@@ -1662,71 +1633,97 @@ def build_structure_map_from_template_wb(
                 generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
 
             elif mapping_rule == "implicit":
-                generated_maps.append(build_implicit_component_map(source_id, target_id))
+                generated_maps.append(
+                    build_implicit_component_map(source_id, target_id)
+                )
 
             elif mapping_rule == "representation":
-                
                 rep_mapping_df = _extract_representation_map(
-                        rep_data=rep_data,
-                        source_id=source_id,
-                        target_id=target_id
-                    )
+                    rep_data=rep_data, source_id=source_id, target_id=target_id
+                )
 
+                # Generate unique ID for RepresentationMap
+                base_id = f"RM_{source_id}_{target_id}"
+                if base_id in rep_map_counter:
+                    rep_map_counter[base_id] += 1
+                    rep_map_id = f"{base_id}_{rep_map_counter[base_id]}"
+                else:
+                    rep_map_counter[base_id] = 0
+                    rep_map_id = base_id
 
                 comp_map = build_single_component_map(
                     df=rep_mapping_df,
                     source_component=source_id,
                     target_component=target_id,
                     agency=current_agency,
-                    id=f"MAP_{target_id}",
-                    name=f"Mapping for {target_id}",
+                    id=rep_map_id,  # Use unique ID
+                    name=f"Mapping {source_id} to {target_id}",
+                    source_cl=parsed.get("source_cl"),
+                    target_cl=parsed.get("target_cl"),
                     source_col="source",
                     target_col="target",
-                    version=current_version
+                    version=current_version,
+                    generate_urn=generate_urns,  # Pass flag through
                 )
                 generated_maps.append(comp_map)
 
             else:
-                # Defensive guard; parser guarantees mapping_rule is one of the known values
+                # Defensive guard
                 raise ValueError(f"Unhandled mapping rule: {mapping_rule}")
 
         except ValueError as e:
-            # Keep your contextual error wrapping
             target_for_msg = str(row.get("TARGET", "")).strip()
-            raise ValueError(f"Error processing mapping for Target '{target_for_msg}': {str(e)}") from e
+            raise ValueError(
+                f"Error processing mapping for Target '{target_for_msg}': {e!s}"
+            ) from e
 
-    # 5. Construct Final Object
+    # 5. Generate URNs if requested
+    structure_map_urn = None
+    source_urn = ""
+    target_urn = ""
+    if generate_urns:
+        structure_map_urn = gen_urn(
+            "StructureMap", current_agency, structure_map_id, current_version
+        )
+        artefact_type = STRUCTURE_TYPE_TO_ARTEFACT[structure_type]
+        if source_structure_id:
+            s_agency, s_id, s_version = parse_artefact_id(source_structure_id)
+            source_urn = gen_urn(artefact_type, s_agency, s_id, s_version)
+        if target_structure_id:
+            t_agency, t_id, t_version = parse_artefact_id(target_structure_id)
+            target_urn = gen_urn(artefact_type, t_agency, t_id, t_version)
+
+    # 6. Construct Final Object
     name_suffix = artefact_ref if artefact_ref else structure_map_id
     return StructureMap(
         id=structure_map_id,
         agency=current_agency,
         version=current_version,
-        name=f"Structure Map generated for {name_suffix}",
-        maps=generated_maps
+        name=f"Structure Map for {name_suffix}",
+        urn=structure_map_urn,
+        source=source_urn,
+        target=target_urn,
+        maps=generated_maps,
     )
-
-# endregion
-
 
 
 @typechecked
-def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
-    """Extract artefact IDs from the provided DataFrame and return them as a dictionary mapping structure types to their corresponding IDs.
+def _extract_all_artefact_ids(info_df: pd.DataFrame) -> dict[str, str]:
+    """Extract artefact IDs from the INFO DataFrame as a structure-type-to-ID mapping.
 
-    This function scans the DataFrame for keys corresponding to SDMX artefacts
-    such as 'dataflow', 'datastructure', and 'provisionagreement', and returns
-    a dictionary where each structure type is linked to its parsed ID.
-    It parses standard SDMX reference formats like 'Agency:ID(Version)' by
-    extracting only the 'ID' component.
+    Scans the DataFrame for keys corresponding to SDMX artefacts such as
+    'dataflow', 'datastructure', and 'provisionagreement', and returns a
+    dictionary where each structure type is linked to its parsed ID.
 
     Args:
-        info_df (pd.DataFrame): DataFrame containing metadata with 'Key' and 'Value' columns.
+        info_df: DataFrame containing metadata with 'Key' and 'Value' columns.
 
     Returns:
-        Dict[str, str]: Dictionary mapping structure types to artefact IDs.
+        Dictionary mapping structure types to artefact IDs.
 
     Raises:
-        ValueError: If the DataFrame is empty, lacks required columns, or no artefacts are found.
+        ValueError: If the DataFrame is empty, lacks required columns, or no
+            artefacts are found.
         TypeError: If info_df is not a pandas DataFrame.
 
     Examples:
@@ -1734,29 +1731,30 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
         ...     'Key': ['dataflow', 'datastructure', 'provisionagreement'],
         ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
         ... })
-        >>> extract_artefact_ids_by_structure(df)
+        >>> _extract_all_artefact_ids(df)
         {'dataflow': 'DF1', 'datastructure': 'DSD1', 'provisionagreement': 'PA1'}
     """
     if not isinstance(info_df, pd.DataFrame):
         raise TypeError("info_df must be a pandas DataFrame.")
     if info_df.empty:
         raise ValueError("info_df is empty.")
-    if not {'Key', 'Value'}.issubset(info_df.columns):
+    if not {"Key", "Value"}.issubset(info_df.columns):
         raise ValueError("info_df must contain 'Key' and 'Value' columns.")
 
     # Define structure types to look for
     structure_types = {"dataflow", "datastructure", "provisionagreement"}
 
-    # Normalize keys for case-insensitive matching
-    info_df["Key"] = info_df["Key"].astype(str).str.strip().str.lower()
+    # Normalize keys for case-insensitive matching (without mutating input)
+    normalized_keys = info_df["Key"].astype(str).str.strip().str.lower()
 
     # Filter rows matching structure types
-    filtered_df = info_df[info_df["Key"].isin(structure_types)]
+    filtered_df = info_df[normalized_keys.isin(structure_types)].copy()
+    filtered_df["Key"] = normalized_keys[filtered_df.index]
 
     if filtered_df.empty:
         raise ValueError("No artefact keys found in info_df.")
 
-    artefact_dict: Dict[str, str] = {}
+    artefact_dict: dict[str, str] = {}
     for _, row in filtered_df.iterrows():
         raw_value = row["Value"]
         if pd.isna(raw_value) or str(raw_value).strip() == "":
@@ -1770,43 +1768,39 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> Dict[str, str]:
 
     return artefact_dict
 
+
 @typechecked
 def _extract_metadata_from_info_sheet(
     info_df: pd.DataFrame,
     agency: str,
     version: str,
-    structure_type: Literal["datastructure", "dataflow", "provisionagreement"] = "datastructure",
-) -> Tuple[str, str, Optional[str]]:
-    """Extract (agency, version, artefact_ref) from INFO sheet using structure_type preference, falling back to other artefacts and FMR_AGENCY when needed.
+    structure_type: Literal[
+        "datastructure", "dataflow", "provisionagreement"
+    ] = "datastructure",
+) -> tuple[str, str, str | None]:
+    """Extract (agency, version, artefact_ref) from the INFO sheet.
 
-    This function:
-      - normalizes the requested structure_type (supports 'dsd' alias),
-      - uses _extract_all_artefact_ids(info_df) to get available artefacts,
-      - selects the artefact reference per the preferred structure_type or fallback order,
-      - parses (agency, version) from artefact_ref via parse_artefact_id,
-      - falls back to FMR_AGENCY for agency if present,
-      - returns defaults if any step fails.
+    Uses ``structure_type`` preference, falling back to other artefacts
+    and FMR_AGENCY when needed.
 
     Args:
-        info_df (pd.DataFrame): INFO sheet with 'Key'/'Value' columns.
-        structure_type (str): preferred structure type ('datastructure', 'dataflow', 'provisionagreement', alias 'dsd').
-        agency (str): default agency used when extraction fails.
-        version (str): default version used when extraction fails.
+        info_df: INFO sheet with 'Key'/'Value' columns.
+        agency: Default agency used when extraction fails.
+        version: Default version used when extraction fails.
+        structure_type: Preferred structure type. Defaults to
+            ``"datastructure"``.
 
     Returns:
-        Tuple[str, str, Optional[str]]: (agency, version, artefact_ref)
-            - agency: derived agency or default
-            - version: derived version or default
-            - artefact_ref: the raw artefact reference string (e.g., 'AGENCY:ID(1.0)'), or None if not found
+        A tuple of (agency, version, artefact_ref) where artefact_ref
+        is the raw reference string or None if not found.
     """
     current_agency = agency
     current_version = version
-    artefact_ref: Optional[str] = None
+    artefact_ref: str | None = None
 
     try:
-        # Extract artefacts; the helper lower-cases info_df["Key"] in place
-        artefact_dict: Dict[str, str] = _extract_all_artefact_ids(info_df)
-    except Exception:
+        artefact_dict: dict[str, str] = _extract_all_artefact_ids(info_df)
+    except (ValueError, TypeError, KeyError):
         artefact_dict = {}
 
     # Preferred artefact by requested structure_type, otherwise fallback order
@@ -1826,21 +1820,25 @@ def _extract_metadata_from_info_sheet(
                 current_agency = parsed_agency
             if parsed_version:
                 current_version = parsed_version
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             # Keep defaults if parsing fails
-            pass 
+            pass
 
     return current_agency, current_version, artefact_ref
+
 
 # tokens that mean "missing" for MAPPING_RULES
 _MISSING_RULE_TOKENS = {"nan", "<na>", ""}
 
+
+@typechecked
 def _is_missing_token(s: str) -> bool:
     """Return True if s is a case-insensitive missing token."""
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
+
 @typechecked
-def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
+def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
     """Parse a COMP_MAPPING row and return a dict of mapping rules. This function performs *syntax-level* validation only and never touches external data.
 
     Returns a dict with the following keys:
@@ -1848,6 +1846,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
       - source_id: normalized SOURCE (may be empty for fixed)
       - target_id: normalized TARGET (empty only if mapping_rule == "skip")
       - fixed_value: present only for mapping_rule == "fixed", else None
+      - source_cl: codelist URN for the source component, or None
+      - target_cl: codelist URN for the target component, or None
 
     Raises:
       - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
@@ -1856,7 +1856,15 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
     """
     source_id = str(row.get("SOURCE", "")).strip()
     target_id = str(row.get("TARGET", "")).strip()
-    raw_rule  = str(row.get("MAPPING_RULES", "")).strip()
+    raw_rule = str(row.get("MAPPING_RULES", "")).strip()
+
+    # Extract optional codelist URNs (None when absent or empty)
+    raw_source_cl = row.get("SOURCE_CL")
+    source_cl = str(raw_source_cl).strip() if pd.notna(raw_source_cl) else ""
+    source_cl = source_cl or None
+    raw_target_cl = row.get("TARGET_CL")
+    target_cl = str(raw_target_cl).strip() if pd.notna(raw_target_cl) else ""
+    target_cl = target_cl or None
 
     # Skip when TARGET is empty or rule is missing-ish
     if not target_id or _is_missing_token(raw_rule):
@@ -1865,6 +1873,8 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     rule_lower = raw_rule.lower()
@@ -1880,68 +1890,67 @@ def _extract_mapping_rule(row: "pd.Series") -> Dict[str, Optional[str]]:
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": fixed_val,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     # implicit
     if rule_lower == "implicit":
         if not source_id:
-            raise ValueError("Implicit map rule requires a non-empty 'SOURCE' component ID.")
+            raise ValueError(
+                "Implicit map rule requires a non-empty 'SOURCE' component ID."
+            )
         return {
             "mapping_rule": "implicit",
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
-    # representation (exact equality: rule == target_id)
-    # if raw_rule == target_id:
+    # representation
     if rule_lower == "representation":
         if not source_id or not target_id:
-            raise ValueError("Representation map rule requires non-empty 'SOURCE' and 'TARGET' component ID.")
+            raise ValueError(
+                "Representation map rule requires non-empty 'SOURCE' and 'TARGET' component ID."
+            )
         return {
             "mapping_rule": "representation",
             "source_id": source_id,
             "target_id": target_id,
             "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
         }
 
     # unknown
     raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
 
+
 @typechecked
 def _extract_representation_map(
-    rep_data: Dict[str, pd.DataFrame],
-    source_id: str,
-    target_id: str
+    rep_data: dict[str, pd.DataFrame], source_id: str, target_id: str
 ) -> pd.DataFrame:
-    """Build the (source, target) mapping pairs DataFrame for a representation-based rule, resolving column names and performing sanitization.
+    """Build the (source, target) mapping pairs DataFrame for a representation rule.
 
-    Parameters
-    ----------
-    rep_data : Dict[str, pd.DataFrame]
-        Dictionary containing 'source' and 'target' DataFrames derived from REP_MAPPING.
-        Expected keys:
-          - 'source': DataFrame of source representations (columns for different components)
-          - 'target': DataFrame of target representations (columns for different components)
+    Resolves column names and performs sanitization.
 
-    source_id : str
-        Component identifier to be matched to a column in rep_data['source'].
+    Args:
+        rep_data: Dictionary containing 'source' and 'target' DataFrames
+            derived from REP_MAPPING.
+        source_id: Component identifier to be matched to a column in
+            ``rep_data['source']``.
+        target_id: Component identifier to be matched to a column in
+            ``rep_data['target']``.
 
-    target_id : str
-        Component identifier to be matched to a column in rep_data['target'].
+    Returns:
+        Two-column DataFrame with columns ['source', 'target'], NA rows
+        dropped and duplicate row pairs removed.
 
-    Returns
-    -------
-    rep_mapping_df : pd.DataFrame
-        - rep_mapping_df: Two-column DataFrame with columns ['source', 'target'],
-                       NA rows dropped and duplicate row pairs removed.
-
-    Raises
-    ------
-    ValueError
-        - If rep_data is missing, or either DataFrame is empty
-        - If column resolution fails via match_column_name
-        - If no valid mapping pairs remain after sanitization
+    Raises:
+        ValueError: If rep_data is missing, either DataFrame is empty,
+            column resolution fails, or no valid mapping pairs remain.
     """
     # 1) Validate presence and non-empty REP_MAPPING inputs
     if (
@@ -1965,10 +1974,16 @@ def _extract_representation_map(
     actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
 
     # 3) Build, sanitize, and deduplicate pairs
-    rep_mapping_df = pd.DataFrame({
-        "source": source_df[actual_source_col],
-        "target": target_df[actual_target_col],
-    }).dropna(subset=["source", "target"], how="any").drop_duplicates()
+    rep_mapping_df = (
+        pd.DataFrame(
+            {
+                "source": source_df[actual_source_col],
+                "target": target_df[actual_target_col],
+            }
+        )
+        .dropna(subset=["source", "target"], how="any")
+        .drop_duplicates()
+    )
 
     # 4) Enforce non-empty result
     if rep_mapping_df.empty:

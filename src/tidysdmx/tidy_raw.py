@@ -1,25 +1,28 @@
-from typing import Dict, List, Any
-from typeguard import typechecked
-from .utils import *
+"""Filter SDMX DataFrames against schema codelist constraints."""
+
 import pandas as pd
 import pysdmx as px
+from typeguard import typechecked
+
+from .utils import extract_validation_info
 
 
 @typechecked
 def filter_rows(
-        df: pd.DataFrame, 
-        codelist_ids: Dict[str, list[str]]
-    ) -> pd.DataFrame:
-    """Filters out rows where values are not in the allowed codelist for coded columns.
-    Compares as strings but does not change df dtypes.
-    Does not mutate input df.
+    df: pd.DataFrame,
+    codelist_ids: dict[str, list[str]],
+) -> pd.DataFrame:
+    """Filter out rows where values are not in the allowed codelist.
+
+    Compares as strings but does not change DataFrame dtypes.
+    Does not mutate the input DataFrame.
 
     Args:
-        df (pd.DataFrame): The input DataFrame.
-        codelist_ids (Dict[str, list[str]]): A dictionary mapping column names to lists of allowed codelist IDs.
+        df: The input DataFrame.
+        codelist_ids: A mapping of column names to allowed codelist IDs.
 
     Returns:
-        - Filtered DataFrame (only selected rows)
+        A filtered copy of the DataFrame containing only selected rows.
     """
     if not codelist_ids:
         return df.copy()
@@ -36,29 +39,24 @@ def filter_rows(
 
     return df.loc[~rows_to_drop].copy()
 
+
 @typechecked
 def filter_tidy_raw(
     df: pd.DataFrame,
     schema: px.model.dataflow.Schema,
 ) -> pd.DataFrame:
-    """Validate and filter SDMX-like input, returning a cleaned DataFrame.
+    """Filter an SDMX DataFrame by removing rows that violate codelist constraints.
 
     Args:
-        df (pd.DataFrame): The input DataFrame.
-        schema (px.model.dataflow.Schema): The SDMX schema to validate against.
-    
-    Returns:
-        pd.DataFrame: The filtered DataFrame.
-    """
-    # if schema is None:
-    #     raise ValueError("Schema must be provided.")
+        df: The input DataFrame.
+        schema: The SDMX schema to validate against.
 
+    Returns:
+        A filtered DataFrame with invalid code rows removed.
+    """
     valid = extract_validation_info(schema)
 
-    # Filter rows based on codelist constraints
-    df_filtered = filter_rows(
+    return filter_rows(
         df=df,
         codelist_ids=valid.get("codelist_ids", {}),
     )
-
-    return df_filtered

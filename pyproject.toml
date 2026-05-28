@@ -1,6 +1,9 @@
-[tool.poetry]
+[project]
 name = "tidysdmx"
-version = "0.1.0"
+dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python"]
+
+[tool.poetry]
+version = "0.7.5"
 description = "A toolbox to work with SDMX data"
 authors = ["Tony Fujs", "Daniel Gil-Sanchez"]
 license = "MIT"
@@ -8,7 +11,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.11.9"
-pysdmx = ">=1.8.1"
+pysdmx = "^1.13.0"
 pandas = "^2.2.3"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
@@ -40,12 +43,48 @@ version_toml = [
 allow_zero_version = true
 
 [tool.ruff]
-# Enable docstring linting rules (prefix "D")
-lint.select = ["D"]
+src = ["src"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "D",    # pydocstyle — docstring conventions
+    "E",    # pycodestyle errors
+    "F",    # pyflakes — unused imports, variables, etc.
+    "I",    # isort — import ordering
+    "UP",   # pyupgrade — modernise syntax for target Python version
+    "B",    # flake8-bugbear — common bug patterns
+    "SIM",  # flake8-simplify — simplifiable constructs
+    "RUF",  # Ruff-specific rules
+]
+ignore = [
+    "D107",  # allow missing docstrings on __init__
+    "D105",  # allow missing docstrings on magic methods
+]
 
 [tool.ruff.lint.pydocstyle]
-# Enforce Google-style docstrings
 convention = "google"
 
-# (Optional) Ignore specific rules, e.g., allow missing docstrings on __init__
-# ignore = ["D107"]
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D100", "D103"]  # no module/function docstrings required in tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: fast, isolated unit tests (no network)",
+    "integration: tests that hit FMR or external services",
+]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/tidysdmx"]
+omit = ["src/tidysdmx/kedro.py"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
