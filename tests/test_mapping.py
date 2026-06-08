@@ -239,6 +239,34 @@ class TestApplyMultiComponentMap:
         result = apply_multi_component_map(df, multi_component_map)
         assert result["URBANISATION"].isna().sum() == 2
 
+    def test_all_unmapped_values_are_none(self):
+        """Rows matching no rule yield None in the target column."""
+        mrm = MultiRepresentationMap(
+            id="MRM",
+            agency="AGY",
+            name="n",
+            maps=[MultiValueMap(source=["COL", "one"], target=["RUR"])],
+        )
+        mcm = MultiComponentMap(
+            source=["AREA", "NOTE"], target=["URBANISATION"], values=mrm
+        )
+        df = pd.DataFrame({"AREA": ["AAA", "BBB"], "NOTE": ["ccc", "ddd"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+        assert result["URBANISATION"].isna().sum() == 2
+
+    def test_no_rules_yields_all_none(self):
+        """A MultiComponentMap with no rules sets the target column to None."""
+        mrm = MultiRepresentationMap(id="MRM", agency="AGY", name="n", maps=[])
+        mcm = MultiComponentMap(
+            source=["AREA", "NOTE"], target=["URBANISATION"], values=mrm
+        )
+        df = pd.DataFrame({"AREA": ["COL", "SWZ"], "NOTE": ["one", "two"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
     @pytest.mark.parametrize("verbose", [True, False])
     def test_verbose_flag(self, multi_component_map, capsys, verbose):
         """Tests that verbose flag prints logs when True."""

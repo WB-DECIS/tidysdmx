@@ -1,7 +1,6 @@
 """Apply pysdmx StructureMap objects to pandas DataFrames."""
 
-import re
-
+import numpy as np
 import pandas as pd
 import pysdmx as px
 from typeguard import typechecked
@@ -207,30 +206,44 @@ def apply_multi_component_map(
     if missing_cols:
         raise KeyError(f"Missing source columns: {missing_cols}")
 
-    rules = [{"patterns": mv.source, "target": mv.target[0]} for mv in rep_map.maps]
+    # Build one boolean mask per rule, vectorised across the source columns,
+    # then resolve them with np.select (first matching rule wins, preserving
+    # rule order). This replaces a row-wise .apply(axis=1) and scales with the
+    # number of rules/columns rather than the number of data rows.
+    n_rows = len(result_df)
+    conditions = []
+    choices = []
+    for mv in rep_map.maps:
+        mask = np.ones(n_rows, dtype=bool)
+        # strict=True preserves the contract that each rule must supply one
+        # pattern per source column.
+        for col, pattern in zip(source_cols, mv.source, strict=True):
+            col_series = result_df[col]
+            if pattern.startswith("regex:"):
+                regex = pattern.removeprefix("regex:")
+                col_mask = (
+                    col_series.astype(str)
+                    .str.fullmatch(regex)
+                    .fillna(False)
+                    .to_numpy(dtype=bool)
+                )
+            else:
+                col_mask = (col_series == pattern).to_numpy(dtype=bool)
+            mask &= col_mask
+        conditions.append(mask)
+        choices.append(mv.target[0])
 
-    def match_row(row):
-        for rule in rules:
-            match = True
-            for col_val, pattern in zip(row, rule["patterns"], strict=True):
-                if pattern.startswith("regex:"):
-                    regex = pattern.removeprefix("regex:")
-                    if not re.fullmatch(regex, str(col_val)):
-                        match = False
-                        break
-                elif col_val != pattern:
-                    match = False
-                    break
-            if match:
-                return rule["target"]
-        return None
-
-    result_df[target_col] = result_df[source_cols].apply(match_row, axis=1)
+    if conditions:
+        result_df[target_col] = pd.Series(
+            np.select(conditions, choices, default=None), index=result_df.index
+        )
+    else:
+        result_df[target_col] = None
 
     if verbose:
         print(
             f"[OK] Mapped {source_cols} → '{target_col}' "
-            f"using {len(rules)} ordered rules."
+            f"using {len(conditions)} ordered rules."
         )
         unmapped = result_df[target_col].isna().sum()
         if unmapped > 0:
