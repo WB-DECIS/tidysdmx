@@ -239,6 +239,65 @@ class TestApplyMultiComponentMap:
         result = apply_multi_component_map(df, multi_component_map)
         assert result["URBANISATION"].isna().sum() == 2
 
+    def test_all_unmapped_values_are_none(self):
+        """Rows matching no rule yield None in the target column."""
+        mrm = MultiRepresentationMap(
+            id="MRM",
+            agency="AGY",
+            name="n",
+            maps=[MultiValueMap(source=["COL", "one"], target=["RUR"])],
+        )
+        mcm = MultiComponentMap(
+            source=["AREA", "NOTE"], target=["URBANISATION"], values=mrm
+        )
+        df = pd.DataFrame({"AREA": ["AAA", "BBB"], "NOTE": ["ccc", "ddd"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+        assert result["URBANISATION"].isna().sum() == 2
+
+    def test_no_rules_yields_all_none(self):
+        """A MultiComponentMap with no rules sets the target column to None."""
+        mrm = MultiRepresentationMap(id="MRM", agency="AGY", name="n", maps=[])
+        mcm = MultiComponentMap(
+            source=["AREA", "NOTE"], target=["URBANISATION"], values=mrm
+        )
+        df = pd.DataFrame({"AREA": ["COL", "SWZ"], "NOTE": ["one", "two"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
+    def test_missing_source_value_does_not_match_regex(self):
+        """A missing source value is not matched by a catch-all regex rule."""
+        mrm = MultiRepresentationMap(
+            id="MRM",
+            agency="AGY",
+            name="n",
+            maps=[MultiValueMap(source=["regex:.*"], target=["MATCHED"])],
+        )
+        mcm = MultiComponentMap(source=["AREA"], target=["FLAG"], values=mrm)
+        df = pd.DataFrame({"AREA": ["COL", np.nan]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["FLAG"].iloc[0] == "MATCHED"
+        assert pd.isna(result["FLAG"].iloc[1])
+
+    def test_exact_match_on_nullable_string_dtype(self):
+        """Exact matching works on a nullable 'string' column with pd.NA."""
+        mrm = MultiRepresentationMap(
+            id="MRM",
+            agency="AGY",
+            name="n",
+            maps=[MultiValueMap(source=["BE"], target=["BEL"])],
+        )
+        mcm = MultiComponentMap(source=["GEO"], target=["COUNTRY"], values=mrm)
+        df = pd.DataFrame({"GEO": pd.array(["BE", pd.NA, "FR"], dtype="string")})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["COUNTRY"].iloc[0] == "BEL"
+        assert pd.isna(result["COUNTRY"].iloc[1])
+        assert pd.isna(result["COUNTRY"].iloc[2])
+
     @pytest.mark.parametrize("verbose", [True, False])
     def test_verbose_flag(self, multi_component_map, capsys, verbose):
         """Tests that verbose flag prints logs when True."""
