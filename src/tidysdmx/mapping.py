@@ -221,14 +221,19 @@ def apply_multi_component_map(
             col_series = result_df[col]
             if pattern.startswith("regex:"):
                 regex = pattern.removeprefix("regex:")
+                # Stringify for regex matching while keeping missing values
+                # missing (via the nullable "string" dtype) so that na=False
+                # treats them as non-matches and leaves them unmapped.
                 col_mask = (
-                    col_series.astype(str)
-                    .str.fullmatch(regex)
-                    .fillna(False)
+                    col_series.astype("string")
+                    .str.fullmatch(regex, na=False)
                     .to_numpy(dtype=bool)
                 )
             else:
-                col_mask = (col_series == pattern).to_numpy(dtype=bool)
+                # fillna(False) guards nullable-boolean comparison results
+                # (e.g. the "string" dtype) so missing values never match and
+                # the conversion to a plain bool array cannot fail on pd.NA.
+                col_mask = (col_series == pattern).fillna(False).to_numpy(dtype=bool)
             mask &= col_mask
         conditions.append(mask)
         choices.append(mv.target[0])
