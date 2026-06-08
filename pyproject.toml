@@ -32,6 +32,12 @@ ruff = "^0.14.6"
 pre-commit = "^4.5.0"
 nbstripout = "^0.8.2"
 
+
+[tool.poetry.group.benchmarks.dependencies]
+polars = "^1.41.2"
+pytest-benchmark = "^5.2.3"
+pyarrow = "^24.0.0"
+
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -67,6 +73,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["D100", "D103"]  # no module/function docstrings required in tests
+"benchmarks/**/*.py" = ["D100", "D103"]  # throwaway benchmark spike; pytest-style funcs
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
