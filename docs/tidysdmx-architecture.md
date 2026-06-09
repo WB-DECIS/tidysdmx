@@ -166,7 +166,30 @@ write_excel_mapping_template(components, rep_maps=["REF_AREA", "INDICATOR"],
                               output_path=Path("mapping.xlsx"))
 ```
 
-The workbook has a `comp_mapping` sheet (source column → target component, with a `MAPPING_RULES` column accepting `"implicit"`, `"fixed:<VALUE>"`, or `"representation"`) and one sheet per coded component for value-level mappings.
+The workbook has a `COMP_MAPPING` sheet (source component → target component, with a `MAPPING_RULES` column accepting `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
+
+For a **single** coded component, use `"representation"` with one component ID in `SOURCE`:
+
+| SOURCE | TARGET | MAPPING_RULES |
+|--------|--------|---------------|
+| SERIES | INDICATOR | representation |
+
+For an **N→1 multi-component** mapping (a tuple of source components jointly determining one target), use `"multi_representation"` and join the source component IDs in the `SOURCE` cell with `+`. The matching `S:`/`T:` columns in `REP_MAPPING` supply the value tuples:
+
+`COMP_MAPPING`
+
+| SOURCE | TARGET | MAPPING_RULES |
+|--------|--------|---------------|
+| FREQ+REF_AREA | INDICATOR | multi_representation |
+
+`REP_MAPPING`
+
+| S:FREQ | S:REF_AREA | T:INDICATOR |
+|--------|------------|-------------|
+| A | US | GDP_ANNUAL |
+| Q | US | GDP_QUARTERLY |
+
+This produces a pysdmx `MultiComponentMap` whose `source` is the ordered tuple `(FREQ, REF_AREA)` and `target` is `[INDICATOR]`. (`+` is used because it is not a legal SDMX ID character, so it cannot collide with a component ID. A `multi_representation` rule needs at least two source components; source codelists are not yet read for multi rules, so sources map as plain strings while `TARGET_CL` is still honoured.)
 
 `build_structure_map_from_template_wb(mappings)` reads the filled-in workbook and returns a pysdmx `StructureMap`. The analyst fills in Excel cells; pysdmx objects are the implementation detail.
 

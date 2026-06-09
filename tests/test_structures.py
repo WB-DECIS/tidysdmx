@@ -11,6 +11,7 @@ from pysdmx.model.map import (
     DatePatternMap,
     FixedValueMap,
     ImplicitComponentMap,
+    MultiComponentMap,
     MultiRepresentationMap,
     MultiValueMap,
     RepresentationMap,
@@ -26,6 +27,7 @@ from tidysdmx.structures import (
     _extract_artefact_id,
     _extract_mapping_rule,
     _extract_metadata_from_info_sheet,
+    _extract_multi_representation_map,
     _extract_representation_map,
     _is_missing_token,
     _match_column_name,
@@ -37,6 +39,7 @@ from tidysdmx.structures import (
     build_date_pattern_map,
     build_fixed_map,
     build_implicit_component_map,
+    build_multi_component_map,
     build_multi_representation_map,
     build_multi_value_map_list,
     build_representation_map,
@@ -961,6 +964,92 @@ class TestBuildMultiRepresentationMap:
         assert first_map.valid_from == datetime.fromisoformat("2020-01-01")
         assert first_map.valid_to == datetime.fromisoformat("2025-12-31")
 
+    def test_generate_urn_true_sets_urn(self, sample_df):
+        """Tests that a URN is generated when generate_urn is True and id given."""
+        result = build_multi_representation_map(
+            sample_df, id="MRM1", agency="WB", generate_urn=True
+        )
+        assert result.urn is not None
+        assert "MultiRepresentationMap=WB:MRM1(1.0)" in result.urn
+
+    def test_generate_urn_false_leaves_urn_none(self, sample_df):
+        """Tests that no URN is generated when generate_urn is False."""
+        result = build_multi_representation_map(
+            sample_df, id="MRM1", agency="WB", generate_urn=False
+        )
+        assert result.urn is None
+
+
+class TestBuildMultiComponentMap:
+    """Tests for build_multi_component_map (N source components -> 1 target)."""
+
+    @pytest.fixture
+    def multi_df(self) -> pd.DataFrame:
+        """DataFrame whose columns are named after the SDMX component IDs."""
+        return pd.DataFrame({
+            "COUNTRY": ["DE", "CH"],
+            "CURRENCY": ["LC", "LC"],
+            "ISO_CURRENCY": ["EUR", "CHF"],
+        })
+
+    def test_returns_multi_component_map(self, multi_df):
+        """A valid df yields a MultiComponentMap wrapping a MultiRepresentationMap."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            agency="WB",
+            id="MCM1",
+            name="Currency by country",
+        )
+        assert isinstance(cm, MultiComponentMap)
+        assert list(cm.source) == ["COUNTRY", "CURRENCY"]
+        assert list(cm.target) == ["ISO_CURRENCY"]
+        assert isinstance(cm.values, MultiRepresentationMap)
+        assert len(cm.values.maps) == 2
+
+    def test_source_target_tuples_preserved(self, multi_df):
+        """Each row becomes a MultiValueMap with the ordered source/target tuple."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            id="MCM1",
+        )
+        first = cm.values.maps[0]
+        assert list(first.source) == ["DE", "LC"]
+        assert list(first.target) == ["EUR"]
+
+    def test_generate_urn_propagates_to_values(self, multi_df):
+        """generate_urn=True gives the wrapped MultiRepresentationMap a URN."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            agency="WB",
+            id="MCM1",
+            generate_urn=True,
+        )
+        assert cm.values.urn is not None
+
+    def test_generate_urn_false_no_values_urn(self, multi_df):
+        """generate_urn=False leaves the wrapped MultiRepresentationMap URN unset."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            agency="WB",
+            id="MCM1",
+            generate_urn=False,
+        )
+        assert cm.values.urn is None
+
+    def test_exported_from_package(self):
+        """build_multi_component_map is part of the public tidysdmx API."""
+        import tidysdmx
+
+        assert hasattr(tidysdmx, "build_multi_component_map")
+
 
 class TestCreateSchemaFromTable:  # noqa: D101
     def test_create_schema_time_period_standardization(self) -> None:
@@ -1602,6 +1691,50 @@ class TestBuildStructureMapFromTemplateWb:
         assert sm.source == ""
         assert sm.target == ""
 
+    def test_multi_representation_produces_multi_component_map(self, valid_mappings):
+        """A 'multi_representation' row yields a MultiComponentMap (N sources -> 1)."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame({
+                "SOURCE": ["FREQ+REF_AREA"],
+                "TARGET": ["INDICATOR"],
+                "MAPPING_RULES": ["multi_representation"],
+            }),
+            "REP_MAPPING": pd.DataFrame({
+                "S:FREQ": ["A", "Q"],
+                "S:REF_AREA": ["US", "US"],
+                "T:INDICATOR": ["GDP_A", "GDP_Q"],
+            }),
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        multi_maps = [m for m in sm.maps if isinstance(m, MultiComponentMap)]
+        assert len(multi_maps) == 1
+        mcm = multi_maps[0]
+        assert list(mcm.source) == ["FREQ", "REF_AREA"]
+        assert list(mcm.target) == ["INDICATOR"]
+        assert len(mcm.values.maps) == 2
+
+    def test_multi_and_single_rules_coexist(self, valid_mappings):
+        """Single 'representation' and 'multi_representation' rows build together."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame({
+                "SOURCE": ["SRC3", "FREQ+REF_AREA"],
+                "TARGET": ["TGT3", "INDICATOR"],
+                "MAPPING_RULES": ["representation", "multi_representation"],
+            }),
+            "REP_MAPPING": pd.DataFrame({
+                "S:SRC3": ["A", "B"],
+                "T:TGT3": ["X", "Y"],
+                "S:FREQ": ["A", "Q"],
+                "S:REF_AREA": ["US", "US"],
+                "T:INDICATOR": ["GDP_A", "GDP_Q"],
+            }),
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        assert sum(isinstance(m, ComponentMap) for m in sm.maps) == 1
+        assert sum(isinstance(m, MultiComponentMap) for m in sm.maps) == 1
+
 class TestExtractAllArtefactIds: #noqa: D101
     
     def test_extract_all_artefact_ids_normal(self):
@@ -1816,6 +1949,38 @@ class TestExtractMappingRule:
         assert result["source_cl"] is None
         assert result["target_cl"] is None
 
+    def test_multi_representation_rule_valid(self):
+        """A multi_representation rule keeps the raw delimited SOURCE string."""
+        row = pd.Series({
+            "SOURCE": "FREQ+REF_AREA",
+            "TARGET": "INDICATOR",
+            "MAPPING_RULES": "multi_representation",
+        })
+        result = _extract_mapping_rule(row)
+        assert result["mapping_rule"] == "multi_representation"
+        assert result["source_id"] == "FREQ+REF_AREA"
+        assert result["target_id"] == "INDICATOR"
+
+    def test_multi_representation_single_source_raises(self):
+        """A multi_representation rule with only one source component is rejected."""
+        row = pd.Series({
+            "SOURCE": "FREQ",
+            "TARGET": "INDICATOR",
+            "MAPPING_RULES": "multi_representation",
+        })
+        with pytest.raises(ValueError, match="at least two source"):
+            _extract_mapping_rule(row)
+
+    def test_multi_representation_missing_source_raises(self):
+        """A multi_representation rule with no source is rejected."""
+        row = pd.Series({
+            "SOURCE": "",
+            "TARGET": "INDICATOR",
+            "MAPPING_RULES": "multi_representation",
+        })
+        with pytest.raises(ValueError, match="at least two source"):
+            _extract_mapping_rule(row)
+
 
 class TestResolveRepresentationRef:
     """Tests for `_resolve_representation_ref`."""
@@ -1898,6 +2063,62 @@ class TestExtractRepresentationMap:
         result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
         assert len(result_df) == 1
         assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
+
+
+class TestExtractMultiRepresentationMap:
+    """Tests for `_extract_multi_representation_map` (N source cols -> 1 target)."""
+
+    @pytest.fixture
+    def sample_rep_data(self):
+        """Source DataFrame with two source columns, target with one."""
+        source_df = pd.DataFrame({
+            "FREQ": ["A", "Q", None],
+            "REF_AREA": ["US", "US", "DE"],
+        })
+        target_df = pd.DataFrame({"INDICATOR": ["GDP_A", "GDP_Q", "GDP_X"]})
+        return {"source": source_df, "target": target_df}
+
+    def test_valid_multi_mapping(self, sample_rep_data):
+        """Returns a DataFrame keyed by component IDs with NA rows dropped."""
+        result_df = _extract_multi_representation_map(
+            sample_rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
+        )
+        expected = pd.DataFrame({
+            "FREQ": ["A", "Q"],
+            "REF_AREA": ["US", "US"],
+            "INDICATOR": ["GDP_A", "GDP_Q"],
+        })
+        pd.testing.assert_frame_equal(
+            result_df.reset_index(drop=True), expected
+        )
+
+    def test_raises_on_unresolved_source_column(self, sample_rep_data):
+        """Unknown source component raises ValueError."""
+        with pytest.raises(ValueError):
+            _extract_multi_representation_map(
+                sample_rep_data, ["FREQ", "MISSING"], "INDICATOR"
+            )
+
+    def test_raises_on_empty_result(self):
+        """All-NA source rows leave no valid mapping rows."""
+        source_df = pd.DataFrame({"FREQ": [None, None], "REF_AREA": [None, None]})
+        target_df = pd.DataFrame({"INDICATOR": ["X", "Y"]})
+        rep_data = {"source": source_df, "target": target_df}
+        with pytest.raises(ValueError, match="No valid mapping rows"):
+            _extract_multi_representation_map(
+                rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
+            )
+
+    def test_deduplicates_tuples(self):
+        """Duplicate source/target tuples are removed."""
+        source_df = pd.DataFrame({"FREQ": ["A", "A"], "REF_AREA": ["US", "US"]})
+        target_df = pd.DataFrame({"INDICATOR": ["GDP", "GDP"]})
+        rep_data = {"source": source_df, "target": target_df}
+        result_df = _extract_multi_representation_map(
+            rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
+        )
+        assert len(result_df) == 1
+
 
 # region Test _validate_mapping_template_wb
 
@@ -2235,6 +2456,13 @@ class TestValidateMappingTemplateWb:  # noqa: D101
 
     def test_valid_mappings_pass_without_error(self, valid_mappings: dict) -> None:
         """Tests that valid mappings do not raise any exceptions."""
+        _validate_mapping_template_wb(valid_mappings)
+
+    def test_accepts_multi_representation_rule(self, valid_mappings: dict) -> None:
+        """Tests that 'multi_representation' is accepted by the validator."""
+        valid_mappings["COMP_MAPPING"] = pd.DataFrame(
+            {"MAPPING_RULES": ["multi_representation"]}
+        )
         _validate_mapping_template_wb(valid_mappings)
 
     def test_mappings_not_dict_raises_type_error(self) -> None:

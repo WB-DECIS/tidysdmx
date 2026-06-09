@@ -24,6 +24,7 @@ from pysdmx.model.map import (
     DatePatternMap,
     FixedValueMap,
     ImplicitComponentMap,
+    MultiComponentMap,
     MultiRepresentationMap,
     MultiValueMap,
     RepresentationMap,
@@ -516,6 +517,7 @@ def build_multi_representation_map(
     target_cols: list[str] | None = None,  # Changed to Optional
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
 ) -> MultiRepresentationMap:
     """Build a MultiRepresentationMap object from a pandas DataFrame.
 
@@ -535,6 +537,8 @@ def build_multi_representation_map(
         target_cols: Target columns. Defaults to ["target"].
         valid_from_col: Validity start column. Defaults to "valid_from".
         valid_to_col: Validity end column. Defaults to "valid_to".
+        generate_urn: If True and ``id`` is provided, generate a URN for the
+            MultiRepresentationMap. Defaults to True.
 
     Returns:
         The constructed MultiRepresentationMap object.
@@ -570,6 +574,11 @@ def build_multi_representation_map(
         valid_to_col=valid_to_col,
     )
 
+    # Generate URN if requested and id is provided
+    urn = None
+    if generate_urn and id:
+        urn = gen_urn("MultiRepresentationMap", agency, id, version)
+
     # Instantiate MultiRepresentationMap with CORRECT arguments
     return MultiRepresentationMap(
         id=id,
@@ -584,6 +593,7 @@ def build_multi_representation_map(
         maps=multi_value_maps,
         description=description,
         version=version,
+        urn=urn,
     )
 
 
@@ -686,6 +696,98 @@ def build_single_component_map(
     # Return ComponentMap
     return ComponentMap(
         source=source_component, target=target_component, values=representation_map
+    )
+
+
+@typechecked
+def build_multi_component_map(
+    df: pd.DataFrame,
+    source_components: Sequence[str],
+    target_components: Sequence[str],
+    agency: str = "FAKE_AGENCY",
+    id: str | None = None,
+    name: str | None = None,
+    source_cls: list[str] | None = None,
+    target_cls: list[str] | None = None,
+    version: str = "1.0",
+    description: str | None = None,
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
+) -> MultiComponentMap:
+    """Build a MultiComponentMap mapping several source components to target(s).
+
+    Mirrors :func:`build_single_component_map` for the N-source case: it builds
+    a :class:`MultiRepresentationMap` from ``df`` (whose columns are named after
+    the component IDs) and wraps it in a :class:`MultiComponentMap`.
+
+    Args:
+        df: DataFrame whose columns are named after the source and target
+            component IDs; each row is one value-tuple mapping.
+        source_components: Ordered IDs of the source components. Must also be
+            present as columns in ``df``.
+        target_components: Ordered IDs of the target components. Must also be
+            present as columns in ``df``.
+        agency: Agency maintaining the representation map.
+            Defaults to "FAKE_AGENCY".
+        id: Identifier for the representation map.
+        name: Name of the representation map.
+        source_cls: URNs/IDs for the source codelists or data types. When
+            omitted, each source is represented as ``DataType.STRING``.
+        target_cls: URNs/IDs for the target codelists or data types. When
+            omitted, each target is represented as ``DataType.STRING``.
+        version: Version of the representation map. Defaults to "1.0".
+        description: Optional description of the representation map.
+        valid_from_col: Column name for validity start date.
+            Defaults to "valid_from".
+        valid_to_col: Column name for validity end date.
+            Defaults to "valid_to".
+        generate_urn: If True and ``id`` is provided, generate a URN for the
+            underlying MultiRepresentationMap. Defaults to True.
+
+    Returns:
+        A MultiComponentMap mapping the source components to the target(s).
+
+    Raises:
+        ValueError: If DataFrame is empty or required columns are missing.
+        TypeError: If source or target columns contain non-string values.
+
+    Examples:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     "COUNTRY": ["DE", "CH"],
+        ...     "CURRENCY": ["LC", "LC"],
+        ...     "ISO_CURRENCY": ["EUR", "CHF"],
+        ... })
+        >>> cm = build_multi_component_map(
+        ...     df,
+        ...     source_components=["COUNTRY", "CURRENCY"],
+        ...     target_components=["ISO_CURRENCY"],
+        ...     id="MCM1",
+        ... )
+        >>> isinstance(cm, MultiComponentMap)
+        True
+    """
+    multi_representation_map = build_multi_representation_map(
+        df=df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cls=source_cls,
+        target_cls=target_cls,
+        version=version,
+        description=description,
+        source_cols=list(source_components),
+        target_cols=list(target_components),
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
+    )
+
+    return MultiComponentMap(
+        source=list(source_components),
+        target=list(target_components),
+        values=multi_representation_map,
     )
 
 
@@ -1440,7 +1542,7 @@ def _validate_mapping_template_wb(
     mappings: dict[str, pd.DataFrame],
     *,  # Ensures following args are keyword-only
     required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
-    valid_rules: Iterable[str] = ("representation", "implicit"),
+    valid_rules: Iterable[str] = ("representation", "multi_representation", "implicit"),
     valid_prefixes: Iterable[str] = ("fixed:",),
 ) -> None:
     """Validate a mapping template workbook represented as a mapping of DataFrames.
@@ -1543,7 +1645,7 @@ def build_structure_map_from_template_wb(
     ] = "datastructure",
     version: str = "1.0",
     required_keys: Iterable[str] = ("INFO", "COMP_MAPPING", "REP_MAPPING"),
-    valid_rules: Iterable[str] = ("representation", "implicit"),
+    valid_rules: Iterable[str] = ("representation", "multi_representation", "implicit"),
     valid_prefixes: Iterable[str] = ("fixed:",),
     generate_urns: bool = True,
     source_structure_id: str | None = None,
@@ -1666,6 +1768,38 @@ def build_structure_map_from_template_wb(
                     generate_urn=generate_urns,  # Pass flag through
                 )
                 generated_maps.append(comp_map)
+
+            elif mapping_rule == "multi_representation":
+                # SOURCE is a '+'-delimited list of >= 2 components
+                source_ids = [s.strip() for s in source_id.split("+") if s.strip()]
+
+                multi_df = _extract_multi_representation_map(
+                    rep_data=rep_data, source_ids=source_ids, target_id=target_id
+                )
+
+                # Generate unique ID for the MultiRepresentationMap
+                base_id = f"MRM_{'_'.join(source_ids)}_{target_id}"
+                if base_id in rep_map_counter:
+                    rep_map_counter[base_id] += 1
+                    rep_map_id = f"{base_id}_{rep_map_counter[base_id]}"
+                else:
+                    rep_map_counter[base_id] = 0
+                    rep_map_id = base_id
+
+                multi_comp_map = build_multi_component_map(
+                    df=multi_df,
+                    source_components=source_ids,
+                    target_components=[target_id],
+                    agency=current_agency,
+                    id=rep_map_id,  # Use unique ID
+                    name=f"Mapping {'+'.join(source_ids)} to {target_id}",
+                    target_cls=[parsed["target_cl"]]
+                    if parsed.get("target_cl")
+                    else None,
+                    version=current_version,
+                    generate_urn=generate_urns,  # Pass flag through
+                )
+                generated_maps.append(multi_comp_map)
 
             else:
                 # Defensive guard
@@ -1924,6 +2058,24 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             "target_cl": target_cl,
         }
 
+    # multi_representation: SOURCE is a '+'-delimited list of >= 2 components
+    if rule_lower == "multi_representation":
+        source_tokens = [s.strip() for s in source_id.split("+") if s.strip()]
+        if len(source_tokens) < 2:
+            raise ValueError(
+                "Multi-representation map rule requires at least two source "
+                "components joined by '+' (e.g. 'FREQ+REF_AREA'). Use "
+                "'representation' for a single source component."
+            )
+        return {
+            "mapping_rule": "multi_representation",
+            "source_id": source_id,
+            "target_id": target_id,
+            "fixed_value": None,
+            "source_cl": source_cl,
+            "target_cl": target_cl,
+        }
+
     # unknown
     raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
 
@@ -1990,6 +2142,72 @@ def _extract_representation_map(
         raise ValueError(
             f"No valid mapping rows found between source column '{actual_source_col}' "
             f"and target column '{actual_target_col}'."
+        )
+
+    return rep_mapping_df
+
+
+@typechecked
+def _extract_multi_representation_map(
+    rep_data: dict[str, pd.DataFrame], source_ids: list[str], target_id: str
+) -> pd.DataFrame:
+    """Build the value-tuple mapping DataFrame for a multi-representation rule.
+
+    Resolves each source component ID and the target component ID to columns in
+    the parsed REP_MAPPING data, then assembles a DataFrame whose columns are
+    named after the component IDs (so they line up with the ``source_cols`` /
+    ``target_cols`` consumed by :func:`build_multi_component_map`).
+
+    Args:
+        rep_data: Dictionary containing 'source' and 'target' DataFrames
+            derived from REP_MAPPING.
+        source_ids: Ordered source component IDs, each matched to a column in
+            ``rep_data['source']``.
+        target_id: Target component ID, matched to a column in
+            ``rep_data['target']``.
+
+    Returns:
+        A DataFrame with one column per ``source_ids`` entry followed by a
+        ``target_id`` column, NA rows dropped and duplicate tuples removed.
+
+    Raises:
+        ValueError: If rep_data is missing/empty, a column cannot be resolved,
+            or no valid mapping rows remain.
+    """
+    # 1) Validate presence and non-empty REP_MAPPING inputs
+    if (
+        not rep_data
+        or "source" not in rep_data
+        or "target" not in rep_data
+        or rep_data["source"] is None
+        or rep_data["target"] is None
+        or rep_data["source"].empty
+        or rep_data["target"].empty
+    ):
+        raise ValueError(
+            "Mapping rule requires 'REP_MAPPING' sheet with data, "
+            "but it was invalid or empty."
+        )
+
+    source_df = rep_data["source"]
+    target_df = rep_data["target"]
+
+    # 2) Resolve actual column names (can raise if not found), keyed by component ID
+    columns: dict[str, pd.Series] = {}
+    for source_id in source_ids:
+        actual_col = _match_column_name(source_id, source_df.columns.tolist())
+        columns[source_id] = source_df[actual_col]
+    actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
+    columns[target_id] = target_df[actual_target_col]
+
+    # 3) Build, sanitize, and deduplicate tuples
+    rep_mapping_df = pd.DataFrame(columns).dropna(how="any").drop_duplicates()
+
+    # 4) Enforce non-empty result
+    if rep_mapping_df.empty:
+        raise ValueError(
+            f"No valid mapping rows found for sources {source_ids} "
+            f"and target '{target_id}'."
         )
 
     return rep_mapping_df
