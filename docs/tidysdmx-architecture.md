@@ -174,13 +174,13 @@ For a **single** coded component, use `"representation"` with one component ID i
 |--------|--------|---------------|
 | SERIES | INDICATOR | representation |
 
-For an **N→1 multi-component** mapping (a tuple of source components jointly determining one target), use `"multi_representation"` and join the source component IDs in the `SOURCE` cell with `+`. The matching `S:`/`T:` columns in `REP_MAPPING` supply the value tuples:
+For an **N→1 multi-component** mapping (a tuple of source components jointly determining one target), use `"multi_representation"` and join the source component IDs in the `SOURCE` cell with `|`. The matching `S:`/`T:` columns in `REP_MAPPING` supply the value tuples:
 
 `COMP_MAPPING`
 
 | SOURCE | TARGET | MAPPING_RULES |
 |--------|--------|---------------|
-| FREQ+REF_AREA | INDICATOR | multi_representation |
+| FREQ\|REF_AREA | INDICATOR | multi_representation |
 
 `REP_MAPPING`
 
@@ -189,7 +189,7 @@ For an **N→1 multi-component** mapping (a tuple of source components jointly d
 | A | US | GDP_ANNUAL |
 | Q | US | GDP_QUARTERLY |
 
-This produces a pysdmx `MultiComponentMap` whose `source` is the ordered tuple `(FREQ, REF_AREA)` and `target` is `[INDICATOR]`. (`+` is used because it is not a legal SDMX ID character, so it cannot collide with a component ID. A `multi_representation` rule needs at least two source components; source codelists are not yet read for multi rules, so sources map as plain strings while `TARGET_CL` is still honoured.)
+This produces a pysdmx `MultiComponentMap` whose `source` is the ordered tuple `(FREQ, REF_AREA)` and `target` is `[INDICATOR]`. (`|` is used purely as a separator inside the Excel template — it never appears in the emitted SDMX artefact, whose `MultiComponentMap` uses the parsed component IDs, so it does not need to be SDMX-compliant. A `multi_representation` rule needs at least two source components; source codelists are not yet read for multi rules, so sources map as plain strings while `TARGET_CL` is still honoured.)
 
 `build_structure_map_from_template_wb(mappings)` reads the filled-in workbook and returns a pysdmx `StructureMap`. The analyst fills in Excel cells; pysdmx objects are the implementation detail.
 

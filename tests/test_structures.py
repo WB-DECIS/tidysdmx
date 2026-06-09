@@ -1696,7 +1696,7 @@ class TestBuildStructureMapFromTemplateWb:
         mappings = {
             "INFO": valid_mappings["INFO"],
             "COMP_MAPPING": pd.DataFrame({
-                "SOURCE": ["FREQ+REF_AREA"],
+                "SOURCE": ["FREQ|REF_AREA"],
                 "TARGET": ["INDICATOR"],
                 "MAPPING_RULES": ["multi_representation"],
             }),
@@ -1719,7 +1719,7 @@ class TestBuildStructureMapFromTemplateWb:
         mappings = {
             "INFO": valid_mappings["INFO"],
             "COMP_MAPPING": pd.DataFrame({
-                "SOURCE": ["SRC3", "FREQ+REF_AREA"],
+                "SOURCE": ["SRC3", "FREQ|REF_AREA"],
                 "TARGET": ["TGT3", "INDICATOR"],
                 "MAPPING_RULES": ["representation", "multi_representation"],
             }),
@@ -1952,13 +1952,13 @@ class TestExtractMappingRule:
     def test_multi_representation_rule_valid(self):
         """A multi_representation rule keeps the raw delimited SOURCE string."""
         row = pd.Series({
-            "SOURCE": "FREQ+REF_AREA",
+            "SOURCE": "FREQ|REF_AREA",
             "TARGET": "INDICATOR",
             "MAPPING_RULES": "multi_representation",
         })
         result = _extract_mapping_rule(row)
         assert result["mapping_rule"] == "multi_representation"
-        assert result["source_id"] == "FREQ+REF_AREA"
+        assert result["source_id"] == "FREQ|REF_AREA"
         assert result["target_id"] == "INDICATOR"
 
     def test_multi_representation_single_source_raises(self):

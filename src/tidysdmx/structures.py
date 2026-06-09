@@ -1770,8 +1770,8 @@ def build_structure_map_from_template_wb(
                 generated_maps.append(comp_map)
 
             elif mapping_rule == "multi_representation":
-                # SOURCE is a '+'-delimited list of >= 2 components
-                source_ids = [s.strip() for s in source_id.split("+") if s.strip()]
+                # SOURCE is a '|'-delimited list of >= 2 components
+                source_ids = [s.strip() for s in source_id.split("|") if s.strip()]
 
                 multi_df = _extract_multi_representation_map(
                     rep_data=rep_data, source_ids=source_ids, target_id=target_id
@@ -1792,7 +1792,7 @@ def build_structure_map_from_template_wb(
                     target_components=[target_id],
                     agency=current_agency,
                     id=rep_map_id,  # Use unique ID
-                    name=f"Mapping {'+'.join(source_ids)} to {target_id}",
+                    name=f"Mapping {'|'.join(source_ids)} to {target_id}",
                     target_cls=[parsed["target_cl"]]
                     if parsed.get("target_cl")
                     else None,
@@ -2058,13 +2058,13 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             "target_cl": target_cl,
         }
 
-    # multi_representation: SOURCE is a '+'-delimited list of >= 2 components
+    # multi_representation: SOURCE is a '|'-delimited list of >= 2 components
     if rule_lower == "multi_representation":
-        source_tokens = [s.strip() for s in source_id.split("+") if s.strip()]
+        source_tokens = [s.strip() for s in source_id.split("|") if s.strip()]
         if len(source_tokens) < 2:
             raise ValueError(
                 "Multi-representation map rule requires at least two source "
-                "components joined by '+' (e.g. 'FREQ+REF_AREA'). Use "
+                "components joined by '|' (e.g. 'FREQ|REF_AREA'). Use "
                 "'representation' for a single source component."
             )
         return {
