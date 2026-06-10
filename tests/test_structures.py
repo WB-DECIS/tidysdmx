@@ -1078,6 +1078,38 @@ class TestBuildMultiRepresentationMap:
         )
         assert result.urn is None
 
+    def test_default_representations_match_column_counts(self):
+        """Omitted source_cls/target_cls default to one String per column."""
+        df = pd.DataFrame(
+            {
+                "COUNTRY": ["DE", "CH"],
+                "CURRENCY": ["LC", "LC"],
+                "ISO_CURRENCY": ["EUR", "CHF"],
+            }
+        )
+        result = build_multi_representation_map(
+            df,
+            source_cols=["COUNTRY", "CURRENCY"],
+            target_cols=["ISO_CURRENCY"],
+            id="MRM1",
+        )
+        assert list(result.source) == [str(DataType.STRING)] * 2
+        assert list(result.target) == [str(DataType.STRING)]
+
+    def test_source_cls_length_mismatch_raises_value_error(self, sample_df):
+        """source_cls must have one entry per source column."""
+        with pytest.raises(ValueError, match="Length of source_cls"):
+            build_multi_representation_map(
+                sample_df, source_cls=["urn:a:cl", "urn:b:cl"]
+            )
+
+    def test_target_cls_length_mismatch_raises_value_error(self, sample_df):
+        """target_cls must have one entry per target column."""
+        with pytest.raises(ValueError, match="Length of target_cls"):
+            build_multi_representation_map(
+                sample_df, target_cls=["urn:a:cl", "urn:b:cl"]
+            )
+
 
 class TestBuildMultiComponentMap:
     """Tests for build_multi_component_map (N source components -> 1 target)."""
@@ -1168,6 +1200,17 @@ class TestBuildMultiComponentMap:
             id="MCM1",
         )
         assert len(cm.values.maps) == 2
+
+    def test_default_representations_one_per_component(self, multi_df):
+        """Omitted source_cls/target_cls yield one representation per component."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            id="MCM1",
+        )
+        assert list(cm.values.source) == [str(DataType.STRING)] * 2
+        assert list(cm.values.target) == [str(DataType.STRING)]
 
     def test_exported_from_package(self):
         """build_multi_component_map is part of the public tidysdmx API."""

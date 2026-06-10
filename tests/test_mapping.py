@@ -254,6 +254,20 @@ class TestApplyComponentMap:
         result = apply_component_map(df, cm)
         assert list(result["REGION"]) == ["EU", "_Z"]
 
+    def test_na_source_not_caught_by_catch_all(self):
+        """Missing source values stay NaN instead of receiving the default."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", np.nan, None]})
+
+        result = apply_component_map(df, cm)
+        assert result["REGION"].iloc[0] == "EU"
+        assert result["REGION"].iloc[1:].isna().all()
+
 
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
@@ -348,6 +362,22 @@ class TestApplyMultiComponentMap:
 
         result = apply_multi_component_map(df, mcm)
         assert list(result["URBANISATION"]) == ["RUR", "_Z"]
+
+    def test_na_source_not_caught_by_catch_all(self):
+        """Rows with any missing source value stay NaN, bypassing the catch-all."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["COL", "one"], target=["RUR"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"]),
+            ]
+        )
+        df = pd.DataFrame(
+            {"AREA": ["COL", np.nan, "XYZ"], "NOTE": ["one", "one", None]}
+        )
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].iloc[0] == "RUR"
+        assert result["URBANISATION"].iloc[1:].isna().all()
 
 
 class TestMapStructures:

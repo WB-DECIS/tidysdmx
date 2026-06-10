@@ -167,6 +167,10 @@ def apply_component_map(
 ) -> pd.DataFrame:
     """Apply a single ComponentMap with a RepresentationMap to a DataFrame.
 
+    Missing source values (NaN/None) remain unmapped: they are never matched
+    by regex value maps or the catch-all (``"regex:.*"``) and yield NaN in the
+    target column.
+
     Args:
         df: Source data.
         component_map: ComponentMap with source, target, and values.
@@ -208,7 +212,9 @@ def apply_component_map(
                     return vm.target
             return None
 
-        unmatched = mapped.isna()
+        # Missing source values stay unmapped: str(NaN) is "nan", which a
+        # regex (especially the catch-all "regex:.*") would otherwise match.
+        unmatched = mapped.isna() & result_df[source_col].notna()
         if unmatched.any():
             mapped = mapped.astype(object)
             mapped.loc[unmatched] = result_df.loc[unmatched, source_col].map(
@@ -240,6 +246,10 @@ def apply_multi_component_map(
     then any pure catch-all (``"regex:.*"`` for every component) last. The first
     matching rule wins. Patterns prefixed with ``"regex:"`` are matched using
     ``re.fullmatch``.
+
+    Rows with a missing value (NaN/None) in any source column remain
+    unmapped: they are never matched by any rule (including the catch-all)
+    and yield NaN in the target column.
 
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
@@ -273,6 +283,10 @@ def apply_multi_component_map(
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
     def match_row(row):
+        # Missing source values stay unmapped: str(NaN) is "nan", which a
+        # regex (especially the catch-all "regex:.*") would otherwise match.
+        if row.isna().any():
+            return None
         for rule in rules:
             match = True
             for col_val, pattern in zip(row, rule["patterns"], strict=True):

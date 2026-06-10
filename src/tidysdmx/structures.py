@@ -565,8 +565,12 @@ def build_multi_representation_map(
         agency: Agency maintaining the map. Defaults to "FAKE_AGENCY".
         id: Identifier for the map.
         name: Name of the map.
-        source_cls: URNs/IDs for source codelists/types.
-        target_cls: URNs/IDs for target codelists/types.
+        source_cls: URNs/IDs for source codelists/types, one per source
+            column. When omitted, each source is represented as
+            ``DataType.STRING``.
+        target_cls: URNs/IDs for target codelists/types, one per target
+            column. When omitted, each target is represented as
+            ``DataType.STRING``.
         version: Version of the map. Defaults to "1.0".
         description: Description of the map.
         source_cols: Source columns. Defaults to ["source"].
@@ -584,7 +588,9 @@ def build_multi_representation_map(
         The constructed MultiRepresentationMap object.
 
     Raises:
-        ValueError: If DataFrame is empty or columns are missing.
+        ValueError: If DataFrame is empty, columns are missing, or the length
+            of ``source_cls``/``target_cls`` does not match the number of
+            source/target columns.
         TypeError: If non-string data is found in source/target columns.
     """
     if df.empty:
@@ -599,6 +605,18 @@ def build_multi_representation_map(
     missing_cols = required_cols - set(df.columns)
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Representation refs, when provided, must align with the mapped columns
+    if source_cls is not None and len(source_cls) != len(_source_cols):
+        raise ValueError(
+            f"Length of source_cls ({len(source_cls)}) must match the number "
+            f"of source columns ({len(_source_cols)})."
+        )
+    if target_cls is not None and len(target_cls) != len(_target_cols):
+        raise ValueError(
+            f"Length of target_cls ({len(target_cls)}) must match the number "
+            f"of target columns ({len(_target_cols)})."
+        )
 
     # Validate data types (String check)
     for col in _source_cols + _target_cols:
@@ -627,10 +645,10 @@ def build_multi_representation_map(
         agency=agency,
         source=[_resolve_representation_ref(s) for s in source_cls]
         if source_cls
-        else [str(DataType.STRING)],
+        else [str(DataType.STRING)] * len(_source_cols),
         target=[_resolve_representation_ref(t) for t in target_cls]
         if target_cls
-        else [str(DataType.STRING)],
+        else [str(DataType.STRING)] * len(_target_cols),
         maps=multi_value_maps,
         description=description,
         version=version,
@@ -1779,7 +1797,9 @@ def build_structure_map_from_template_wb(
     with contextlib.suppress(ValueError):
         rep_data = _parse_rep_mapping_sheet(mappings)
 
-    generated_maps: list[FixedValueMap | ImplicitComponentMap | ComponentMap] = []
+    generated_maps: list[
+        FixedValueMap | ImplicitComponentMap | ComponentMap | MultiComponentMap
+    ] = []
 
     # Track RepresentationMap IDs to avoid duplicates
     rep_map_counter = {}
