@@ -1,8 +1,8 @@
 # python
-from typeguard import TypeCheckError
-import pytest
 import pandas as pd
 import pysdmx as px
+import pytest
+from typeguard import TypeCheckError
 
 # Import tidysdmx functions
 from tidysdmx.tidy_raw import filter_rows, filter_tidy_raw
@@ -57,9 +57,11 @@ class TestFilterRows:
             assert result[col].dtype == df[col].dtype
 
     def test_filter_rows_returns_copy(self, sample_df):
-        """Verify filter_rows with an empty filter returns a new DataFrame:
+        """Verify filter_rows with an empty filter returns a new DataFrame.
+
         - Content identical to input (same rows, order, values)
-        - Different object identity (copy, not original)"""
+        - Different object identity (copy, not original)
+        """
         result = filter_rows(sample_df, {})
         assert result.equals(sample_df)  # Same number of rows and identical content
         assert result is not sample_df  # Distinct object (copy)
@@ -106,8 +108,10 @@ class TestFilterRows:
         assert 3 in result.index
 
     def test_filter_rows_empty_dataframe(self):
-        """Ensure filter_rows returns an empty DataFrame when called on an input with
-        no rows; should not raise and result remains empty."""
+        """Ensure filter_rows returns an empty DataFrame for an empty input.
+
+        Should not raise, and the result remains empty.
+        """
         df = pd.DataFrame(columns=["code", "status"])
         result = filter_rows(df, {"code": ["1"]})
         assert result.empty
@@ -142,7 +146,6 @@ class TestFilterTidyRaw:
 
     def test_filter_tidy_raw_no_filter_needed(self, sdmx_df):
         """If all rows are valid, the output should match the input."""
-
         # Instantiate an empty Components object
         empty_components = px.model.Components([])
 

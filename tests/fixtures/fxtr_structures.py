@@ -1,17 +1,9 @@
 # tests/fixtures/fxtr_structures.py
-import pytest
 import pickle as pkl
 from pathlib import Path
-import pysdmx as px
-from pysdmx.model.map import (
-    RepresentationMap,
-    FixedValueMap,
-    ImplicitComponentMap,
-    DatePatternMap,
-    ValueMap,
-    MultiValueMap,
-)
+
 import pandas as pd
+import pytest
 
 # Directory for cached responses
 CACHE_DIR = Path(__file__).parent / "data/structures"
@@ -20,7 +12,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 @pytest.fixture(scope="session")
 def value_map_df_mandatory_cols():
-    """Session-scoped fixture returning a DataFrame with mandatory 'source' and 'target' columns.
+    """Return a session-scoped DataFrame with 'source' and 'target' columns.
 
     Caches the data to CSV on first run and reloads it on subsequent runs.
     """
@@ -44,7 +36,7 @@ def value_map_df_mandatory_cols():
 
 @pytest.fixture(scope="session")
 def multi_value_map_df():
-    """Session-scoped fixture returning a DataFrame for testing build_multi_value_map_list.
+    """Return a session-scoped DataFrame for build_multi_value_map_list tests.
 
     Covers:
         - Normal case with multiple source columns and single target column.

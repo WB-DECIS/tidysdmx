@@ -1,6 +1,7 @@
-import pytest
 from pathlib import Path
+
 import pandas as pd
+import pytest
 
 # Global variables definitions
 incorrect_ind_code = "INCORRECT_IND"

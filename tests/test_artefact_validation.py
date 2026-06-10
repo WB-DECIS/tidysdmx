@@ -51,7 +51,7 @@ def _measure(id_):
     return Component(id=id_, required=True, role=Role.MEASURE, concept=Concept(id=id_))
 
 
-class TestValidationIssue:  # noqa: D101
+class TestValidationIssue:
     def test_defaults(self):
         """Severity defaults to error and field to None."""
         issue = ValidationIssue(rule_id="M001", path="p", message="m")
@@ -71,7 +71,7 @@ class TestValidationIssue:  # noqa: D101
         assert issue.field == "id"
 
 
-class TestValidationError:  # noqa: D101
+class TestValidationError:
     def test_is_value_error_subclass(self):
         """Existing ValueError handlers keep working."""
         err = ValidationError([ValidationIssue(rule_id="M001", path="p", message="m")])
@@ -95,7 +95,7 @@ class TestValidationError:  # noqa: D101
         assert "q:" in msg
 
 
-class TestCommonRules:  # noqa: D101
+class TestCommonRules:
     def test_m001_empty_id_flagged(self):
         """Empty id triggers M001."""
         issues = validate(_codelist(id=""))
@@ -132,7 +132,7 @@ class TestCommonRules:  # noqa: D101
         assert any(i.rule_id == "M003" for i in issues)
 
 
-class TestCodelist:  # noqa: D101
+class TestCodelist:
     def test_populated_codelist_ok(self):
         """A populated codelist has no issues."""
         assert validate(_codelist()) == []
@@ -142,7 +142,7 @@ class TestCodelist:  # noqa: D101
         assert any(i.rule_id == "C001" for i in validate(_codelist(items=())))
 
 
-class TestSchemes:  # noqa: D101
+class TestSchemes:
     def test_concept_scheme_empty_flagged(self):
         """Empty ConceptScheme triggers CS001."""
         cs = ConceptScheme(id="CS", agency="AGY", name="n", items=())
@@ -164,7 +164,7 @@ class TestSchemes:  # noqa: D101
         assert any(i.rule_id == "AS001" for i in validate(ag))
 
 
-class TestHierarchy:  # noqa: D101
+class TestHierarchy:
     def test_empty_codes_flagged(self):
         """Hierarchy without codes triggers H001."""
         h = Hierarchy(id="H", agency="AGY", name="n", codes=())
@@ -181,7 +181,7 @@ class TestHierarchy:  # noqa: D101
         assert validate(h) == []
 
 
-class TestRepresentationMap:  # noqa: D101
+class TestRepresentationMap:
     def test_missing_fields_flagged(self):
         """Missing source/target/maps all trigger rules."""
         rm = RepresentationMap(id="R", agency="AGY", name="n")
@@ -201,7 +201,7 @@ class TestRepresentationMap:  # noqa: D101
         assert validate(rm) == []
 
 
-class TestMultiRepresentationMap:  # noqa: D101
+class TestMultiRepresentationMap:
     def test_missing_fields_flagged(self):
         """Missing source/target/maps all trigger rules."""
         mrm = MultiRepresentationMap(id="MR", agency="AGY", name="n")
@@ -221,7 +221,7 @@ class TestMultiRepresentationMap:  # noqa: D101
         assert validate(mrm) == []
 
 
-class TestDataStructureDefinition:  # noqa: D101
+class TestDataStructureDefinition:
     def test_no_components_flagged(self):
         """DSD without components triggers D001."""
         dsd = DataStructureDefinition(
@@ -250,7 +250,7 @@ class TestDataStructureDefinition:  # noqa: D101
         assert validate(dsd) == []
 
 
-class TestDataflow:  # noqa: D101
+class TestDataflow:
     def test_no_structure_flagged(self):
         """Dataflow without structure triggers DF001."""
         df = Dataflow(id="DF", agency="AGY", name="n")
@@ -277,7 +277,7 @@ class TestDataflow:  # noqa: D101
         assert any(i.rule_id == "DF001" for i in validate(df))
 
 
-class TestValidate:  # noqa: D101
+class TestValidate:
     def test_artefact_without_specific_checker(self):
         """A StructureMap has no type-specific rules registered."""
         sm = StructureMap(
@@ -300,7 +300,7 @@ class TestValidate:  # noqa: D101
         assert validate(cl) == []
 
 
-class TestValidateMany:  # noqa: D101
+class TestValidateMany:
     def test_empty_input_returns_empty_list(self):
         """Empty sequence returns empty list."""
         assert validate_many([]) == []
@@ -313,7 +313,7 @@ class TestValidateMany:  # noqa: D101
         assert {i.rule_id for i in issues} == {"C001", "H001"}
 
 
-class TestRaiseIfInvalid:  # noqa: D101
+class TestRaiseIfInvalid:
     def test_accepts_single_artefact(self):
         """A single valid artefact does not raise."""
         raise_if_invalid(_codelist())

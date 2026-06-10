@@ -35,7 +35,7 @@ from tidysdmx.artefact_builder import (
 from tidysdmx.artefact_validation import ValidationError
 
 
-class TestBuildCodelist:  # noqa: D101
+class TestBuildCodelist:
     def test_happy_path(self):
         """Returns a Codelist when inputs are valid."""
         cl = build_codelist(
@@ -70,7 +70,7 @@ class TestBuildCodelist:  # noqa: D101
         assert cl.sdmx_type == "valuelist"
 
 
-class TestBuildConceptScheme:  # noqa: D101
+class TestBuildConceptScheme:
     def test_happy_path(self):
         """Returns a ConceptScheme when inputs are valid."""
         cs = build_concept_scheme(
@@ -88,7 +88,7 @@ class TestBuildConceptScheme:  # noqa: D101
             build_concept_scheme(id="CS", agency="AGY", name="n")
 
 
-class TestBuildCategoryScheme:  # noqa: D101
+class TestBuildCategoryScheme:
     def test_happy_path(self):
         """Returns a CategoryScheme when inputs are valid."""
         cs = build_category_scheme(
@@ -105,7 +105,7 @@ class TestBuildCategoryScheme:  # noqa: D101
             build_category_scheme(id="CAT", agency="AGY", name="n")
 
 
-class TestBuildAgencyScheme:  # noqa: D101
+class TestBuildAgencyScheme:
     def test_happy_path(self):
         """Returns an AgencyScheme when inputs are valid."""
         scheme = build_agency_scheme(
@@ -122,7 +122,7 @@ class TestBuildAgencyScheme:  # noqa: D101
             build_agency_scheme(id="AGENCIES", agency="SDMX", name="n")
 
 
-class TestBuildHierarchy:  # noqa: D101
+class TestBuildHierarchy:
     def test_happy_path(self):
         """Returns a Hierarchy when inputs are valid."""
         h = build_hierarchy(
@@ -149,7 +149,7 @@ def _measure(id_):
     return Component(id=id_, required=True, role=Role.MEASURE, concept=Concept(id=id_))
 
 
-class TestBuildDataStructureDefinition:  # noqa: D101
+class TestBuildDataStructureDefinition:
     def test_accepts_plain_sequence(self):
         """A plain list of Component instances is wrapped in Components."""
         dsd = build_data_structure_definition(
@@ -187,7 +187,7 @@ class TestBuildDataStructureDefinition:  # noqa: D101
             )
 
 
-class TestBuildDataflow:  # noqa: D101
+class TestBuildDataflow:
     def test_happy_path(self):
         """Returns a Dataflow referencing the DSD."""
         df = build_dataflow(
@@ -210,7 +210,7 @@ class TestBuildDataflow:  # noqa: D101
             )
 
 
-class TestBuildRepresentationMap:  # noqa: D101
+class TestBuildRepresentationMap:
     def test_happy_path(self):
         """Returns a RepresentationMap when inputs are valid."""
         rm = build_representation_map(
@@ -247,7 +247,7 @@ class TestBuildRepresentationMap:  # noqa: D101
             )
 
 
-class TestBuildMultiRepresentationMap:  # noqa: D101
+class TestBuildMultiRepresentationMap:
     def test_happy_path(self):
         """Returns a MultiRepresentationMap when inputs are valid."""
         mrm = build_multi_representation_map(

@@ -1,23 +1,23 @@
-from typeguard import TypeCheckError
+import numpy as np
+import pandas as pd
+import pytest
 from pysdmx.model import (
+    ComponentMap,
     FixedValueMap,
     ImplicitComponentMap,
     MultiComponentMap,
     MultiRepresentationMap,
     MultiValueMap,
-    ComponentMap,
     RepresentationMap,
     ValueMap,
 )
-import pytest
-import pandas as pd
-import numpy as np
+from typeguard import TypeCheckError
 
 # Load tidysdmx functions
 from tidysdmx.mapping import (
+    apply_component_map,
     apply_fixed_value_maps,
     apply_implicit_component_maps,
-    apply_component_map,
     apply_multi_component_map,
     map_structures,
 )
@@ -53,7 +53,7 @@ def implicit_maps():
 # endregion
 
 
-class TestApplyFixedValueMaps:  # noqa: D101
+class TestApplyFixedValueMaps:
     def test_apply_fixed_value_maps_adds_columns(self, sample_df, fixed_maps):
         result = apply_fixed_value_maps(sample_df, fixed_maps)
         # Original columns remain
@@ -65,7 +65,7 @@ class TestApplyFixedValueMaps:  # noqa: D101
         assert all(result["OBS_CONF"] == "R")
 
     def test_apply_fixed_value_maps_empty_maps(self, sample_df):
-        """Empty map should not modify input dataframe"""
+        """Empty map should not modify input dataframe."""
         result = apply_fixed_value_maps(sample_df, [])
         # Should return unchanged DataFrame
         pd.testing.assert_frame_equal(result, sample_df)
@@ -90,7 +90,7 @@ class TestApplyFixedValueMaps:  # noqa: D101
         pd.testing.assert_frame_equal(sample_df, original_copy)
 
 
-class TestApplyImplicitComponentMaps:  # noqa: D101
+class TestApplyImplicitComponentMaps:
     def test_apply_maps_add_new_columns(self, sample_df, implicit_maps):
         """Test that new columns are added correctly from source columns."""
         result = apply_implicit_component_maps(sample_df, implicit_maps)
@@ -107,7 +107,8 @@ class TestApplyImplicitComponentMaps:  # noqa: D101
         )  # 'FREQ' should now equal 'OBS_VALUE'
 
     @pytest.mark.skip(
-        reason="REVIEW FUNCTION LOGIC: Should at least trigger a warning. But probably needs to fails entirely with helpful message."
+        reason="REVIEW FUNCTION LOGIC: Should at least trigger a warning. But "
+        "probably needs to fails entirely with helpful message."
     )
     def test_skip_missing_source_column(self, sample_df):
         """Test that missing source columns are skipped without error."""
@@ -146,8 +147,8 @@ class TestApplyImplicitComponentMaps:  # noqa: D101
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-class TestApplyComponentMap:  # noqa: D101
-    """Tests for the apply_component_map function using the existing ifpri_asti_sm fixture."""
+class TestApplyComponentMap:
+    """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
     @pytest.fixture
     def component_map(self, ifpri_asti_sm):
@@ -157,7 +158,7 @@ class TestApplyComponentMap:  # noqa: D101
         return cm
 
     def test_successful_mapping(self, component_map):
-        """Tests that mapping is applied correctly using ComponentMap from component_map."""
+        """Tests that mapping is applied correctly via the ComponentMap."""
         # Prepare DataFrame with source values
         df = pd.DataFrame(
             {

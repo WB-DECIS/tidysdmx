@@ -1,22 +1,24 @@
-import pandas as pd
-from pandas.testing import assert_frame_equal
-from pysdmx.model import Schema, Components
-from typeguard import TypeCheckError
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
+
 import numpy as np
+import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
+from pysdmx.model import Components, Schema
+from typeguard import TypeCheckError
 
 from tidysdmx.tidysdmx import (
-    parse_dsd_id,
+    _add_sdmx_reference_cols,
+    _extract_artefact_type,
+    create_keys_dict,
     parse_artefact_id,
+    parse_dsd_id,
     standardize_indicator_id,
+    standardize_output,
+    transform_source_to_target,
     vectorized_lookup_ordered_v1,
     vectorized_lookup_ordered_v2,
-    create_keys_dict,
-    transform_source_to_target,
-    _extract_artefact_type,
-    _add_sdmx_reference_cols,
-    standardize_output,
 )
 
 
@@ -539,11 +541,15 @@ class TestTransformSourceToTarget:
         assert_frame_equal(result_df, expected_df)
 
     def test_empty_mapping(self, sample_raw_df):
-        """If mapping is empty, should raise an error"""
+        """If mapping is empty, should raise an error."""
         mapping = {"components": []}
         with pytest.raises(
             KeyError,
-            match="The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty.",
+            match=re.escape(
+                "The mapping file should contain 'components' key or its value "
+                "should not be empty. Please make sure the mapping file has this "
+                "key and its value is not empty."
+            ),
         ):
             transform_source_to_target(sample_raw_df, mapping)
 
@@ -552,7 +558,11 @@ class TestTransformSourceToTarget:
         mapping = {}
         with pytest.raises(
             KeyError,
-            match="The mapping file should contain 'components' key or its value should not be empty. Please make sure the mapping file has this key and its value is not empty.",
+            match=re.escape(
+                "The mapping file should contain 'components' key or its value "
+                "should not be empty. Please make sure the mapping file has this "
+                "key and its value is not empty."
+            ),
         ):
             transform_source_to_target(sample_raw_df, mapping)
 
@@ -564,18 +574,21 @@ class TestTransformSourceToTarget:
 
     def test_invalid_mapping_type(self, sample_raw_df):
         """Optional: ensure invalid mapping type raises an error (if enforced later)."""
-        with pytest.raises(Exception):
+        with pytest.raises(TypeCheckError):
             transform_source_to_target(sample_raw_df, ["invalid_structure"])
 
 
 class TestExtractArtefactType:
-    """Tests for the _extract_artefact function which extracts SDMX artefact type from a Schema instance."""
+    """Tests for the _extract_artefact function.
+
+    Extracts the SDMX artefact type from a Schema instance.
+    """
 
     @pytest.mark.parametrize(
         "context", ["dataflow", "datastructure", "provisionagreement"]
     )
     def test_valid_contexts(self, context):
-        """Tests that _extract_artefact returns the correct context for valid schema contexts."""
+        """Tests _extract_artefact returns the correct context for valid contexts."""
         comps = Components([])
         schema = Schema(
             context,
@@ -584,13 +597,13 @@ class TestExtractArtefactType:
             comps,
             "1.0",
             [],
-            generated=datetime.now(timezone.utc),
+            generated=datetime.now(UTC),
         )
         result = _extract_artefact_type(schema)
         assert result == context
 
     def test_invalid_context_raises_value_error(self):
-        """Tests that _extract_artefact raises ValueError when schema context is invalid."""
+        """Tests _extract_artefact raises ValueError when schema context is invalid."""
         comps = Components([])
         schema = Schema(
             "invalid_context",
@@ -599,7 +612,7 @@ class TestExtractArtefactType:
             comps,
             "1.0",
             [],
-            generated=datetime.now(timezone.utc),
+            generated=datetime.now(UTC),
         )
         with pytest.raises(ValueError) as exc_info:
             _extract_artefact_type(schema)
@@ -615,7 +628,7 @@ class TestExtractArtefactType:
             comps,
             "1.0",
             [],
-            generated=datetime.now(timezone.utc),
+            generated=datetime.now(UTC),
         )
         with pytest.raises(ValueError) as exc_info:
             _extract_artefact_type(schema)
@@ -624,14 +637,17 @@ class TestExtractArtefactType:
         assert "datastructure" in message
 
     def test_not_schema_raise_error(self):
-        """Tests that _extract_artefact raises TypeCheckError when argument is not a valid schema."""
+        """Tests _extract_artefact raises TypeCheckError for a non-schema argument."""
         schema = "Not a valid schema"
         with pytest.raises(TypeCheckError):
             _extract_artefact_type(schema)
 
 
 class TestAddSdmxReferenceCols:
-    """Tests for the `_add_sdmx_reference_cols` function which adds SDMX reference columns to a DataFrame."""
+    """Tests for the `_add_sdmx_reference_cols` function.
+
+    Adds SDMX reference columns to a DataFrame.
+    """
 
     @pytest.mark.parametrize(
         "artefact_type,expected_cols",
@@ -717,7 +733,9 @@ class TestStandardizeOutput:
     def test_empty_dataframe_raises(self, ifpri_asti_schema):
         """Tests that ValueError is raised when DataFrame is empty."""
         empty_df = pd.DataFrame()
-        with pytest.raises(ValueError, match="Input DataFrame `df` cannot be empty."):
+        with pytest.raises(
+            ValueError, match=re.escape("Input DataFrame `df` cannot be empty.")
+        ):
             standardize_output(
                 empty_df, artefact_id="DF_IFPRI_ASTI", schema=ifpri_asti_schema
             )

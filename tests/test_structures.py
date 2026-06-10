@@ -1,6 +1,7 @@
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -86,7 +87,7 @@ def description():
 # endregion
 
 
-class TestBuildFixedMap:  # noqa: D101
+class TestBuildFixedMap:
     def test_build_fixed_map_normal(self):
         """Valid mapping with default located_in."""
         mapping = build_fixed_map(target="CONF_STATUS", value="F")
@@ -114,7 +115,7 @@ class TestBuildFixedMap:  # noqa: D101
 
     def test_build_fixed_map_invalid_located_in_raises(self):
         """Invalid located_in should raise ValueError."""
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError):
             build_fixed_map("CONF_STATUS", "F", located_in="invalid")
 
     def test_build_fixed_map_type_safety(self):
@@ -127,7 +128,7 @@ class TestBuildFixedMap:  # noqa: D101
             build_fixed_map("CONF_STATUS", 456, located_in=None)
 
 
-class TestBuildImplicitComponentMap:  # noqa: D101
+class TestBuildImplicitComponentMap:
     def test_build_implicit_component_map_valid(self):
         """Valid mapping should return an ImplicitComponentMap instance."""
         mapping = build_implicit_component_map("FREQ", "FREQUENCY")
@@ -175,7 +176,7 @@ class TestBuildImplicitComponentMap:  # noqa: D101
         assert mapping.source == "freq"
 
 
-class TestBuildDatePatternMap:  # noqa: D101
+class TestBuildDatePatternMap:
     def test_build_date_pattern_map_valid_fixed(self):
         """Valid case with fixed pattern type."""
         dpm = build_date_pattern_map("DATE", "TIME_PERIOD", "MMM yy", "M")
@@ -260,7 +261,7 @@ class TestBuildDatePatternMap:  # noqa: D101
             build_date_pattern_map("DATE", "TIME_PERIOD", "   ", "M")
 
 
-class TestBuildValueMap:  # noqa: D101
+class TestBuildValueMap:
     def test_build_value_map_normal(self):
         """Test normal case with source and target values."""
         vm = build_value_map("BE", "BEL")
@@ -333,7 +334,7 @@ class TestBuildValueMap:  # noqa: D101
         assert isinstance(vm.valid_from, datetime)
 
 
-class TestBuildValueMapList:  # noqa: D101
+class TestBuildValueMapList:
     def test_build_value_map_list_valid(self, value_map_df_mandatory_cols):
         """Valid DataFrame should return a list of ValueMap objects."""
         result = build_value_map_list(value_map_df_mandatory_cols, "source", "target")
@@ -401,7 +402,6 @@ class TestBuildValueMapList:  # noqa: D101
     ):
         """Column order should not affect the result."""
         df_reordered = value_map_df_mandatory_cols[["target", "source"]]
-        # result = build_value_map_list(df_reordered.rename(columns={"target": "target", "source": "source"}), "source", "target")
         result = build_value_map_list(df_reordered, "source", "target")
         assert len(result) == value_map_df_mandatory_cols.shape[0]
         assert result[1].source == "UY"
@@ -423,7 +423,7 @@ class TestBuildValueMapList:  # noqa: D101
         assert all(vm.source != "regex:.*" for vm in result)
 
 
-class TestBuildMultiValueMapList:  # noqa: D101
+class TestBuildMultiValueMapList:
     @pytest.fixture
     def multi_value_map_df(self) -> pd.DataFrame:
         """Fixture providing a standard DataFrame for testing scenarios.
@@ -468,13 +468,14 @@ class TestBuildMultiValueMapList:  # noqa: D101
         self,
         non_string_type_error_data: tuple[pd.DataFrame, Sequence[str], Sequence[str]],
     ) -> None:
-        """Tests that TypeError is raised when the target column contains non-string values.
+        """Tests that TypeError is raised when target column has non-string values.
 
         Args:
             non_string_type_error_data: Fixture data for the error case.
         """
         df, source_cols, target_cols = non_string_type_error_data
-        # Note: The function validates per column, so expected message refers to the specific column name
+        # Note: The function validates per column, so expected message refers to
+        # the specific column name
         expected_message = (
             f"Target column '{target_cols[0]}' must contain only string values."
         )
@@ -652,7 +653,7 @@ class TestBuildMultiValueMapList:  # noqa: D101
             build_multi_value_map_list(valid_dataframe, source_cols, target_cols)
 
     def test_raises_type_error_when_columns_contain_non_strings(self):
-        """Tests that TypeError is raised if source/target columns contain non-string data."""
+        """Tests TypeError is raised if source/target columns have non-string data."""
         # Arrange
         df = pd.DataFrame(
             {
@@ -684,7 +685,7 @@ class TestBuildMultiValueMapList:  # noqa: D101
         assert result[0].valid_from.year == 2020
 
     def test_handles_pandas_timestamp_validity(self):
-        """Tests that pd.Timestamp objects in valid_from/valid_to are converted to datetime.
+        """Tests pd.Timestamp objects in valid_from/valid_to convert to datetime.
 
         This specifically targets the line:
         elif hasattr(val, "to_pydatetime"): kwargs["valid_from"] = val.to_pydatetime()
@@ -705,8 +706,8 @@ class TestBuildMultiValueMapList:  # noqa: D101
         map_obj = result[0]
         # Check valid_from
         assert isinstance(map_obj.valid_from, datetime)
-        # Ensure it's a standard datetime, not a pandas Timestamp (unless they are same class in env,
-        # but the code calls to_pydatetime explicitely to convert)
+        # Ensure it's a standard datetime, not a pandas Timestamp (unless they are
+        # same class in env, but the code calls to_pydatetime explicitely to convert)
         assert map_obj.valid_from == datetime(2022, 1, 1)
 
         # Check valid_to
@@ -755,7 +756,7 @@ class TestBuildMultiValueMapList:  # noqa: D101
         assert map_obj.valid_to is None
 
 
-class TestBuildRepresentationMap:  # noqa: D101
+class TestBuildRepresentationMap:
     def test_build_representation_map_success(
         self,
         value_map_df_mandatory_cols,
@@ -838,7 +839,7 @@ class TestBuildRepresentationMap:  # noqa: D101
     def test_defaults_to_string_dtype_when_no_codelist(
         self, value_map_df_mandatory_cols
     ):
-        """When source_cl and target_cl are omitted, source/target default to 'String'."""
+        """When source_cl/target_cl are omitted, source/target default to 'String'."""
         rm = build_representation_map(df=value_map_df_mandatory_cols)
         assert rm.source == "String"
         assert rm.target == "String"
@@ -851,7 +852,7 @@ class TestBuildRepresentationMap:  # noqa: D101
         assert rm.target == "String"
 
 
-class TestBuildSingleComponentMap:  # noqa: D101
+class TestBuildSingleComponentMap:
     def test_build_single_component_map_valid(self, value_map_df_mandatory_cols):
         """Test normal case with valid DataFrame and fixture."""
         df = value_map_df_mandatory_cols
@@ -873,7 +874,7 @@ class TestBuildSingleComponentMap:  # noqa: D101
     def test_build_single_component_map_defaults_to_string_dtype(
         self, value_map_df_mandatory_cols
     ):
-        """When no codelist args, RepresentationMap source/target default to 'String'."""
+        """When no codelist args, RepresentationMap source/target default 'String'."""
         cm = build_single_component_map(
             value_map_df_mandatory_cols,
             source_component="COUNTRY",
@@ -1027,7 +1028,7 @@ class TestBuildMultiRepresentationMap:
         ],
     )
     def test_non_string_values_raise_type_error(self, invalid_data):
-        """Tests that TypeError is raised when source or target columns contain non-string values."""
+        """Tests TypeError raised when source/target columns have non-string values."""
         df_invalid = pd.DataFrame(invalid_data)
         with pytest.raises(TypeError):
             build_multi_representation_map(df_invalid)
@@ -1145,7 +1146,7 @@ class TestBuildMultiComponentMap:
         assert cm.values.urn is None
 
     def test_default_value_appends_catch_all(self, multi_df):
-        """default_value appends a trailing catch-all MultiValueMap (regex per source)."""
+        """default_value appends trailing catch-all MultiValueMap (regex per source)."""
         cm = build_multi_component_map(
             multi_df,
             source_components=["COUNTRY", "CURRENCY"],
@@ -1175,7 +1176,7 @@ class TestBuildMultiComponentMap:
         assert hasattr(tidysdmx, "build_multi_component_map")
 
 
-class TestCreateSchemaFromTable:  # noqa: D101
+class TestCreateSchemaFromTable:
     def test_create_schema_time_period_standardization(self) -> None:
         """Test that the time dimension is standardized to TIME_PERIOD."""
         df = pd.DataFrame(
@@ -1199,7 +1200,9 @@ class TestCreateSchemaFromTable:  # noqa: D101
         assert time_comp.id == "TIME_PERIOD"
         assert time_comp.role == Role.DIMENSION
         assert time_comp.local_dtype == DataType.PERIOD
-        # assert time_comp.description == "Timespan or point in time to which the observation actually refers."
+        # assert time_comp.description == (
+        #     "Timespan or point in time to which the observation actually refers."
+        # )
 
         # Verify TIME_PERIOD concept properties
         assert isinstance(time_comp.concept, ItemReference)
@@ -1241,7 +1244,7 @@ class TestCreateSchemaFromTable:  # noqa: D101
         assert "Columns not found" in str(exc.value)
 
 
-class TestBuildSchemaFromWbTemplate:  # noqa: D101
+class TestBuildSchemaFromWbTemplate:
     def test_parse_info_sheet_basic_scenario(self):
         """Test a standard scenario where the sheet contains simple Key-Value pairs.
 
@@ -1277,7 +1280,7 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
             _parse_info_sheet(sheets, sheet_name="INFO")
 
     def test_parse_info_sheet_ignore_section_header(self):
-        """Test that the specific 'DATA CURATION PROCESS' string causes the row to be ignored."""
+        """Test the 'DATA CURATION PROCESS' string causes the row to be ignored."""
         df = pd.DataFrame(
             [
                 ["DATA CURATION PROCESS", "Some Description"],  # Should be ignored
@@ -1298,7 +1301,7 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
             [
                 ["OnlyOne"],  # 1 valid cell -> Keep
                 ["Key", "Value", "Extra"],  # 3 valid cells -> Ignore
-                # [None, None, "SingleValid"],       # 1 valid cell (after nan filter) -> Ignore
+                # [None, None, "SingleValid"],  # 1 valid cell post-nan -> Ignore
                 ["Key2", "Value2", None],  # 2 valid cells -> Keep
             ]
         )
@@ -1311,7 +1314,7 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
         assert result.iloc[1]["Value"] == "Value2"
 
     def test_parse_info_sheet_empty_input(self):
-        """Test parsing an empty DataFrame results in an empty result with correct columns."""
+        """Test parsing an empty DataFrame yields empty result with correct columns."""
         df = pd.DataFrame()
         sheets = {"INFO": df}
         result = _parse_info_sheet(sheets)
@@ -1355,7 +1358,7 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
         assert result.iloc[1]["Key"] == "Key2"
 
     def test_parse_info_sheet_unnamed_columns(self):
-        """Test that pandas 'Unnamed: X' columns (common in headerless parsing) don't break logic."""
+        """Test pandas 'Unnamed: X' columns (headerless parse) don't break logic."""
         # pd.read_excel often produces 'Unnamed: 0', 'Unnamed: 1' if no header is found
         # These will be automatically removed
 
@@ -1552,9 +1555,9 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
         assert "Unnamed: 0" not in result["source"].columns
 
 
-class TestMatchColumnName:  # noqa: D101
+class TestMatchColumnName:
     # Shared list of column names mimicking cleaned headers from REP_MAPPING sheet
-    AVAILABLE_COLUMNS = [
+    AVAILABLE_COLUMNS: ClassVar[list[str]] = [
         "INDICATOR_CODE",
         "Time Period",
         "REF AREA",
@@ -1596,7 +1599,10 @@ class TestMatchColumnName:  # noqa: D101
         assert result == expected
 
     def test_match_column_name_fuzzy_match_short_in_long(self):
-        """Tests fuzzy match where the column name is contained in the target name (e.g., 'ShortName' in 'TheShortName')."""
+        """Tests fuzzy match where column name is contained in target name.
+
+        For example, 'ShortName' in 'TheShortName'.
+        """
         # Target is longer/more descriptive, column is the core name
         target = "The Short Name Field"
         expected = "ShortName"
@@ -1604,7 +1610,10 @@ class TestMatchColumnName:  # noqa: D101
         assert result == expected
 
     def test_match_column_name_fuzzy_match_long_in_short(self):
-        """Tests fuzzy match where the target name is contained in the column name (e.g., 'Long' in 'LONG_NAME_TEST')."""
+        """Tests fuzzy match where target name is contained in column name.
+
+        For example, 'Long' in 'LONG_NAME_TEST'.
+        """
         # Target is the short name, column is longer
         target = "Long"
         expected = "LONG_NAME_TEST"
@@ -1636,7 +1645,8 @@ class TestMatchColumnName:  # noqa: D101
         """Tests that the @typechecked decorator catches incorrect argument types."""
         # Note: Requires the real `typeguard.typechecked` to be active in the runtime
         # environment to enforce the check before the ValueError might be raised.
-        # In this isolated mock, we check for a general TypeError/AttributeError if the code runs.
+        # In this isolated mock, we check for a general TypeError/AttributeError if
+        # the code runs.
 
         # Passing None for target_name should raise a type error
         with pytest.raises(TypeCheckError):
@@ -1648,7 +1658,7 @@ class TestMatchColumnName:  # noqa: D101
 
 
 class TestExtractArtefactId:
-    """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO sheet DataFrame."""
+    """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO."""
 
     @pytest.fixture
     def valid_info_df(self):
@@ -1714,11 +1724,11 @@ class TestExtractArtefactId:
 
 
 class TestBuildStructureMapFromTemplateWb:
-    """Tests for build_structure_map_from_template_wb() which builds a StructureMap from WB-format Excel template."""
+    """Tests for build_structure_map_from_template_wb() (WB-format Excel template)."""
 
     @pytest.fixture
     def valid_mappings(self):
-        """Fixture: Valid mappings dictionary with INFO, COMP_MAPPING, and REP_MAPPING sheets."""
+        """Fixture: Valid mappings with INFO, COMP_MAPPING, and REP_MAPPING sheets."""
         info_df = pd.DataFrame({"Key": ["dataflow"], "Value": ["AGENCY:DF_ID(1.0)"]})
         comp_df = pd.DataFrame(
             {
@@ -1764,14 +1774,14 @@ class TestBuildStructureMapFromTemplateWb:
     def test_representation_missing_rep_mapping_sheet_raises_valueerror(
         self, valid_mappings
     ):
-        """Tests that representation rule without REP_MAPPING sheet raises ValueError."""
+        """Tests representation rule without REP_MAPPING sheet raises ValueError."""
         mappings = valid_mappings.copy()
         mappings.pop("REP_MAPPING")
         with pytest.raises(ValueError):
             build_structure_map_from_template_wb(mappings)
 
     def test_representation_empty_combined_df_raises_valueerror(self, valid_mappings):
-        """Tests that representation rule with empty combined DataFrame raises ValueError."""
+        """Tests representation rule with empty combined DataFrame raises ValueError."""
         mappings = valid_mappings.copy()
         mappings["REP_MAPPING"] = pd.DataFrame(
             {"S:SRC3": [], "T:TGT3": []}
@@ -1787,7 +1797,7 @@ class TestBuildStructureMapFromTemplateWb:
             build_structure_map_from_template_wb(mappings)
 
     def test_case_insensitive_info_key_match(self, valid_mappings):
-        """Tests that INFO sheet key matching is case-insensitive and correctly extracts agency and version."""
+        """Tests INFO key matching is case-insensitive and extracts agency/version."""
         mappings = valid_mappings.copy()
         mappings["INFO"] = pd.DataFrame(
             {"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]}
@@ -1814,7 +1824,7 @@ class TestBuildStructureMapFromTemplateWb:
         assert "DataStructure=TGT_AGENCY:TGT_DSD(3.0)" in sm.target
 
     def test_source_and_target_urns_for_dataflow(self, valid_mappings):
-        """Tests that URNs use Dataflow artefact type when structure_type is dataflow."""
+        """Tests URNs use Dataflow artefact type when structure_type is dataflow."""
         sm = build_structure_map_from_template_wb(
             valid_mappings,
             source_structure_id="AG:DF_SRC(1.0)",
@@ -1825,7 +1835,7 @@ class TestBuildStructureMapFromTemplateWb:
         assert "Dataflow=AG:DF_TGT(1.0)" in sm.target
 
     def test_omitted_structure_ids_default_to_empty(self, valid_mappings):
-        """Tests backward compatibility: omitting source/target IDs keeps empty strings."""
+        """Tests backward compat: omitting source/target IDs keeps empty strings."""
         sm = build_structure_map_from_template_wb(valid_mappings)
         assert sm.source == ""
         assert sm.target == ""
@@ -1952,7 +1962,7 @@ class TestBuildStructureMapFromTemplateWb:
         )
 
 
-class TestExtractAllArtefactIds:  # noqa: D101
+class TestExtractAllArtefactIds:
     def test_extract_all_artefact_ids_normal(self):
         """Test normal case with valid artefact keys and values."""
         df = pd.DataFrame(
@@ -2076,7 +2086,7 @@ class TestExtractMetadataFromInfoSheet:
 
 
 class TestIsMissingToken:
-    """Tests for the `_is_missing_token` function which checks if a string is a missing token."""
+    """Tests for `_is_missing_token` which checks if a string is a missing token."""
 
     @pytest.mark.parametrize(
         "input_str,expected",
@@ -2097,7 +2107,7 @@ class TestIsMissingToken:
 
 
 class TestExtractMappingRule:
-    """Tests for the `_extract_mapping_rule` function which parses mapping rules from a pandas Series."""
+    """Tests for `_extract_mapping_rule` which parses mapping rules from a Series."""
 
     def test_skip_rule_when_target_empty(self):
         """Tests that rule is 'skip' when TARGET is empty."""
@@ -2176,8 +2186,12 @@ class TestExtractMappingRule:
                 "SOURCE": "SRC",
                 "TARGET": "TGT",
                 "MAPPING_RULES": "representation",
-                "SOURCE_CL": "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)",
-                "TARGET_CL": "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_TGT(1.0)",
+                "SOURCE_CL": (
+                    "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)"
+                ),
+                "TARGET_CL": (
+                    "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_TGT(1.0)"
+                ),
             }
         )
         result = _extract_mapping_rule(row)
@@ -2319,7 +2333,7 @@ class TestResolveRepresentationRef:
 
 
 class TestExtractRepresentationMap:
-    """Tests for `_extract_representation_map` which builds a sanitized mapping DataFrame."""
+    """Tests for `_extract_representation_map` which builds a sanitized mapping."""
 
     @pytest.fixture
     def sample_rep_data(self):
@@ -2333,7 +2347,7 @@ class TestExtractRepresentationMap:
         return {"source": source_df, "target": target_df}
 
     def test_valid_mapping(self, sample_rep_data):
-        """Tests that valid mapping returns correct DataFrame with duplicates and NA removed."""
+        """Tests valid mapping returns correct DataFrame with dups and NA removed."""
         result_df = _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
         expected = pd.DataFrame({"source": ["A", "B"], "target": ["X", "Y"]})
         pd.testing.assert_frame_equal(result_df, expected)
@@ -2356,7 +2370,7 @@ class TestExtractRepresentationMap:
             _extract_representation_map(sample_rep_data, "invalid_src", "invalid_tgt")
 
     def test_raises_value_error_on_empty_result_after_sanitization(self):
-        """Tests that ValueError is raised when all rows are dropped after sanitization."""
+        """Tests ValueError is raised when all rows are dropped after sanitization."""
         source_df = pd.DataFrame({"src_col": [None, None], "extra": [1, 2]})
         target_df = pd.DataFrame({"tgt_col": [None, None], "extra": [3, 4]})
         rep_data = {"source": source_df, "target": target_df}
@@ -2435,9 +2449,9 @@ class TestExtractMultiRepresentationMap:
 # region Test _validate_mapping_template_wb
 
 
-class TestCollectRequiredSheetErrors:  # noqa: D101
+class TestCollectRequiredSheetErrors:
     def test_returns_empty_list_when_all_required_sheets_present(self) -> None:
-        """Tests that no errors are returned when all required sheets exist and values are dataframes."""
+        """Tests no errors when all required sheets exist and values are dataframes."""
         mappings = {
             "Sheet1": pd.DataFrame({"a": [1, 2]}),
             "Sheet2": pd.DataFrame({"b": [3, 4]}),
@@ -2526,7 +2540,7 @@ class TestCollectRequiredSheetErrors:  # noqa: D101
         assert errors == []
 
 
-class TestCollectMappingRulesErrors:  # noqa: D101
+class TestCollectMappingRulesErrors:
     def test_missing_mapping_rules_column_returns_single_error(self):
         """Tests that a missing `MAPPING_RULES` column yields one descriptive error."""
         comp_mapping = pd.DataFrame(
@@ -2558,7 +2572,7 @@ class TestCollectMappingRulesErrors:  # noqa: D101
     def test_valid_literal_rules_produce_no_errors(
         self, values, valid_rules, expected_error_count
     ):
-        """Tests that valid literal rules (including with whitespace/NaN) produce no errors.
+        """Tests valid literal rules (including with whitespace/NaN) produce no errors.
 
         Args:
             values: Values placed in the MAPPING_RULES column.
@@ -2585,7 +2599,7 @@ class TestCollectMappingRulesErrors:  # noqa: D101
         ],
     )
     def test_valid_prefixed_rules_produce_no_errors(self, value, prefixes):
-        """Tests that valid prefixed rules (with non-empty parsed_value) produce no errors.
+        """Tests valid prefixed rules (with non-empty parsed_value) produce no errors.
 
         Args:
             value: The rule value to test.
@@ -2613,7 +2627,7 @@ class TestCollectMappingRulesErrors:  # noqa: D101
     def test_prefixed_rules_with_empty_parsed_value_produce_error(
         self, raw_value, prefix
     ):
-        """Tests that prefixed rules with empty/whitespace parsed_value produce an error."""
+        """Tests prefixed rules with empty/whitespace parsed_value produce an error."""
         comp_mapping = pd.DataFrame({"MAPPING_RULES": [raw_value]})
 
         errors = _collect_mapping_rules_errors(
@@ -2707,7 +2721,7 @@ class TestCollectMappingRulesErrors:  # noqa: D101
         assert errors == []
 
 
-class TestValidateMappingTemplateWb:  # noqa: D101
+class TestValidateMappingTemplateWb:
     @pytest.fixture
     def valid_mappings(self) -> dict:
         """Provides a fully valid mappings dictionary."""
