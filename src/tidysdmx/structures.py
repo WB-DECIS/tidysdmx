@@ -242,6 +242,7 @@ def build_value_map_list(
     target_col: str = "target",
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
+    default_value: str | None = None,
 ) -> list[ValueMap]:
     """Build a list of ValueMap objects from a pandas DataFrame, optionally including validity periods.
 
@@ -253,6 +254,10 @@ def build_value_map_list(
             Defaults to "valid_from".
         valid_to_col: Optional column name for validity end date.
             Defaults to "valid_to".
+        default_value: Optional catch-all target value. When provided, a final
+            ValueMap with source ``"regex:.*"`` is appended so that source
+            values not listed in the DataFrame resolve to this value instead of
+            remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         List of ValueMap objects created from the DataFrame.
@@ -302,6 +307,11 @@ def build_value_map_list(
             kwargs["valid_to"] = str(row[valid_to_col])
         value_maps.append(ValueMap(**kwargs))
 
+    if default_value is not None:
+        # Catch-all: matches any source value not listed above. Apply-time
+        # rule ordering guarantees explicit value maps win (see mapping.py).
+        value_maps.append(ValueMap(source="regex:.*", target=default_value))
+
     return value_maps
 
 
@@ -312,6 +322,7 @@ def build_multi_value_map_list(
     target_cols: Sequence[str],
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
+    default_value: str | None = None,
 ) -> list[MultiValueMap]:
     """Build a list of MultiValueMap objects from a pandas DataFrame.
 
@@ -326,6 +337,11 @@ def build_multi_value_map_list(
             Defaults to "valid_from".
         valid_to_col: Optional column name for validity end date.
             Defaults to "valid_to".
+        default_value: Optional catch-all target value. When provided, a final
+            MultiValueMap with source ``"regex:.*"`` for every source component
+            is appended so that source-value tuples not listed in the DataFrame
+            resolve to this value instead of remaining unmapped. Defaults to
+            None (no catch-all).
 
     Returns:
         List of MultiValueMap objects created from the DataFrame.
@@ -418,6 +434,16 @@ def build_multi_value_map_list(
 
         multi_value_maps.append(MultiValueMap(**kwargs))
 
+    if default_value is not None:
+        # Catch-all: matches any source tuple not listed above. Apply-time
+        # rule ordering guarantees explicit value maps win (see mapping.py).
+        multi_value_maps.append(
+            MultiValueMap(
+                source=["regex:.*"] * len(source_cols),
+                target=[default_value] * len(target_cols),
+            )
+        )
+
     return multi_value_maps
 
 
@@ -436,6 +462,7 @@ def build_representation_map(
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
     generate_urn: bool = True,
+    default_value: str | None = None,
 ) -> RepresentationMap:
     """Build a RepresentationMap object from a pandas DataFrame using build_value_map_list.
 
@@ -455,6 +482,9 @@ def build_representation_map(
         valid_to_col: Column name for validity end date.
             Defaults to "valid_to".
         generate_urn: If True, automatically generate URN. Defaults to True.
+        default_value: Optional catch-all target value. When provided, source
+            values not listed in the DataFrame resolve to this value instead of
+            remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         A RepresentationMap object containing the mappings.
@@ -483,6 +513,7 @@ def build_representation_map(
         target_col=target_col,
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col,
+        default_value=default_value,
     )
 
     # Generate URN if requested and id is provided
@@ -518,6 +549,7 @@ def build_multi_representation_map(
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
     generate_urn: bool = True,
+    default_value: str | None = None,
 ) -> MultiRepresentationMap:
     """Build a MultiRepresentationMap object from a pandas DataFrame.
 
@@ -539,6 +571,10 @@ def build_multi_representation_map(
         valid_to_col: Validity end column. Defaults to "valid_to".
         generate_urn: If True and ``id`` is provided, generate a URN for the
             MultiRepresentationMap. Defaults to True.
+        default_value: Optional catch-all target value. When provided,
+            source-value tuples not listed in the DataFrame resolve to this
+            value instead of remaining unmapped. Defaults to None (no
+            catch-all).
 
     Returns:
         The constructed MultiRepresentationMap object.
@@ -572,6 +608,7 @@ def build_multi_representation_map(
         target_cols=_target_cols,  # Correct: passes list[str]
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col,
+        default_value=default_value,
     )
 
     # Generate URN if requested and id is provided
@@ -614,6 +651,7 @@ def build_single_component_map(
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
     generate_urn: bool = True,
+    default_value: str | None = None,
 ) -> ComponentMap:
     """Build a ComponentMap mapping one source component to one target component using a RepresentationMap built from a pandas DataFrame.
 
@@ -637,6 +675,9 @@ def build_single_component_map(
             Defaults to "valid_to".
         generate_urn: If True, generate URN for the RepresentationMap.
             Defaults to True.
+        default_value: Optional catch-all target value. When provided, source
+            values not listed in the DataFrame resolve to this value instead of
+            remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         A ComponentMap object mapping the source to the target component.
@@ -691,6 +732,7 @@ def build_single_component_map(
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col,
         generate_urn=generate_urn,
+        default_value=default_value,
     )
 
     # Return ComponentMap
@@ -714,6 +756,7 @@ def build_multi_component_map(
     valid_from_col: str = "valid_from",
     valid_to_col: str = "valid_to",
     generate_urn: bool = True,
+    default_value: str | None = None,
 ) -> MultiComponentMap:
     """Build a MultiComponentMap mapping several source components to target(s).
 
@@ -744,6 +787,9 @@ def build_multi_component_map(
             Defaults to "valid_to".
         generate_urn: If True and ``id`` is provided, generate a URN for the
             underlying MultiRepresentationMap. Defaults to True.
+        default_value: Optional catch-all target value. When provided,
+            source-value tuples not listed in ``df`` resolve to this value
+            instead of remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         A MultiComponentMap mapping the source components to the target(s).
@@ -782,6 +828,7 @@ def build_multi_component_map(
         valid_from_col=valid_from_col,
         valid_to_col=valid_to_col,
         generate_urn=generate_urn,
+        default_value=default_value,
     )
 
     return MultiComponentMap(
@@ -1269,7 +1316,7 @@ def _parse_comp_mapping_sheet(
     df = sheets[sheet_name]
 
     required_columns = ["SOURCE", "TARGET", "MAPPING_RULES"]
-    optional_columns = ["SOURCE_CL", "TARGET_CL"]
+    optional_columns = ["SOURCE_CL", "TARGET_CL", "DEFAULT_VALUE"]
 
     # Validate that required columns exist
     missing_columns = [col for col in required_columns if col not in df.columns]
@@ -1766,6 +1813,7 @@ def build_structure_map_from_template_wb(
                     target_col="target",
                     version=current_version,
                     generate_urn=generate_urns,  # Pass flag through
+                    default_value=parsed.get("default_value"),
                 )
                 generated_maps.append(comp_map)
 
@@ -1798,6 +1846,7 @@ def build_structure_map_from_template_wb(
                     else None,
                     version=current_version,
                     generate_urn=generate_urns,  # Pass flag through
+                    default_value=parsed.get("default_value"),
                 )
                 generated_maps.append(multi_comp_map)
 
@@ -1982,6 +2031,8 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
       - fixed_value: present only for mapping_rule == "fixed", else None
       - source_cl: codelist URN for the source component, or None
       - target_cl: codelist URN for the target component, or None
+      - default_value: catch-all target for unlisted source values, or None
+        (only on "representation" and "multi_representation" rules)
 
     Raises:
       - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
@@ -1999,6 +2050,11 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
     raw_target_cl = row.get("TARGET_CL")
     target_cl = str(raw_target_cl).strip() if pd.notna(raw_target_cl) else ""
     target_cl = target_cl or None
+
+    # Optional default (catch-all) target value (None when absent or empty)
+    raw_default = row.get("DEFAULT_VALUE")
+    default_value = str(raw_default).strip() if pd.notna(raw_default) else ""
+    default_value = default_value or None
 
     # Skip when TARGET is empty or rule is missing-ish
     if not target_id or _is_missing_token(raw_rule):
@@ -2056,6 +2112,7 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             "fixed_value": None,
             "source_cl": source_cl,
             "target_cl": target_cl,
+            "default_value": default_value,
         }
 
     # multi_representation: SOURCE is a '|'-delimited list of >= 2 components
@@ -2074,6 +2131,7 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             "fixed_value": None,
             "source_cl": source_cl,
             "target_cl": target_cl,
+            "default_value": default_value,
         }
 
     # unknown

@@ -6,6 +6,8 @@ from pysdmx.model import (
     MultiRepresentationMap,
     MultiValueMap,
     ComponentMap,
+    RepresentationMap,
+    ValueMap,
 )
 import pytest
 import pandas as pd
@@ -215,6 +217,42 @@ class TestApplyComponentMap:  # noqa: D101
         result = apply_component_map(df, component_map)
         assert pd.isna(result["SEX"]).all()
 
+    @staticmethod
+    def _component_map_with_catch_all(value_maps):
+        """Build a ComponentMap (AREA -> REGION) from the given value maps."""
+        return ComponentMap(
+            source="AREA",
+            target="REGION",
+            values=RepresentationMap(id="RM", agency="WB", maps=value_maps),
+        )
+
+    def test_default_value_catch_all_assigns_default(self):
+        """A regex catch-all ValueMap assigns the default to unlisted values."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="DE", target="EU"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", "DE", "BR"]})
+
+        result = apply_component_map(df, cm)
+        assert list(result["REGION"]) == ["EU", "EU", "_Z"]
+
+    def test_default_value_catch_all_order_independent(self):
+        """Explicit values win even when the catch-all is stored first."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="regex:.*", target="_Z"),  # catch-all stored first
+                ValueMap(source="FR", target="EU"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", "BR"]})
+
+        result = apply_component_map(df, cm)
+        assert list(result["REGION"]) == ["EU", "_Z"]
+
 
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
@@ -274,6 +312,41 @@ class TestApplyMultiComponentMap:
             assert "Mapped" in captured.out
         else:
             assert captured.out == ""
+
+    @staticmethod
+    def _multi_map_with_catch_all(multi_value_maps):
+        """Build a MultiComponentMap (AREA, NOTE -> URBANISATION) from value maps."""
+        return MultiComponentMap(
+            source=["AREA", "NOTE"],
+            target=["URBANISATION"],
+            values=MultiRepresentationMap(id="MR", agency="WB", maps=multi_value_maps),
+        )
+
+    def test_default_value_catch_all_assigns_default(self):
+        """A regex catch-all MultiValueMap assigns the default to unlisted tuples."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["COL", "one"], target=["RUR"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["COL", "XYZ"], "NOTE": ["one", "anything"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert list(result["URBANISATION"]) == ["RUR", "_Z"]
+
+    def test_default_value_catch_all_order_independent(self):
+        """Explicit tuples win even when the catch-all is stored first."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"]),
+                MultiValueMap(source=["COL", "one"], target=["RUR"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["COL", "XYZ"], "NOTE": ["one", "x"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert list(result["URBANISATION"]) == ["RUR", "_Z"]
 
 
 class TestMapStructures:

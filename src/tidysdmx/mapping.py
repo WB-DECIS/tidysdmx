@@ -1,10 +1,35 @@
 """Apply pysdmx StructureMap objects to pandas DataFrames."""
 
 import re
+from collections.abc import Sequence
 
 import pandas as pd
 import pysdmx as px
 from typeguard import typechecked
+
+
+def _value_map_rank(patterns: Sequence[str]) -> int:
+    """Return the apply-order priority of a value map's source pattern(s).
+
+    Lower ranks are evaluated first, so explicit literal maps win over regex
+    maps and a pure catch-all is always tried last, regardless of the order in
+    which the maps are stored (e.g. after an FMR round-trip):
+
+    * 0 — every pattern is a literal value (exact match)
+    * 1 — at least one pattern is a regex, but not a pure catch-all
+    * 2 — every pattern is the catch-all ``"regex:.*"``
+
+    Args:
+        patterns: The source pattern(s) of a ``ValueMap`` or ``MultiValueMap``.
+
+    Returns:
+        The priority rank: 0 (literal), 1 (regex), or 2 (catch-all).
+    """
+    if all(p == "regex:.*" for p in patterns):
+        return 2
+    if any(p.startswith("regex:") for p in patterns):
+        return 1
+    return 0
 
 
 @typechecked
@@ -159,13 +184,42 @@ def apply_component_map(
     if source_col not in result_df.columns:
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
 
-    mapping = {vm.source: vm.target for vm in rep_map.maps}
-    result_df[target_col] = result_df[source_col].map(mapping)
+    # Apply literal (exact) value maps first via a fast vectorised lookup;
+    # these always win. Source values left unmapped then fall through to the
+    # regex value maps, with any catch-all ("regex:.*") evaluated last.
+    literal_mapping = {
+        vm.source: vm.target
+        for vm in rep_map.maps
+        if not vm.source.startswith("regex:")
+    }
+    regex_maps = sorted(
+        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
+        key=lambda vm: _value_map_rank([vm.source]),
+    )
+
+    mapped = result_df[source_col].map(literal_mapping)
+
+    if regex_maps:
+
+        def _regex_target(value: object) -> object:
+            for vm in regex_maps:
+                pattern = vm.source.removeprefix("regex:")
+                if re.fullmatch(pattern, str(value)):
+                    return vm.target
+            return None
+
+        unmatched = mapped.isna()
+        if unmatched.any():
+            mapped = mapped.astype(object)
+            mapped.loc[unmatched] = result_df.loc[unmatched, source_col].map(
+                _regex_target
+            )
+
+    result_df[target_col] = mapped
 
     if verbose:
-        print(
-            f"[OK] Mapped '{source_col}' → '{target_col}' using {len(mapping)} pairs."
-        )
+        n_pairs = len(literal_mapping) + len(regex_maps)
+        print(f"[OK] Mapped '{source_col}' → '{target_col}' using {n_pairs} pairs.")
         unmapped = result_df[target_col].isna().sum()
         if unmapped > 0:
             print(f"[WARN] {unmapped} values could not be mapped (set to NaN).")
@@ -179,11 +233,13 @@ def apply_multi_component_map(
     multi_component_map: px.model.map.MultiComponentMap,
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """Apply a single MultiComponentMap with regex support, preserving rule order.
+    """Apply a single MultiComponentMap with regex and catch-all support.
 
-    Rules are applied in the order they appear in the MultiRepresentationMap.
-    The first matching rule wins. Patterns prefixed with ``"regex:"`` are
-    matched using ``re.fullmatch``.
+    Rules are evaluated by priority so that results do not depend on the stored
+    order of the value maps: explicit (literal) tuples first, then regex tuples,
+    then any pure catch-all (``"regex:.*"`` for every component) last. The first
+    matching rule wins. Patterns prefixed with ``"regex:"`` are matched using
+    ``re.fullmatch``.
 
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
@@ -208,6 +264,13 @@ def apply_multi_component_map(
         raise KeyError(f"Missing source columns: {missing_cols}")
 
     rules = [{"patterns": mv.source, "target": mv.target[0]} for mv in rep_map.maps]
+
+    # Order rules so explicit (literal) tuples are tried before regex ones and
+    # the catch-all ("regex:.*" for every component) is tried last. The sort is
+    # stable, so the stored order within each priority tier is preserved; this
+    # keeps results independent of the maps' stored order (e.g. after an FMR
+    # round-trip).
+    rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
     def match_row(row):
         for rule in rules:

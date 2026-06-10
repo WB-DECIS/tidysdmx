@@ -407,6 +407,21 @@ class TestBuildValueMapList:  # noqa: D101
         assert result[1].source == "UY"
         assert result[1].target == "URY"
 
+    def test_build_value_map_list_default_value_appends_catch_all(self):
+        """default_value appends a trailing regex catch-all ValueMap."""
+        df = pd.DataFrame({"source": ["BE", "FR"], "target": ["BEL", "FRA"]})
+        result = build_value_map_list(df, "source", "target", default_value="_Z")
+        assert len(result) == 3
+        assert result[-1].source == "regex:.*"
+        assert result[-1].target == "_Z"
+
+    def test_build_value_map_list_no_default_value_no_catch_all(self):
+        """Omitting default_value leaves the list without a catch-all."""
+        df = pd.DataFrame({"source": ["BE"], "target": ["BEL"]})
+        result = build_value_map_list(df, "source", "target")
+        assert len(result) == 1
+        assert all(vm.source != "regex:.*" for vm in result)
+
 
 class TestBuildMultiValueMapList:  # noqa: D101
     @pytest.fixture
@@ -581,6 +596,16 @@ class TestBuildMultiValueMapList:  # noqa: D101
             # Ensure target is not nested like [['EUR']] but flat like ['EUR']
             assert len(mv_map.target) == 1
             assert isinstance(mv_map.target[0], str)
+
+    def test_build_multi_value_map_list_default_value_appends_catch_all(self):
+        """default_value appends a catch-all with a regex per source column."""
+        df = pd.DataFrame({"country": ["DE"], "currency": ["LC"], "iso_code": ["EUR"]})
+        result = build_multi_value_map_list(
+            df, ["country", "currency"], ["iso_code"], default_value="_Z"
+        )
+        assert len(result) == 2
+        assert list(result[-1].source) == ["regex:.*", "regex:.*"]
+        assert list(result[-1].target) == ["_Z"]
 
     @pytest.fixture
     def valid_dataframe(self):
@@ -936,6 +961,21 @@ class TestBuildSingleComponentMap:  # noqa: D101
         assert cm.values.version == "2.0"
         assert cm.values.description == "Test Description"
 
+    def test_build_single_component_map_default_value(self):
+        """default_value adds a trailing catch-all ValueMap to the RepresentationMap."""
+        df = pd.DataFrame({"source": ["A"], "target": ["X"]})
+        cm = build_single_component_map(
+            df,
+            source_component="SRC",
+            target_component="TGT",
+            id="CM1",
+            default_value="_Z",
+        )
+        maps = cm.values.maps
+        assert len(maps) == 2
+        assert maps[-1].source == "regex:.*"
+        assert maps[-1].target == "_Z"
+
 
 class TestBuildMultiRepresentationMap:
     """Tests for the build_multi_representation_map function."""
@@ -1103,6 +1143,30 @@ class TestBuildMultiComponentMap:
             generate_urn=False,
         )
         assert cm.values.urn is None
+
+    def test_default_value_appends_catch_all(self, multi_df):
+        """default_value appends a trailing catch-all MultiValueMap (regex per source)."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            id="MCM1",
+            default_value="_Z",
+        )
+        maps = cm.values.maps
+        assert len(maps) == 3
+        assert list(maps[-1].source) == ["regex:.*", "regex:.*"]
+        assert list(maps[-1].target) == ["_Z"]
+
+    def test_no_default_value_no_catch_all(self, multi_df):
+        """Omitting default_value yields only the explicit MultiValueMaps."""
+        cm = build_multi_component_map(
+            multi_df,
+            source_components=["COUNTRY", "CURRENCY"],
+            target_components=["ISO_CURRENCY"],
+            id="MCM1",
+        )
+        assert len(cm.values.maps) == 2
 
     def test_exported_from_package(self):
         """build_multi_component_map is part of the public tidysdmx API."""
@@ -1325,13 +1389,15 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
 
         result = _parse_comp_mapping_sheet(sheets)
 
-        # Check columns (SOURCE_CL and TARGET_CL are optional columns added with None values when not specified)
+        # Check columns (SOURCE_CL, TARGET_CL and DEFAULT_VALUE are optional
+        # columns added with None values when not specified)
         assert list(result.columns) == [
             "SOURCE",
             "TARGET",
             "MAPPING_RULES",
             "SOURCE_CL",
             "TARGET_CL",
+            "DEFAULT_VALUE",
         ]
 
         # Check data integrity
@@ -1340,6 +1406,20 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
         assert pd.isna(result.iloc[1]["SOURCE"])  # Ensure None/NaN is preserved
         assert result.iloc[1]["TARGET"] == "FREQ"
         assert result.iloc[1]["MAPPING_RULES"] == "fixed:A"
+
+    def test_parse_comp_mapping_sheet_preserves_default_value(self):
+        """An optional DEFAULT_VALUE column is preserved when present."""
+        df = pd.DataFrame(
+            {
+                "SOURCE": ["SRC"],
+                "TARGET": ["TGT"],
+                "MAPPING_RULES": ["representation"],
+                "DEFAULT_VALUE": ["_Z"],
+            }
+        )
+        result = _parse_comp_mapping_sheet({"COMP_MAPPING": df})
+        assert "DEFAULT_VALUE" in result.columns
+        assert result.iloc[0]["DEFAULT_VALUE"] == "_Z"
 
     def test_parse_comp_mapping_sheet_missing_sheet(self):
         """Test that ValueError is raised when the sheet is not present."""
@@ -1390,6 +1470,7 @@ class TestBuildSchemaFromWbTemplate:  # noqa: D101
             "MAPPING_RULES",
             "SOURCE_CL",
             "TARGET_CL",
+            "DEFAULT_VALUE",
         ]
 
     def test_parse_rep_mapping_normal_case(self):
@@ -1812,6 +1893,64 @@ class TestBuildStructureMapFromTemplateWb:
         assert sum(isinstance(m, ComponentMap) for m in sm.maps) == 1
         assert sum(isinstance(m, MultiComponentMap) for m in sm.maps) == 1
 
+    def test_default_value_column_adds_catch_all(self, valid_mappings):
+        """DEFAULT_VALUE appends a catch-all to representation and multi rows."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["SRC3", "FREQ|REF_AREA"],
+                    "TARGET": ["TGT3", "INDICATOR"],
+                    "MAPPING_RULES": ["representation", "multi_representation"],
+                    "DEFAULT_VALUE": ["_Z", "_Z"],
+                }
+            ),
+            "REP_MAPPING": pd.DataFrame(
+                {
+                    "S:SRC3": ["A", "B"],
+                    "T:TGT3": ["X", "Y"],
+                    "S:FREQ": ["A", "Q"],
+                    "S:REF_AREA": ["US", "US"],
+                    "T:INDICATOR": ["GDP_A", "GDP_Q"],
+                }
+            ),
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        comp_map = next(m for m in sm.maps if isinstance(m, ComponentMap))
+        multi_map = next(m for m in sm.maps if isinstance(m, MultiComponentMap))
+        # single-component catch-all is appended last
+        assert comp_map.values.maps[-1].source == "regex:.*"
+        assert comp_map.values.maps[-1].target == "_Z"
+        # multi-component catch-all is appended last (regex per source component)
+        assert list(multi_map.values.maps[-1].source) == ["regex:.*", "regex:.*"]
+        assert list(multi_map.values.maps[-1].target) == ["_Z"]
+
+    def test_default_value_absent_leaves_no_catch_all(self, valid_mappings):
+        """Without a DEFAULT_VALUE column the maps keep only explicit rules."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["FREQ|REF_AREA"],
+                    "TARGET": ["INDICATOR"],
+                    "MAPPING_RULES": ["multi_representation"],
+                }
+            ),
+            "REP_MAPPING": pd.DataFrame(
+                {
+                    "S:FREQ": ["A", "Q"],
+                    "S:REF_AREA": ["US", "US"],
+                    "T:INDICATOR": ["GDP_A", "GDP_Q"],
+                }
+            ),
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        mcm = next(m for m in sm.maps if isinstance(m, MultiComponentMap))
+        assert len(mcm.values.maps) == 2
+        assert all(
+            list(vm.source) != ["regex:.*", "regex:.*"] for vm in mcm.values.maps
+        )
+
 
 class TestExtractAllArtefactIds:  # noqa: D101
     def test_extract_all_artefact_ids_normal(self):
@@ -2097,6 +2236,53 @@ class TestExtractMappingRule:
         )
         with pytest.raises(ValueError, match="at least two source"):
             _extract_mapping_rule(row)
+
+    def test_default_value_extracted_for_representation(self):
+        """DEFAULT_VALUE is parsed (and trimmed) into the representation rule."""
+        row = pd.Series(
+            {
+                "SOURCE": "SRC",
+                "TARGET": "TGT",
+                "MAPPING_RULES": "representation",
+                "DEFAULT_VALUE": "  _Z  ",
+            }
+        )
+        result = _extract_mapping_rule(row)
+        assert result["default_value"] == "_Z"
+
+    def test_default_value_extracted_for_multi_representation(self):
+        """DEFAULT_VALUE is parsed into the multi_representation rule."""
+        row = pd.Series(
+            {
+                "SOURCE": "FREQ|REF_AREA",
+                "TARGET": "INDICATOR",
+                "MAPPING_RULES": "multi_representation",
+                "DEFAULT_VALUE": "_Z",
+            }
+        )
+        result = _extract_mapping_rule(row)
+        assert result["default_value"] == "_Z"
+
+    def test_default_value_none_when_absent(self):
+        """Missing DEFAULT_VALUE yields None in the rule dict."""
+        row = pd.Series(
+            {"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation"}
+        )
+        result = _extract_mapping_rule(row)
+        assert result["default_value"] is None
+
+    def test_default_value_blank_is_none(self):
+        """A whitespace-only DEFAULT_VALUE is treated as absent (None)."""
+        row = pd.Series(
+            {
+                "SOURCE": "SRC",
+                "TARGET": "TGT",
+                "MAPPING_RULES": "representation",
+                "DEFAULT_VALUE": "   ",
+            }
+        )
+        result = _extract_mapping_rule(row)
+        assert result["default_value"] is None
 
 
 class TestResolveRepresentationRef:
