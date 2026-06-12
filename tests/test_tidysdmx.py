@@ -31,43 +31,23 @@ class TestParseDsdId:
 
     def test_parse_dsd_id_missing_colon(self):
         # Test with a DSD ID missing the colon
-        dsd_id = "WBWDI(1.0)"
-        try:
-            parse_dsd_id(dsd_id)
-        except ValueError as e:
-            assert (
-                str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
-            )
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_dsd_id("WBWDI(1.0)")
 
     def test_parse_dsd_id_missing_parentheses(self):
         # Test with a DSD ID missing the parentheses
-        dsd_id = "WB:WDI1.0"
-        try:
-            parse_dsd_id(dsd_id)
-        except ValueError as e:
-            assert (
-                str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
-            )
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_dsd_id("WB:WDI1.0")
 
     def test_parse_dsd_id_empty_string(self):
         # Test with an empty string
-        dsd_id = ""
-        try:
-            parse_dsd_id(dsd_id)
-        except ValueError as e:
-            assert (
-                str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
-            )
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_dsd_id("")
 
     def test_parse_dsd_id_extra_colon(self):
-        # Test with an extra colon in the DSD ID
-        dsd_id = "WB:WDI:Extra(1.0)"
-        try:
-            parse_dsd_id(dsd_id)
-        except ValueError as e:
-            assert (
-                str(e) == "Invalid dsd_id format. Expected format: 'agency:id(version)'"
-            )
+        # Test with an extra colon in the DSD ID; the extra colon lands in the
+        # id part, which the parser tolerates.
+        assert parse_dsd_id("WB:WDI:Extra(1.0)") == ("WB", "WDI:Extra", "1.0")
 
 
 class TestParseArtefactId:
@@ -161,6 +141,11 @@ class TestStandardizeIndicatorId:
             }
         )
         with pytest.raises(ValueError):
+            standardize_indicator_id(df)
+
+    def test_standardize_indicator_id_missing_id_column(self):
+        df = pd.DataFrame({"INDICATOR": ["indicator.one"]})
+        with pytest.raises(ValueError, match="'DATABASE_ID' or 'DATASET_ID' column"):
             standardize_indicator_id(df)
 
     def test_standardize_indicator_id_no_prefix(self):
