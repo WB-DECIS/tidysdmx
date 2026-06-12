@@ -13,6 +13,7 @@ readme = "README.md"
 python = ">=3.11.9"
 pysdmx = "^1.13.0"
 pandas = "^2.2.3"
+numpy = ">=1.26"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
 
