@@ -1,11 +1,19 @@
 """Apply pysdmx StructureMap objects to pandas DataFrames."""
 
+import logging
 import re
 from collections.abc import Sequence
 
 import pandas as pd
 import pysdmx as px
 from typeguard import typechecked
+
+logger = logging.getLogger(__name__)
+
+
+def _progress_level(verbose: bool) -> int:
+    """Return the log level for progress messages (INFO when verbose)."""
+    return logging.INFO if verbose else logging.DEBUG
 
 
 def _value_map_rank(patterns: Sequence[str]) -> int:
@@ -46,7 +54,8 @@ def map_structures(
     Args:
         df: The source dataset.
         structure_map: A StructureMap containing various mapping components.
-        verbose: If True, print logs about applied mappings.
+        verbose: If True, log applied mappings at INFO level (DEBUG otherwise).
+            Data-loss warnings are always logged at WARNING level.
 
     Returns:
         Modified DataFrame with all mappings applied.
@@ -72,8 +81,11 @@ def map_structures(
 
     if fixed_value_maps:
         result_df = apply_fixed_value_maps(result_df, fixed_value_maps)
-        if verbose:
-            print(f"[OK] Applied {len(fixed_value_maps)} FixedValueMap(s).")
+        logger.log(
+            _progress_level(verbose),
+            "Applied %d FixedValueMap(s).",
+            len(fixed_value_maps),
+        )
 
     if implicit_maps:
         result_df = apply_implicit_component_maps(
@@ -130,7 +142,8 @@ def apply_implicit_component_maps(
     Args:
         df: The source dataset.
         implicit_maps: A list of ImplicitComponentMap objects.
-        verbose: If True, print logs about applied mappings and conflicts.
+        verbose: If True, log applied mappings at INFO level (DEBUG otherwise).
+            Missing-source warnings are always logged at WARNING level.
 
     Returns:
         DataFrame with implicit component mappings applied.
@@ -147,14 +160,18 @@ def apply_implicit_component_maps(
         target_col = imap.target
 
         if source_col not in result_df.columns:
-            if verbose:
-                print(f"[WARN] Source column '{source_col}' not found. Skipping.")
+            logger.warning("Source column '%s' not found. Skipping.", source_col)
             continue
 
         result_df[target_col] = result_df[source_col]
-        if verbose:
-            action = "Overwritten" if target_col in df.columns else "Added"
-            print(f"[OK] {action} column '{target_col}' from source '{source_col}'.")
+        action = "Overwritten" if target_col in df.columns else "Added"
+        logger.log(
+            _progress_level(verbose),
+            "%s column '%s' from source '%s'.",
+            action,
+            target_col,
+            source_col,
+        )
 
     return result_df
 
@@ -174,7 +191,8 @@ def apply_component_map(
     Args:
         df: Source data.
         component_map: ComponentMap with source, target, and values.
-        verbose: If True, print progress.
+        verbose: If True, log progress at INFO level (DEBUG otherwise).
+            Unmapped-value warnings are always logged at WARNING level.
 
     Returns:
         DataFrame with the target column added or overwritten.
@@ -223,12 +241,17 @@ def apply_component_map(
 
     result_df[target_col] = mapped
 
-    if verbose:
-        n_pairs = len(literal_mapping) + len(regex_maps)
-        print(f"[OK] Mapped '{source_col}' → '{target_col}' using {n_pairs} pairs.")
-        unmapped = result_df[target_col].isna().sum()
-        if unmapped > 0:
-            print(f"[WARN] {unmapped} values could not be mapped (set to NaN).")
+    n_pairs = len(literal_mapping) + len(regex_maps)
+    logger.log(
+        _progress_level(verbose),
+        "Mapped '%s' → '%s' using %d pairs.",
+        source_col,
+        target_col,
+        n_pairs,
+    )
+    unmapped = result_df[target_col].isna().sum()
+    if unmapped > 0:
+        logger.warning("%d values could not be mapped (set to NaN).", unmapped)
 
     return result_df
 
@@ -258,7 +281,8 @@ def apply_multi_component_map(
         df: Source data.
         multi_component_map: MultiComponentMap with source columns, target
             column, and values.
-        verbose: If True, print progress.
+        verbose: If True, log progress at INFO level (DEBUG otherwise).
+            Unmapped-value warnings are always logged at WARNING level.
 
     Returns:
         DataFrame with the target column added or overwritten.
@@ -304,13 +328,15 @@ def apply_multi_component_map(
 
     result_df[target_col] = result_df[source_cols].apply(match_row, axis=1)
 
-    if verbose:
-        print(
-            f"[OK] Mapped {source_cols} → '{target_col}' "
-            f"using {len(rules)} ordered rules."
-        )
-        unmapped = result_df[target_col].isna().sum()
-        if unmapped > 0:
-            print(f"[WARN] {unmapped} rows could not be mapped (set to NaN).")
+    logger.log(
+        _progress_level(verbose),
+        "Mapped %s → '%s' using %d ordered rules.",
+        source_cols,
+        target_col,
+        len(rules),
+    )
+    unmapped = result_df[target_col].isna().sum()
+    if unmapped > 0:
+        logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
 
     return result_df
