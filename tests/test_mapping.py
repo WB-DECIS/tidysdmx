@@ -148,6 +148,7 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
+@pytest.mark.integration
 class TestApplyComponentMap:
     """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
@@ -270,6 +271,7 @@ class TestApplyComponentMap:
         assert result["REGION"].iloc[1:].isna().all()
 
 
+@pytest.mark.integration
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -382,6 +384,7 @@ class TestApplyMultiComponentMap:
         assert result["URBANISATION"].iloc[1:].isna().all()
 
 
+@pytest.mark.integration
 class TestMapStructures:
     """Tests for map_structures function."""
 

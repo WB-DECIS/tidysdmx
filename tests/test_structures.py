@@ -714,7 +714,6 @@ class TestBuildMultiValueMapList:
         assert isinstance(map_obj.valid_to, datetime)
         assert map_obj.valid_to == datetime(2022, 12, 31)
 
-    @pytest.mark.skip(reason="Not implemented correctly. To review")
     def test_handles_native_datetime_validity(self):
         """Tests that native datetime objects in valid_from/valid_to are preserved.
 
@@ -738,8 +737,8 @@ class TestBuildMultiValueMapList:
 
         # Assert
         map_obj = result[0]
-        assert map_obj.valid_from is dt_from  # Should be the exact object or equal
-        assert map_obj.valid_to is dt_to
+        assert map_obj.valid_from == dt_from
+        assert map_obj.valid_to == dt_to
 
     def test_ignores_nan_validity_values(self):
         """Tests that NaT/NaN/None in validity columns result in None in the object."""

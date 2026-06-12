@@ -251,9 +251,6 @@ class TestVectorizedLookupOrderedV1:
             vectorized_lookup_ordered_v1(series, mapping_df), expected_output
         )
 
-    @pytest.mark.skip(
-        reason="Not handled currently. Relies on ordering of rules in the mapping file"
-    )
     def test_vectorized_lookup_ordered_v1_multiple_matches(self):
         series = pd.Series(["A12", "A1", "A"])
         mapping_df = pd.DataFrame(
@@ -385,9 +382,6 @@ class TestVectorizedLookupOrderedV2:
             vectorized_lookup_ordered_v2(series, mapping_df), expected_output
         )
 
-    @pytest.mark.skip(
-        reason="Not handled currently. Relies on ordering of rules in the mapping file"
-    )
     def test_vectorized_lookup_ordered_v2_multiple_matches(self):
         series = pd.Series(["A12", "A1", "A"])
         mapping_df = pd.DataFrame(
@@ -679,6 +673,7 @@ class TestAddSdmxReferenceCols:
             _add_sdmx_reference_cols(df, "ID123", "dataflow", "X")
 
 
+@pytest.mark.integration
 class TestStandardizeOutput:
     """Tests for the `standardize_output` function using real schema fixture."""
 
