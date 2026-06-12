@@ -358,8 +358,8 @@ class TestBuildValueMapList:
         result = build_value_map_list(
             df, "source", "target", valid_from_col="start_date", valid_to_col="end_date"
         )
-        assert result[0].valid_from == "2020-01-01"
-        assert result[0].valid_to == "2025-12-31"
+        assert result[0].valid_from == datetime(2020, 1, 1)
+        assert result[0].valid_to == datetime(2025, 12, 31)
         assert result[1].valid_from is None
         assert result[1].valid_to is None
 

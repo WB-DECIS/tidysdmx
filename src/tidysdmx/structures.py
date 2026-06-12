@@ -69,6 +69,60 @@ def _resolve_representation_ref(
     return str(default_dtype)
 
 
+def _parse_validity_date(value: object) -> datetime | None:
+    """Coerce a validity-date cell to a ``datetime``, or None when missing.
+
+    pysdmx declares ``ValueMap.valid_from``/``valid_to`` as ``Optional[datetime]``,
+    so DataFrame cells (ISO strings, pandas Timestamps, datetimes) must be
+    converted before constructing the map objects.
+
+    Args:
+        value: An ISO-8601 string, pandas Timestamp, datetime, or NaN/None.
+
+    Returns:
+        The value as a plain ``datetime``, or None when the cell is null.
+
+    Raises:
+        TypeError: If the value cannot be interpreted as a date.
+        ValueError: If a string value is not valid ISO-8601.
+    """
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    if hasattr(value, "to_pydatetime"):  # pandas Timestamp
+        return value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value
+    raise TypeError(f"Cannot interpret validity date value: {value!r}")
+
+
+def _validate_string_columns(
+    df: pd.DataFrame,
+    cols: Sequence[str],
+    *,
+    allow_na: bool = False,
+    message: str | None = None,
+) -> None:
+    """Check that the given DataFrame columns contain only string values.
+
+    Args:
+        df: The DataFrame to check.
+        cols: Column names to validate.
+        allow_na: Whether NaN/None cells are tolerated alongside strings.
+        message: Optional error message overriding the per-column default.
+
+    Raises:
+        TypeError: If any checked column contains non-string values.
+    """
+    for col in cols:
+        series = df[col].dropna() if allow_na else df[col]
+        if not series.map(lambda x: isinstance(x, str)).all():
+            raise TypeError(
+                message or f"Column '{col}' must contain only string values."
+            )
+
+
 # --- Structure map builders ---
 @typechecked
 def build_fixed_map(
@@ -290,11 +344,11 @@ def build_value_map_list(
         raise ValueError(
             f"Columns '{source_col}' and '{target_col}' must exist in DataFrame."
         )
-    if (
-        not df[source_col].map(lambda x: isinstance(x, str)).all()
-        or not df[target_col].map(lambda x: isinstance(x, str)).all()
-    ):
-        raise TypeError("Source and target columns must contain only string values.")
+    _validate_string_columns(
+        df,
+        [source_col, target_col],
+        message="Source and target columns must contain only string values.",
+    )
 
     has_valid_from = valid_from_col in df.columns
     has_valid_to = valid_to_col in df.columns
@@ -302,10 +356,14 @@ def build_value_map_list(
     value_maps: list[ValueMap] = []
     for _, row in df.iterrows():
         kwargs = {"source": row[source_col], "target": row[target_col]}
-        if has_valid_from and pd.notna(row.get(valid_from_col)):
-            kwargs["valid_from"] = str(row[valid_from_col])
-        if has_valid_to and pd.notna(row.get(valid_to_col)):
-            kwargs["valid_to"] = str(row[valid_to_col])
+        if has_valid_from:
+            valid_from = _parse_validity_date(row.get(valid_from_col))
+            if valid_from is not None:
+                kwargs["valid_from"] = valid_from
+        if has_valid_to:
+            valid_to = _parse_validity_date(row.get(valid_to_col))
+            if valid_to is not None:
+                kwargs["valid_to"] = valid_to
         value_maps.append(ValueMap(**kwargs))
 
     if default_value is not None:
@@ -386,13 +444,17 @@ def build_multi_value_map_list(
 
     # 2. Validate Data Types (Must be strings for SDMX mappings)
     for col in source_cols:
-        # Check if any value in the column is NOT a string
-        if not df[col].apply(lambda x: isinstance(x, str)).all():
-            raise TypeError(f"Source column '{col}' must contain only string values.")
-
+        _validate_string_columns(
+            df,
+            [col],
+            message=f"Source column '{col}' must contain only string values.",
+        )
     for col in target_cols:
-        if not df[col].apply(lambda x: isinstance(x, str)).all():
-            raise TypeError(f"Target column '{col}' must contain only string values.")
+        _validate_string_columns(
+            df,
+            [col],
+            message=f"Target column '{col}' must contain only string values.",
+        )
 
     has_valid_from = valid_from_col in df.columns
     has_valid_to = valid_to_col in df.columns
@@ -413,25 +475,14 @@ def build_multi_value_map_list(
 
         # Handle Validity Dates
         if has_valid_from:
-            val = row[valid_from_col]
-            if pd.notna(val):
-                # Handle pandas Timestamp or string format
-                if isinstance(val, str):
-                    kwargs["valid_from"] = datetime.fromisoformat(val)
-                elif hasattr(val, "to_pydatetime"):
-                    kwargs["valid_from"] = val.to_pydatetime()
-                elif isinstance(val, datetime):
-                    kwargs["valid_from"] = val
+            valid_from = _parse_validity_date(row[valid_from_col])
+            if valid_from is not None:
+                kwargs["valid_from"] = valid_from
 
         if has_valid_to:
-            val = row[valid_to_col]
-            if pd.notna(val):
-                if isinstance(val, str):
-                    kwargs["valid_to"] = datetime.fromisoformat(val)
-                elif hasattr(val, "to_pydatetime"):
-                    kwargs["valid_to"] = val.to_pydatetime()
-                elif isinstance(val, datetime):
-                    kwargs["valid_to"] = val
+            valid_to = _parse_validity_date(row[valid_to_col])
+            if valid_to is not None:
+                kwargs["valid_to"] = valid_to
 
         multi_value_maps.append(MultiValueMap(**kwargs))
 
@@ -620,8 +671,12 @@ def build_multi_representation_map(
 
     # Validate data types (String check)
     for col in _source_cols + _target_cols:
-        if not df[col].dropna().apply(lambda x: isinstance(x, str)).all():
-            raise TypeError(f"Column '{col}' contains non-string values.")
+        _validate_string_columns(
+            df,
+            [col],
+            allow_na=True,
+            message=f"Column '{col}' contains non-string values.",
+        )
 
     # Build list of maps (Using the new target_cols signature)
     multi_value_maps = build_multi_value_map_list(
@@ -736,8 +791,12 @@ def build_single_component_map(
     for col in [source_col, target_col]:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
-        if not df[col].map(lambda x: isinstance(x, str) or pd.isna(x)).all():
-            raise TypeError(f"Column '{col}' must contain only string values or NaN.")
+        _validate_string_columns(
+            df,
+            [col],
+            allow_na=True,
+            message=f"Column '{col}' must contain only string values or NaN.",
+        )
 
     # Build RepresentationMap using the provided helper
     representation_map = build_representation_map(
@@ -883,26 +942,6 @@ def _infer_sdmx_type(dtype: object) -> DataType:
         return DataType.DATE_TIME
     else:
         return DataType.STRING
-
-
-@typechecked
-def _concept_ref(
-    agency_id: str, scheme_id: str, version: str, concept_id: str
-) -> tuple[Concept, ItemReference]:
-    """Create a Concept and its ItemReference for use in a ConceptScheme."""
-    urn = (
-        f"urn:sdmx:org.sdmx.infomodel.conceptscheme.Concept="
-        f"{agency_id}:{scheme_id}({version}).{concept_id}"
-    )
-    concept = Concept(id=concept_id, urn=urn)
-    ref = ItemReference(
-        sdmx_type="Concept",
-        agency=agency_id,
-        id=scheme_id,
-        version=version,
-        item_id=concept_id,
-    )
-    return concept, ref
 
 
 _ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
