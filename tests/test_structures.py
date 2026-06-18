@@ -358,8 +358,8 @@ class TestBuildValueMapList:
         result = build_value_map_list(
             df, "source", "target", valid_from_col="start_date", valid_to_col="end_date"
         )
-        assert result[0].valid_from == "2020-01-01"
-        assert result[0].valid_to == "2025-12-31"
+        assert result[0].valid_from == datetime(2020, 1, 1)
+        assert result[0].valid_to == datetime(2025, 12, 31)
         assert result[1].valid_from is None
         assert result[1].valid_to is None
 
@@ -714,7 +714,6 @@ class TestBuildMultiValueMapList:
         assert isinstance(map_obj.valid_to, datetime)
         assert map_obj.valid_to == datetime(2022, 12, 31)
 
-    @pytest.mark.skip(reason="Not implemented correctly. To review")
     def test_handles_native_datetime_validity(self):
         """Tests that native datetime objects in valid_from/valid_to are preserved.
 
@@ -738,8 +737,8 @@ class TestBuildMultiValueMapList:
 
         # Assert
         map_obj = result[0]
-        assert map_obj.valid_from is dt_from  # Should be the exact object or equal
-        assert map_obj.valid_to is dt_to
+        assert map_obj.valid_from == dt_from
+        assert map_obj.valid_to == dt_to
 
     def test_ignores_nan_validity_values(self):
         """Tests that NaT/NaN/None in validity columns result in None in the object."""

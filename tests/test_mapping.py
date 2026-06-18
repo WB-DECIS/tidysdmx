@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -116,17 +118,16 @@ class TestApplyImplicitComponentMaps:
         with pytest.raises(TypeError):
             apply_implicit_component_maps(sample_df, maps)
 
-    # To review: Need consistent loggin approach
-    def test_verbose_output(self, capsys, sample_df):
+    def test_verbose_output(self, caplog, sample_df):
         """Test verbose logging for added and skipped columns."""
         maps = [
             ImplicitComponentMap("OBS_VALUE", "NEW_VALUE"),
             ImplicitComponentMap("MISSING", "NEW_COL"),  # missing source
         ]
-        apply_implicit_component_maps(sample_df, maps, verbose=True)
-        captured = capsys.readouterr()
-        assert "[OK] Added column 'NEW_VALUE'" in captured.out
-        assert "[WARN] Source column 'MISSING' not found" in captured.out
+        with caplog.at_level(logging.INFO, logger="tidysdmx.mapping"):
+            apply_implicit_component_maps(sample_df, maps, verbose=True)
+        assert "Added column 'NEW_VALUE'" in caplog.text
+        assert "Source column 'MISSING' not found" in caplog.text
 
     @pytest.mark.parametrize("invalid_df", [None, "not_a_df", 123])
     def test_invalid_df_type(self, invalid_df, implicit_maps):
@@ -147,6 +148,7 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
+@pytest.mark.integration
 class TestApplyComponentMap:
     """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
@@ -183,14 +185,14 @@ class TestApplyComponentMap:
         _ = apply_component_map(df, component_map)
         pd.testing.assert_frame_equal(df, original_copy)
 
-    def test_verbose_output(self, component_map, capsys):
-        """Tests that verbose=True prints mapping details."""
+    def test_verbose_output(self, component_map, caplog):
+        """Tests that verbose=True logs mapping details."""
         df = pd.DataFrame({"INDICATOR": ["RES_FEMALE_TOT_FTE", "UNKNOWN"]})
 
-        _ = apply_component_map(df, component_map, verbose=True)
-        captured = capsys.readouterr()
-        assert "Mapped 'INDICATOR' → 'SEX'" in captured.out
-        assert "values could not be mapped" in captured.out
+        with caplog.at_level(logging.INFO, logger="tidysdmx.mapping"):
+            _ = apply_component_map(df, component_map, verbose=True)
+        assert "Mapped 'INDICATOR' → 'SEX'" in caplog.text
+        assert "values could not be mapped" in caplog.text
 
     def test_missing_source_column_raises_keyerror(self, component_map):
         """Tests that KeyError is raised when source column is missing."""
@@ -269,6 +271,7 @@ class TestApplyComponentMap:
         assert result["REGION"].iloc[1:].isna().all()
 
 
+@pytest.mark.integration
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -317,16 +320,17 @@ class TestApplyMultiComponentMap:
         assert result["URBANISATION"].isna().sum() == 2
 
     @pytest.mark.parametrize("verbose", [True, False])
-    def test_verbose_flag(self, multi_component_map, capsys, verbose):
-        """Tests that verbose flag prints logs when True."""
+    def test_verbose_flag(self, multi_component_map, caplog, verbose):
+        """Tests that progress is logged at INFO only when verbose=True."""
         df = pd.DataFrame({"AREA": ["COL", "SWZ"], "NOTE": ["one", "two"]})
 
-        apply_multi_component_map(df, multi_component_map, verbose=verbose)
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.INFO, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, multi_component_map, verbose=verbose)
+        info_messages = [r.message for r in caplog.records if r.levelname == "INFO"]
         if verbose:
-            assert "Mapped" in captured.out
+            assert any("Mapped" in msg for msg in info_messages)
         else:
-            assert captured.out == ""
+            assert not info_messages
 
     @staticmethod
     def _multi_map_with_catch_all(multi_value_maps):
@@ -380,6 +384,7 @@ class TestApplyMultiComponentMap:
         assert result["URBANISATION"].iloc[1:].isna().all()
 
 
+@pytest.mark.integration
 class TestMapStructures:
     """Tests for map_structures function."""
 
@@ -457,8 +462,8 @@ class TestMapStructures:
             map_structures(df, ifpri_asti_sm)
 
     @pytest.mark.parametrize("verbose", [True, False])
-    def test_verbose_flag(self, ifpri_asti_sm, capsys, verbose):
-        """Tests that verbose flag prints logs when True."""
+    def test_verbose_flag(self, ifpri_asti_sm, caplog, verbose):
+        """Tests that progress is logged at INFO only when verbose=True."""
         df = pd.DataFrame(
             {
                 "TIME_PERIOD": ["2020"],
@@ -469,9 +474,10 @@ class TestMapStructures:
             }
         )
 
-        map_structures(df, ifpri_asti_sm, verbose=verbose)
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.INFO, logger="tidysdmx.mapping"):
+            map_structures(df, ifpri_asti_sm, verbose=verbose)
+        info_messages = [r.message for r in caplog.records if r.levelname == "INFO"]
         if verbose:
-            assert "Applied" in captured.out
+            assert any("Applied" in msg for msg in info_messages)
         else:
-            assert captured.out == ""
+            assert not info_messages

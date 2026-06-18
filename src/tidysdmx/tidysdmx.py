@@ -3,6 +3,7 @@
 import json
 import logging
 import warnings
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 # candidates for removal once confirmed unused by downstream consumers.
 
 
-def _check_dict_keys(dict1: dict, dict2: dict) -> str | None:
+def _check_dict_keys(dict1: dict[str, object], dict2: dict[str, object]) -> str | None:
     """Check whether the sorted keys of two dictionaries are the same."""
     keys1 = sorted(dict1.keys())
     keys2 = sorted(dict2.keys())
@@ -43,12 +44,12 @@ def _remove_extension(key: str) -> str:
     return key.rsplit(".", 1)[0]
 
 
-def _modify_dict_keys(input_dict: dict) -> dict:
+def _modify_dict_keys(input_dict: dict[str, object]) -> dict[str, object]:
     """Create a new dictionary with file extensions removed from keys."""
     return {_remove_extension(key): value for key, value in input_dict.items()}
 
 
-def _create_keys_dict(input_dict: dict) -> dict[str, str]:
+def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
     """Create a mapping from extension-stripped keys to original keys."""
     return {_remove_extension(key): key for key in input_dict}
 
@@ -143,15 +144,7 @@ def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
         stacklevel=2,
     )
 
-    try:
-        agency, rest = dsd_id.split(":", 1)
-        id_part, version_part = rest.split("(", 1)
-        version = version_part.rstrip(")")
-        return agency, id_part, version
-    except (ValueError, AttributeError) as err:
-        raise ValueError(
-            "Invalid dsd_id format. Expected format: 'agency:id(version)'"
-        ) from err
+    return parse_artefact_id(dsd_id)
 
 
 @typechecked
@@ -482,8 +475,9 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
         The modified DataFrame with corrected INDICATOR values.
 
     Raises:
-        ValueError: If the database/dataset ID column contains more than
-            one unique value.
+        ValueError: If neither a ``DATABASE_ID`` nor a ``DATASET_ID`` column
+            is present, or if the ID column contains more than one unique
+            value.
 
     Examples:
         >>> df = pd.DataFrame({
@@ -499,6 +493,10 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             id_column = col
             break
+    if id_column is None:
+        raise ValueError(
+            "The DataFrame must contain a 'DATABASE_ID' or 'DATASET_ID' column."
+        )
 
     df = df.copy()
     dataset_id = df[id_column].unique()
@@ -704,7 +702,7 @@ def _add_sdmx_reference_cols(
 
 
 @typechecked
-def read_mapping(path: str) -> dict:
+def read_mapping(path: str | Path) -> dict[str, str | pd.DataFrame]:
     """Read a JSON mapping file and parse its content into DataFrames.
 
     The function processes JSON data with four main keys:
@@ -735,7 +733,7 @@ def read_mapping(path: str) -> dict:
     with open(path) as file:
         data = json.load(file)
 
-    result = {}
+    result: dict[str, str | pd.DataFrame] = {}
 
     schema_version = data.get("schema_version")
     if schema_version:
