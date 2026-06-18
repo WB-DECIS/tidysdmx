@@ -1,5 +1,6 @@
 """SDMX component extraction, mapping rules, and Excel helpers."""
 
+import zipfile
 from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import Literal
@@ -149,7 +150,7 @@ def write_excel_mapping_template(
 
     try:
         wb.save(str(output_path))
-    except Exception as e:
+    except OSError as e:
         raise RuntimeError(
             f"Failed to save Excel workbook to {output_path}: {e}"
         ) from e
@@ -251,7 +252,9 @@ def build_excel_workbook(
                 ws = wb.create_sheet(title=tab_name)
                 for row in dataframe_to_rows(df_rep, index=False, header=True):
                     ws.append(row)
-            except Exception as e:
+            except ValueError as e:
+                # openpyxl raises ValueError for invalid/duplicate/too-long
+                # sheet titles.
                 raise RuntimeError(
                     f"Failed to create sheet '{tab_name}'. "
                     f"Check for invalid characters or long names: {e}"
@@ -285,7 +288,7 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
 
     try:
         return pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
-    except Exception as e:
+    except (ValueError, OSError, zipfile.BadZipFile) as e:
         raise RuntimeError(f"Failed to read Excel file: {e}") from e
 
 

@@ -11,7 +11,7 @@ from tidysdmx.validation import (
 )
 
 
-class TestValidateNoMissingValues:  # noqa: D101
+class TestValidateNoMissingValues:
     def test_no_missing(self):
         """Pass when no mandatory values are missing."""
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
@@ -41,7 +41,7 @@ class TestValidateNoMissingValues:  # noqa: D101
         validate_no_missing_values(df, mandatory_columns=["col1", "col2"])
 
 
-class TestValidateDuplicates:  # noqa: D101
+class TestValidateDuplicates:
     def test_no_duplicates(self):
         """Pass when no duplicate key combinations exist."""
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
@@ -54,7 +54,7 @@ class TestValidateDuplicates:  # noqa: D101
             validate_duplicates(df, dim_comp=["col1", "col2"])
 
 
-class TestValidateMandatoryColumns:  # noqa: D101
+class TestValidateMandatoryColumns:
     def test_all_present(self):
         """Pass when all mandatory columns are present."""
         df = pd.DataFrame({"col1": [1, 2, 3], "col2": [4, 5, 6]})
@@ -69,7 +69,7 @@ class TestValidateMandatoryColumns:  # noqa: D101
             )
 
 
-class TestValidateColumns:  # noqa: D101
+class TestValidateColumns:
     @pytest.mark.parametrize(
         "df_columns, valid_columns, sdmx_cols",
         [
@@ -139,7 +139,7 @@ class TestValidateColumns:  # noqa: D101
         )
 
 
-class TestValidateCodelistIds:  # noqa: D101
+class TestValidateCodelistIds:
     @pytest.fixture()
     def sample_codelist_ids(self):
         """Fixture that returns a dictionary of allowed IDs for columns."""
@@ -196,7 +196,7 @@ class TestValidateCodelistIds:  # noqa: D101
         assert expected_error in str(excinfo.value)
 
 
-class TestValidateDatasetLocal:  # noqa: D101
+class TestValidateDatasetLocal:
     # Existing tests pass a precomputed ``valid`` dict via fixture. That path
     # is deprecated (see #218 follow-up) and emits FutureWarning. Suppress it
     # at the class level so the legacy assertions stay focused on validation

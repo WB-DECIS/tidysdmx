@@ -112,7 +112,7 @@ def test_workbook_data() -> tuple[list[str], list[str]]:
 # endregion
 
 
-class TestExtractComponentIds:  # noqa: D101
+class TestExtractComponentIds:
     def test_extract_component_ids_empty(self):
         """Raise ValueError if Schema has no components."""
         empty_schema = Schema(
@@ -132,7 +132,7 @@ class TestExtractComponentIds:  # noqa: D101
             extract_component_ids("Not a Schema Object")
 
 
-class TestExtractValidationInfo:  # noqa: D101
+class TestExtractValidationInfo:
     @pytest.mark.parametrize(
         "invalid_input",
         [None, {}, [], "not_a_schema", 123],
@@ -142,6 +142,7 @@ class TestExtractValidationInfo:  # noqa: D101
         with pytest.raises(TypeCheckError):
             extract_validation_info(invalid_input)
 
+    @pytest.mark.integration
     def test_extract_validation_has_expected_structure(self, ifpri_asti_schema):
         """Ensure the returned dict has the expected keys and types."""
         result = extract_validation_info(ifpri_asti_schema)
@@ -189,13 +190,14 @@ class TestExtractValidationInfo:  # noqa: D101
         result = extract_validation_info(sdmx_schema)
         assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
 
+    @pytest.mark.integration
     def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
         """Datastructure-context schema yields STRUCTURE reference columns."""
         result = extract_validation_info(ifpri_asti_schema)
         assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
 
-class TestSdmxReferenceColsFor:  # noqa: D101
+class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
         "context, expected",
         [
@@ -217,7 +219,8 @@ class TestSdmxReferenceColsFor:  # noqa: D101
             sdmx_reference_cols_for("not_a_context")
 
 
-class TestGetCodelistIds:  # noqa: D101
+class TestGetCodelistIds:
+    @pytest.mark.integration
     def test_get_codelist_ids_has_expected_structure(self, ifpri_asti_schema):
         """Ensure returned dict maps coded components to code ID lists."""
         comp = ifpri_asti_schema.components
@@ -239,7 +242,7 @@ class TestGetCodelistIds:  # noqa: D101
         assert get_codelist_ids(comp, coded_comp) == expected_output
 
 
-class TestExtractCodelistIds:  # noqa: D101
+class TestExtractCodelistIds:
     @pytest.mark.skip(reason="Temporary skipping to generate a coverage report")
     def test_extract_component_ids_normal(self):
         """Retrieve IDs from a valid schema with multiple components."""
@@ -308,7 +311,7 @@ class TestExtractCodelistIds:  # noqa: D101
             extract_component_ids(schema)
 
 
-class TestCreateMappingRules:  # noqa: D101
+class TestCreateMappingRules:
     def test_create_mapping_rules_normal_case(self):
         """Test a mix of matching and non-matching components."""
         components = ["D1", "D2", "D3", "D4"]
@@ -376,7 +379,7 @@ class TestCreateMappingRules:  # noqa: D101
             create_mapping_rules(components, [1, 2])  # type: ignore
 
 
-class TestBuildExcelWorkbook:  # noqa: D101
+class TestBuildExcelWorkbook:
     def test_build_excel_workbook_content_and_sheets(self, test_workbook_data):
         """Test successful workbook creation and content structure."""
         components, rep_maps = test_workbook_data
@@ -424,7 +427,7 @@ class TestBuildExcelWorkbook:  # noqa: D101
         assert rules_cells == ["", "", "", ""]
 
 
-class TestWriteExcelMappingTemplate:  # noqa: D101
+class TestWriteExcelMappingTemplate:
     def test_write_excel_mapping_template_success(self, test_workbook_data, tmp_path):
         """Test successful file creation."""
         components, rep_maps = test_workbook_data
@@ -473,7 +476,7 @@ class TestWriteExcelMappingTemplate:  # noqa: D101
         assert cell_value == ('=HYPERLINK("#C_REF_AREA!A1","C_REF_AREA")')
 
 
-class TestParseMappingTemplateWb:  # noqa: D101
+class TestParseMappingTemplateWb:
     def test_parse_mapping_template_wb_valid(self, mapping_template_path):
         """Test parsing a valid mapping template."""
         result = parse_mapping_template_wb(mapping_template_path)
