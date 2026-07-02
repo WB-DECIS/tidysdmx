@@ -24,19 +24,29 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
 If nothing since the last tag warrants a release (only `docs:`/`chore:`/`test:`… commits),
 the workflow succeeds as a no-op and nothing is published.
 
+The release commit itself triggers no CI: pushes made with `GITHUB_TOKEN` never start
+workflows, and the `[skip ci]` marker is additionally
+[honored natively by GitHub Actions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
+for push/PR-triggered workflows (relevant if the PAT route is used).
+
 ## Commit messages → version bumps
 
 | Commit type | Bump |
 |---|---|
 | `fix:`, `perf:` | patch (0.9.0 → 0.9.1) |
 | `feat:` | minor (0.9.0 → 0.10.0) |
-| `BREAKING CHANGE:` footer or `!` (e.g. `feat!:`) | major (0.x → 1.0.0) |
+| `BREAKING CHANGE:` footer or `!` (e.g. `feat!:`) | minor while on 0.x (`major_on_zero = false`) |
 | `docs:`, `test:`, `chore:`, `ci:`, `build:`, `refactor:`, `style:` | none |
 
 Only `feat`/`fix`/`perf` entries appear in the generated changelog
 (see `exclude_commit_patterns` in `pyproject.toml`). Hand-written history below the
 `<!-- version list -->` marker is preserved; you may still edit it manually, but never
 remove the marker itself and never hand-edit the version in `pyproject.toml`.
+
+**Releasing 1.0.0:** the API is declared unstable, so breaking changes deliberately do
+not leave 0.x. When the API is ready to be stabilised, set `major_on_zero = true` in
+`pyproject.toml` — the next release containing a breaking change (or any release, if
+you also remove `allow_zero_version`) becomes 1.0.0.
 
 ## One-time setup (record once done)
 

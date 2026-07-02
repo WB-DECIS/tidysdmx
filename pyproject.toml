@@ -62,6 +62,7 @@ version_toml = [
     "pyproject.toml:tool.poetry.version",
 ]
 allow_zero_version = true    # stay on 0.x; without this the next release would jump to 1.0.0
+major_on_zero = false        # while on 0.x, breaking changes bump minor; set true to release 1.0.0
 tag_format = "v{version}"    # matches the existing v0.2.0..v0.8.0 tags
 # The release workflow's PSR container has no Poetry preinstalled.
 build_command = "python -m pip install 'poetry>=2.3,<3' && poetry build"
