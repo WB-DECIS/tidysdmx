@@ -80,14 +80,28 @@ you also remove `allow_zero_version`) becomes 1.0.0.
 
 ## Dry runs
 
-- **In CI:** *Actions → Release → Run workflow* with `noop: true` — prints what would be
-  released without committing, tagging, or publishing.
-- **Locally:**
+- **In CI** (second release onwards): *Actions → Release → Run workflow* with
+  `noop: true` — prints what would be released without committing, tagging, or
+  publishing. GitHub only lists a `workflow_dispatch` workflow in the Actions tab
+  once its file exists on the default branch, so the *Release* entry (and its
+  *Run workflow* button) only appears after the first release PR has been merged
+  to `master`.
+- **Locally** (works any time, including before the first release):
+  semantic-release only computes releases on a branch named `master`/`main`, so
+  running it on `dev` fails with "branch not in any release groups". Instead,
+  simulate the post-merge state on a temporary **local** `master` — nothing is
+  pushed at any point:
 
   ```bash
-  git fetch origin master --tags
+  git fetch origin
+  git checkout -B master origin/dev     # local master at dev's tip = what master will contain after the release PR
   poetry run semantic-release -v --noop version
+  git checkout dev
+  git branch -f master origin/master    # restore your local master
   ```
+
+  Expected output: `The next version is: X.Y.Z!` followed by `[NOP]` lines showing
+  the commit, tag, and pushes it *would* perform.
 
 ## Troubleshooting & manual fallback
 
