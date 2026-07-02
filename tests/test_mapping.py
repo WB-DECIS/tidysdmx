@@ -383,6 +383,42 @@ class TestApplyMultiComponentMap:
         assert result["URBANISATION"].iloc[0] == "RUR"
         assert result["URBANISATION"].iloc[1:].isna().all()
 
+    def test_all_unmapped_values_are_none(self):
+        """Rows matching no rule yield None when there is no catch-all."""
+        mcm = self._multi_map_with_catch_all(
+            [MultiValueMap(source=["COL", "one"], target=["RUR"])]
+        )
+        df = pd.DataFrame({"AREA": ["AAA", "BBB"], "NOTE": ["ccc", "ddd"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
+    def test_no_rules_yields_all_none(self):
+        """A MultiComponentMap with no rules sets the target column to None."""
+        mcm = self._multi_map_with_catch_all([])
+        df = pd.DataFrame({"AREA": ["COL", "SWZ"], "NOTE": ["one", "two"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
+    def test_exact_match_on_nullable_string_dtype(self):
+        """Exact matching works on a nullable 'string' column with pd.NA."""
+        mcm = MultiComponentMap(
+            source=["GEO"],
+            target=["COUNTRY"],
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                maps=[MultiValueMap(source=["BE"], target=["BEL"])],
+            ),
+        )
+        df = pd.DataFrame({"GEO": pd.array(["BE", pd.NA, "FR"], dtype="string")})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["COUNTRY"].iloc[0] == "BEL"
+        assert pd.isna(result["COUNTRY"].iloc[1])
+        assert pd.isna(result["COUNTRY"].iloc[2])
+
 
 @pytest.mark.integration
 class TestMapStructures:
