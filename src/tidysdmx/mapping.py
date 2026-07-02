@@ -307,6 +307,20 @@ def apply_multi_component_map(
     # round-trip).
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
+    str_cols: dict[str, pd.Series] = {}
+
+    def _stringified(col: str) -> pd.Series:
+        # Per-cell str() (not .astype("string")) keeps the exact regex
+        # semantics of the previous row-wise implementation and of
+        # apply_component_map: .astype("string") formats some dtypes
+        # differently, and array-dependently (e.g. it trims " 00:00:00"
+        # from datetime columns, but only when every value is midnight).
+        # na_action="ignore" keeps missing values missing so that na=False
+        # below treats them as non-matches and they stay unmapped.
+        if col not in str_cols:
+            str_cols[col] = result_df[col].map(str, na_action="ignore")
+        return str_cols[col]
+
     # Build one boolean mask per rule, vectorised across the source columns,
     # then resolve them with np.select: rules are already rank-sorted, and
     # np.select picks the first true condition per row, so the first matching
@@ -323,12 +337,8 @@ def apply_multi_component_map(
             col_series = result_df[col]
             if pattern.startswith("regex:"):
                 regex = pattern.removeprefix("regex:")
-                # Stringify via the nullable "string" dtype so missing values
-                # stay missing and na=False treats them as non-matches; a
-                # plain str() conversion would turn NaN into "nan", which a
-                # regex (especially the catch-all "regex:.*") could match.
                 col_mask = (
-                    col_series.astype("string")
+                    _stringified(col)
                     .str.fullmatch(regex, na=False)
                     .to_numpy(dtype=bool)
                 )
