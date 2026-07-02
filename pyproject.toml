@@ -1,13 +1,33 @@
 [project]
 name = "tidysdmx"
-dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python"]
+dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python", "classifiers"]
+keywords = ["sdmx", "statistics", "data", "metadata", "fmr", "pysdmx"]
+
+[project.urls]
+Homepage = "https://github.com/WB-DECIS/tidysdmx"
+Repository = "https://github.com/WB-DECIS/tidysdmx"
+Documentation = "https://wb-decis.github.io/tidysdmx/"
+Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/master/CHANGELOG.md"
+Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
 
 [tool.poetry]
-version = "0.7.5"
+version = "0.8.0"
 description = "A toolbox to work with SDMX data"
 authors = ["Tony Fujs", "Daniel Gil-Sanchez"]
 license = "MIT"
 readme = "README.md"
+packages = [{ include = "tidysdmx", from = "src" }]
+# License and Python-version classifiers are auto-added by Poetry
+# ("classifiers" is listed in [project] dynamic). 3.11 must be listed
+# manually: auto-enrichment skips it because >=3.11.9 excludes part of 3.11.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+    "Operating System :: OS Independent",
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11.9"
@@ -41,7 +61,31 @@ build-backend = "poetry.core.masonry.api"
 version_toml = [
     "pyproject.toml:tool.poetry.version",
 ]
-allow_zero_version = true
+allow_zero_version = true    # stay on 0.x; without this the next release would jump to 1.0.0
+major_on_zero = false        # while on 0.x, breaking changes bump minor; set true to release 1.0.0
+tag_format = "v{version}"    # matches the existing v0.2.0..v0.8.0 tags
+# The release workflow's PSR container has no Poetry preinstalled.
+build_command = "python -m pip install 'poetry>=2.3,<3' && poetry build"
+commit_message = "chore(release): {version} [skip ci]"
+
+[tool.semantic_release.changelog]
+# "update" inserts new sections under insertion_flag and leaves the
+# hand-written history below it untouched.
+mode = "update"
+insertion_flag = "<!-- version list -->"
+# Keep the changelog user-facing: only feat/fix/perf entries.
+exclude_commit_patterns = [
+    '''chore(?:\([^)]*?\))?: .+''',
+    '''ci(?:\([^)]*?\))?: .+''',
+    '''build(?:\([^)]*?\))?: .+''',
+    '''refactor(?:\([^)]*?\))?: .+''',
+    '''style(?:\([^)]*?\))?: .+''',
+    '''test(?:\([^)]*?\))?: .+''',
+    '''docs(?:\([^)]*?\))?: .+''',
+]
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
 
 [tool.ruff]
 src = ["src"]
