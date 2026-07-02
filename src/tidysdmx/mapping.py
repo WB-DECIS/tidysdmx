@@ -4,6 +4,7 @@ import logging
 import re
 from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
 import pysdmx as px
 from typeguard import typechecked
@@ -267,8 +268,8 @@ def apply_multi_component_map(
     Rules are evaluated by priority so that results do not depend on the stored
     order of the value maps: explicit (literal) tuples first, then regex tuples,
     then any pure catch-all (``"regex:.*"`` for every component) last. The first
-    matching rule wins. Patterns prefixed with ``"regex:"`` are matched using
-    ``re.fullmatch``.
+    matching rule wins. Patterns prefixed with ``"regex:"`` must match the full
+    stringified value (``Series.str.fullmatch``).
 
     Rows with a missing value (NaN/None) in any source column remain
     unmapped: they are never matched by any rule (including the catch-all)
@@ -306,27 +307,56 @@ def apply_multi_component_map(
     # round-trip).
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
-    def match_row(row):
-        # Missing source values stay unmapped: str(NaN) is "nan", which a
-        # regex (especially the catch-all "regex:.*") would otherwise match.
-        if row.isna().any():
-            return None
-        for rule in rules:
-            match = True
-            for col_val, pattern in zip(row, rule["patterns"], strict=True):
-                if pattern.startswith("regex:"):
-                    regex = pattern.removeprefix("regex:")
-                    if not re.fullmatch(regex, str(col_val)):
-                        match = False
-                        break
-                elif col_val != pattern:
-                    match = False
-                    break
-            if match:
-                return rule["target"]
-        return None
+    str_cols: dict[str, pd.Series] = {}
 
-    result_df[target_col] = result_df[source_cols].apply(match_row, axis=1)
+    def _stringified(col: str) -> pd.Series:
+        # Per-cell str() (not .astype("string")) keeps the exact regex
+        # semantics of the previous row-wise implementation and of
+        # apply_component_map: .astype("string") formats some dtypes
+        # differently, and array-dependently (e.g. it trims " 00:00:00"
+        # from datetime columns, but only when every value is midnight).
+        # na_action="ignore" keeps missing values missing so that na=False
+        # below treats them as non-matches and they stay unmapped.
+        if col not in str_cols:
+            str_cols[col] = result_df[col].map(str, na_action="ignore")
+        return str_cols[col]
+
+    # Build one boolean mask per rule, vectorised across the source columns,
+    # then resolve them with np.select: rules are already rank-sorted, and
+    # np.select picks the first true condition per row, so the first matching
+    # rule wins. This replaces a row-wise .apply(axis=1) so matching cost
+    # scales with the number of rules/columns instead of the number of rows.
+    n_rows = len(result_df)
+    conditions = []
+    choices = []
+    for rule in rules:
+        mask = np.ones(n_rows, dtype=bool)
+        # strict=True preserves the contract that each rule must supply one
+        # pattern per source column.
+        for col, pattern in zip(source_cols, rule["patterns"], strict=True):
+            col_series = result_df[col]
+            if pattern.startswith("regex:"):
+                regex = pattern.removeprefix("regex:")
+                col_mask = (
+                    _stringified(col)
+                    .str.fullmatch(regex, na=False)
+                    .to_numpy(dtype=bool)
+                )
+            else:
+                # fillna(False) guards nullable-boolean comparison results
+                # (e.g. the "string" dtype) so missing values never match and
+                # the conversion to a plain bool array cannot fail on pd.NA.
+                col_mask = (col_series == pattern).fillna(False).to_numpy(dtype=bool)
+            mask &= col_mask
+        conditions.append(mask)
+        choices.append(rule["target"])
+
+    if conditions:
+        result_df[target_col] = pd.Series(
+            np.select(conditions, choices, default=None), index=result_df.index
+        )
+    else:
+        result_df[target_col] = None
 
     logger.log(
         _progress_level(verbose),

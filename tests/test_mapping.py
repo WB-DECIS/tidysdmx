@@ -383,6 +383,85 @@ class TestApplyMultiComponentMap:
         assert result["URBANISATION"].iloc[0] == "RUR"
         assert result["URBANISATION"].iloc[1:].isna().all()
 
+    def test_all_unmapped_values_are_none(self):
+        """Rows matching no rule yield None when there is no catch-all."""
+        mcm = self._multi_map_with_catch_all(
+            [MultiValueMap(source=["COL", "one"], target=["RUR"])]
+        )
+        df = pd.DataFrame({"AREA": ["AAA", "BBB"], "NOTE": ["ccc", "ddd"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
+    def test_no_rules_yields_all_none(self):
+        """A MultiComponentMap with no rules sets the target column to None."""
+        mcm = self._multi_map_with_catch_all([])
+        df = pd.DataFrame({"AREA": ["COL", "SWZ"], "NOTE": ["one", "two"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].isna().all()
+
+    def test_exact_match_on_nullable_string_dtype(self):
+        """Exact matching works on a nullable 'string' column with pd.NA."""
+        mcm = MultiComponentMap(
+            source=["GEO"],
+            target=["COUNTRY"],
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                maps=[MultiValueMap(source=["BE"], target=["BEL"])],
+            ),
+        )
+        df = pd.DataFrame({"GEO": pd.array(["BE", pd.NA, "FR"], dtype="string")})
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["COUNTRY"].iloc[0] == "BEL"
+        assert pd.isna(result["COUNTRY"].iloc[1])
+        assert pd.isna(result["COUNTRY"].iloc[2])
+
+    def test_regex_on_datetime_column_uses_str_semantics(self):
+        """Regexes match the per-cell str() of datetime values.
+
+        An all-midnight datetime column must stringify per cell (keeping the
+        " 00:00:00" time part), not via the array-wide date-only formatter.
+        """
+        mcm = MultiComponentMap(
+            source=["DATE"],
+            target=["FLAG"],
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                maps=[
+                    MultiValueMap(
+                        source=[r"regex:2020-01-01 00:00:00"], target=["MATCHED"]
+                    )
+                ],
+            ),
+        )
+        df = pd.DataFrame(
+            {"DATE": [pd.Timestamp("2020-01-01"), pd.Timestamp("2021-03-05")]}
+        )
+
+        result = apply_multi_component_map(df, mcm)
+        assert result["FLAG"].iloc[0] == "MATCHED"
+        assert pd.isna(result["FLAG"].iloc[1])
+
+    def test_multiple_regex_rules_on_same_column(self):
+        """Several regex rules on one column resolve with first-match-wins."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["regex:C.*", "regex:one|two"], target=["C_"]),
+                MultiValueMap(source=["regex:.*L", "regex:one|two"], target=["_L"]),
+            ]
+        )
+        df = pd.DataFrame(
+            {"AREA": ["COL", "BEL", "COL"], "NOTE": ["one", "two", "three"]}
+        )
+
+        result = apply_multi_component_map(df, mcm)
+        # "COL"/"one" matches both rules; the first stored rule wins.
+        assert list(result["URBANISATION"]) == ["C_", "_L", None]
+
 
 @pytest.mark.integration
 class TestMapStructures:
