@@ -61,9 +61,7 @@ def ifpri_asti_schema(api_params_schema):
             version=api_params_schema["raw_structure_version"],
         )
     except Exception as exc:
-        pytest.skip(
-            f"Cassette {cache_file.name} not found and FMR unavailable: {exc}"
-        )
+        pytest.skip(f"Cassette {cache_file.name} not found and FMR unavailable: {exc}")
 
     with open(cache_file, "wb") as f:
         pkl.dump(schema, f)

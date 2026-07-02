@@ -153,9 +153,11 @@ dmypy.json
 *.pem
 
 # Custom
+notebooks/TMP/
 TMP/
-config.json
-## Ignore everything under scripts/
+docs/.local-docs
+notebooks/tidysdmx/config.json
+# Ignore everything under scripts/
 scripts/*
 ## But keep the scripts directory itself
 !scripts/ 

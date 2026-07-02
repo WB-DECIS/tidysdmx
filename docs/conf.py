@@ -1,3 +1,5 @@
+"""Sphinx documentation build configuration for tidysdmx."""
+
 # Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
@@ -6,9 +8,9 @@
 
 # -- Project information -----------------------------------------------------
 
-project = u"tidysdmx"
-copyright = u"2025, DECGT - World Bank"
-author = u"DECGT - World Bank"
+project = "tidysdmx"
+copyright = "2025, DECGT - World Bank"
+author = "DECGT - World Bank"
 
 # -- General configuration ---------------------------------------------------
 

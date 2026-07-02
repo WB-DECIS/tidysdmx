@@ -10,14 +10,16 @@ from pysdmx.model import StructureMap
 CACHE_DIR = Path(__file__).parent / "cassettes"
 CACHE_DIR.mkdir(exist_ok=True)
 
+
 @pytest.fixture(scope="session")
 def api_params_sm():
     """Fixture0 for API parameters."""
     return {
         "fmr_url": "https://fmrqa.worldbank.org/FMR/sdmx/v2",
         "raw_structure_agency": "WB",
-        "raw_structure_map": "SM_IFPRI_ASTI_TO_DATA360"   
+        "raw_structure_map": "SM_IFPRI_ASTI_TO_DATA360",
     }
+
 
 @pytest.fixture(scope="session")
 def ifpri_asti_sm(api_params_sm):
@@ -45,9 +47,7 @@ def ifpri_asti_sm(api_params_sm):
             id=api_params_sm["raw_structure_map"],
         )
     except Exception as exc:
-        pytest.skip(
-            f"Cassette {cache_file.name} not found and FMR unavailable: {exc}"
-        )
+        pytest.skip(f"Cassette {cache_file.name} not found and FMR unavailable: {exc}")
 
     with open(cache_file, "wb") as f:
         pkl.dump(sm, f)

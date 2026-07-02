@@ -1,11 +1,11 @@
-"""
-DEBUGGING SANITY CHECKS
-----------------------
+"""Debugging sanity checks.
+
 Remove or comment out once debugging is stable.
 """
 
-import sys
 import os
+import sys
+
 import tidysdmx
 
 print("\n=== DEBUG ENVIRONMENT ===")

@@ -80,6 +80,12 @@ Before you submit a pull request, check that it meets these guidelines:
 1. The pull request should include additional tests if appropriate.
 2. If the pull request adds functionality, the docs should be updated.
 3. The pull request should work for all currently supported operating systems and versions of Python.
+4. Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org/)
+   (`feat:`, `fix:`, `docs:`, …) — they drive automated versioning and the changelog.
+
+## Releasing
+
+Releases to PyPI are automated. See [RELEASING.md](RELEASING.md).
 
 ## Code of Conduct
 

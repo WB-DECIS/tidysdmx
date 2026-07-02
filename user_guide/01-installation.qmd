@@ -1,0 +1,66 @@
+---
+title: "Installation"
+description: "Install tidysdmx and verify your environment."
+tags: [Getting Started, Setup]
+---
+
+# Installation
+
+tidysdmx requires **Python 3.11.9 or later**.
+
+## With pip
+
+```bash
+pip install tidysdmx
+```
+
+## With Poetry
+
+```bash
+poetry add tidysdmx
+```
+
+## From source (development)
+
+```bash
+git clone https://github.com/WB-DECIS/tidysdmx.git
+cd tidysdmx
+poetry install
+poetry run pytest -m "not integration"
+```
+
+## Runtime dependencies
+
+tidysdmx depends on:
+
+- [`pysdmx`](https://py.sdmx.io) — the underlying SDMX information-model library.
+- [`pandas`](https://pandas.pydata.org) — the tabular workhorse.
+- [`typeguard`](https://typeguard.readthedocs.io) — runtime type checking.
+- [`openpyxl`](https://openpyxl.readthedocs.io) — Excel mapping template support.
+
+## Verify the install
+
+```python
+import tidysdmx
+print(tidysdmx.__version__)
+
+from tidysdmx import (
+    create_schema_from_table,
+    parse_mapping_template_wb,
+    build_structure_map_from_template_wb,
+    map_structures,
+    standardize_output,
+    validate_dataset_local,
+)
+```
+
+If the imports succeed, you're ready to go. Continue to the [quick start](02-quick-start.qmd).
+
+## Optional: connect to FMR
+
+Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. The `pysdmx` FMR client is bundled with tidysdmx and can be instantiated directly:
+
+```python
+import pysdmx as px
+client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+```
