@@ -126,10 +126,13 @@ source directly rather than guessing. Locate it with
 ## CI/CD
 
 - **GitHub Actions CI** (`.github/workflows/ci.yml`): runs ruff lint + format check, then
-  pytest with coverage on Python 3.11 and 3.12 — triggered on push/PR to master
+  pytest with coverage on Python 3.11 and 3.12 — triggered on push/PR to master and dev
 - **Claude PR Review** (`.github/workflows/pr-review.yml`): automated code review on PRs
   using Claude, checking SDMX correctness, type safety, test coverage, and code quality
-- **Semantic Release**: `python-semantic-release` manages versioning from commit messages
+- **Release** (`.github/workflows/release.yml`): on push to master,
+  `python-semantic-release` computes the version from commit messages, tags, creates a
+  GitHub Release, and publishes to PyPI via Trusted Publishing — see `RELEASING.md`.
+  Never hand-edit the version in `pyproject.toml`.
 
 ## What NOT to Do
 
