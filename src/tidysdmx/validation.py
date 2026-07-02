@@ -1,12 +1,31 @@
 """Validate SDMX datasets against schemas and codelists."""
 
+import warnings
+
 import pandas as pd
 from pysdmx.model.dataflow import Schema
 from typeguard import typechecked
 
-from .utils import extract_validation_info
+from .utils import extract_validation_info, sdmx_reference_cols_for
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
+
+
+def _truncation_note(shown: int, total: int, max_errors: int) -> str:
+    """Return a canonical suffix describing truncated error output.
+
+    Args:
+        shown: Number of items included in the message.
+        total: Total number of items found.
+        max_errors: The cap that was applied.
+
+    Returns:
+        ``" … and N more (max_errors=...)"`` when items were dropped,
+        otherwise an empty string.
+    """
+    if total <= shown:
+        return ""
+    return f" … and {total - shown} more (max_errors={max_errors})"
 
 
 def _get_unexpected_columns(
@@ -67,16 +86,23 @@ def validate_dataset_local(
 ) -> pd.DataFrame:
     """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
 
-    Either a schema or a precomputed ``valid`` object must be provided to avoid
-    recomputing validation info for multiple datasets.
+    Pass ``schema`` so validation info (including the expected SDMX reference
+    columns) can be inferred. The ``valid`` parameter is retained as a
+    deprecated shim for callers that previously cached the output of
+    :func:`~tidysdmx.utils.extract_validation_info`.
 
     Args:
         df: The DataFrame to be validated.
         schema: The schema object (optional if ``valid`` is provided).
-        valid: Precomputed validation information returned by
-            :func:`~tidysdmx.utils.extract_validation_info` (optional).
-        sdmx_cols: SDMX reference columns expected in the dataset. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        valid: **Deprecated.** Precomputed validation information returned by
+            :func:`~tidysdmx.utils.extract_validation_info`. This argument
+            will be removed in a future release; pass ``schema`` directly
+            instead.
+        sdmx_cols: SDMX reference columns expected in the dataset. When
+            omitted, the columns are inferred from the schema's context
+            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
+            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
+            datastructure schema).
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -84,22 +110,44 @@ def validate_dataset_local(
         A DataFrame containing validation errors. Each row is one error, with
         columns ``Validation`` and ``Error``.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    if valid is not None:
+        warnings.warn(
+            "The `valid` argument of validate_dataset_local is deprecated "
+            "and will be removed in a future release. Pass `schema` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
 
     if valid is None:
         if schema is None:
             raise ValueError("Either a schema or precomputed 'valid' must be provided.")
         valid = extract_validation_info(schema)
 
+    if sdmx_cols is None:
+        inferred = valid.get("sdmx_cols")
+        if inferred is not None:
+            sdmx_cols = list(inferred)
+        else:
+            # TODO(deprecated): legacy fallback for `valid` dicts built under
+            # the pre-#218 shape (missing the "sdmx_cols" key). Remove once
+            # the deprecated `valid` parameter itself is dropped.
+            if schema is not None:
+                sdmx_cols = sdmx_reference_cols_for(schema.context)
+            else:
+                sdmx_cols = list(_DEFAULT_SDMX_COLS)
+
     error_records: list[dict[str, str]] = []
 
     # Validate columns — one row per unexpected column
     unexpected = _get_unexpected_columns(df, valid["valid_comp"], sdmx_cols)
-    for col in unexpected[:max_errors]:
+    capped_cols = unexpected[:max_errors]
+    for col in capped_cols:
         error_records.append(
             {"Validation": "columns", "Error": f"Unexpected column: '{col}'"}
         )
+    note = _truncation_note(len(capped_cols), len(unexpected), max_errors)
+    if note:
+        error_records.append({"Validation": "columns", "Error": note.strip()})
 
     # Check mandatory columns directly instead of catching ValueError
     required = set(valid["mandatory_comp"]) | set(sdmx_cols)
@@ -162,10 +210,8 @@ def validate_columns(
     unexpected = _get_unexpected_columns(df, valid_columns, sdmx_cols)
     if unexpected:
         capped = unexpected[:max_errors]
-        truncated = len(unexpected) - len(capped)
         msg = f"Found unexpected columns: {capped}"
-        if truncated:
-            msg += f" … and {truncated} more (max_errors={max_errors})"
+        msg += _truncation_note(len(capped), len(unexpected), max_errors)
         raise ValueError(msg)
 
 
@@ -220,7 +266,7 @@ def validate_codelist_ids(
     if violations:
         truncated = ""
         if len(violations) >= max_errors:
-            truncated = f" (capped at max_errors={max_errors})"
+            truncated = f" … capped (max_errors={max_errors})"
         raise ValueError(
             f"Invalid codelist values found{truncated}:\n  "
             + "\n  ".join(f"'{col}': {val}" for col, val in violations)
@@ -249,9 +295,7 @@ def validate_duplicates(
     if duplicate_mask.any():
         dup_keys = df.loc[duplicate_mask, dim_comp].drop_duplicates().head(max_errors)
         total = df.loc[duplicate_mask, dim_comp].drop_duplicates().shape[0]
-        truncated = (
-            f" (showing {len(dup_keys)} of {total})" if total > max_errors else ""
-        )
+        truncated = _truncation_note(len(dup_keys), total, max_errors)
         raise ValueError(
             f"Found {duplicate_mask.sum()} duplicate rows across {total} key "
             f"combination(s) for {dim_comp}{truncated}:\n"
@@ -281,7 +325,7 @@ def validate_no_missing_values(
     if missing_mask.any():
         sample = df.loc[missing_mask].head(max_errors)
         total = missing_mask.sum()
-        truncated = f" (showing {len(sample)} of {total})" if total > max_errors else ""
+        truncated = _truncation_note(len(sample), int(total), max_errors)
         raise ValueError(
             f"Found {total} row(s) with missing values in "
             f"mandatory columns{truncated}:\n"

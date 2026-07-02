@@ -1,5 +1,8 @@
-[tool.poetry]
+[project]
 name = "tidysdmx"
+dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python"]
+
+[tool.poetry]
 version = "0.8.0"
 description = "A toolbox to work with SDMX data"
 authors = ["Tony Fujs", "Daniel Gil-Sanchez"]
@@ -10,6 +13,7 @@ readme = "README.md"
 python = ">=3.11.9"
 pysdmx = "^1.13.0"
 pandas = "^2.2.3"
+numpy = ">=1.26"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
 
@@ -42,6 +46,9 @@ allow_zero_version = true
 [tool.ruff]
 src = ["src"]
 target-version = "py311"
+# Notebooks are exploratory and managed via nbstripout, not ruff. Linting them
+# raises Jupyter-specific false positives (cross-cell imports/names), so exclude.
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = [
@@ -63,7 +70,8 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["D100", "D103"]  # no module/function docstrings required in tests
+# Docstrings are not required anywhere in tests (module/class/method/function).
+"tests/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D106"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

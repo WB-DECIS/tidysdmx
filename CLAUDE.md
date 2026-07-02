@@ -20,7 +20,7 @@ upstream dependency your code wraps:
 
 1. `docs/sdmx-information-model.md` — understand the SDMX artefacts involved
 2. `docs/pysdmx-overview.md` — understand how pysdmx models those artefacts
-3. `docs/tidy-sdmx-architecture.md` — understand how tidysdmx maps onto pysdmx
+3. `docs/tidysdmx-architecture.md` — understand how tidysdmx maps onto pysdmx
 
 ## Python Environment
 
@@ -54,6 +54,8 @@ src/tidysdmx/
 ├── mapping.py              — Apply StructureMaps to DataFrames
 ├── structure_map_writer.py — Collect, validate, and prepare StructureMaps for FMR upload
 ├── validation.py           — Validate datasets against schemas and codelists
+├── artefact_builder.py     — Build pysdmx artefacts with publish-readiness validation
+├── artefact_validation.py  — Validate artefacts before publishing (rules + ValidationError)
 ├── utils.py                — Utilities: extract components, build mapping rules, Excel helpers
 ├── qa_utils.py             — QA helpers: coerce numeric, remove duplicates
 ├── kedro.py                — Kedro pipeline node wrappers
@@ -86,11 +88,11 @@ tests/
 - `pysdmx.io.format.StructureFormat` — structure serialisation formats
 
 ## pysdmx Source Code
-The pysdmx source is available at `.pysdmx-src/`. When you need to understand
-how pysdmx implements something, read the source directly rather than guessing.
-Key modules:
-- `.pysdmx-src/src/pysdmx/model/` — core data model classes
-- `.pysdmx-src/src/pysdmx/io/` — readers and writers
+When you need to understand how pysdmx implements something, read the installed
+source directly rather than guessing. Locate it with
+`poetry run python -c "import pysdmx; print(pysdmx.__file__)"`. Key modules:
+- `pysdmx/model/` — core data model classes
+- `pysdmx/io/` — readers and writers
 
 ## SDMX Domain Knowledge
 
