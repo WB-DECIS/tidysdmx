@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       noop:
-        description: "Dry run: compute the release without changing anything"
+        description: "Dry run: compute the release without changing anything (publish steps are skipped)"
         type: boolean
         default: false
 
@@ -16,6 +16,9 @@ permissions:
 jobs:
   release:
     name: Semantic release
+    # Dispatch guard: only master may release. semantic-release's branch
+    # config would refuse other branches anyway; this skips cleanly instead.
+    if: github.ref_name == 'master'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-release-${{ github.ref_name }}
@@ -50,15 +53,17 @@ jobs:
           git_committer_email: "actions@users.noreply.github.com"
           no_operation_mode: ${{ inputs.noop || false }}
 
+      # In noop mode semantic-release still reports released=true but skips
+      # the build, so every step past this point must also skip.
       - name: Attach distributions to GitHub Release
-        if: steps.release.outputs.released == 'true'
+        if: steps.release.outputs.released == 'true' && inputs.noop != true
         uses: python-semantic-release/publish-action@v10.5.3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ steps.release.outputs.tag }}
 
       - name: Store distribution artifacts
-        if: steps.release.outputs.released == 'true'
+        if: steps.release.outputs.released == 'true' && inputs.noop != true
         uses: actions/upload-artifact@v4
         with:
           name: distribution-artifacts
@@ -69,7 +74,7 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: release
-    if: needs.release.outputs.released == 'true'
+    if: needs.release.outputs.released == 'true' && inputs.noop != true
     environment:
       name: pypi
       url: https://pypi.org/project/tidysdmx/${{ needs.release.outputs.version }}/
