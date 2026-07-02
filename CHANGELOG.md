@@ -1,6 +1,7 @@
 # Changelog
 
-<!--next-version-placeholder-->
+<!-- version list -->
+
 ## v0.8.0 (26/3/2026)
 ### Changed
 
