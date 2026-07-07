@@ -1,5 +1,6 @@
 """SDMX component extraction, mapping rules, and Excel helpers."""
 
+import warnings
 import zipfile
 from collections.abc import Sequence, Set
 from pathlib import Path
@@ -299,6 +300,11 @@ def fix_sdmx_xml_datatype_tags(
 ) -> Path:
     """Fix incorrect SourceCodelist/TargetCodelist tags in SDMX-ML.
 
+    .. deprecated::
+        pysdmx >= 1.14 fixes the underlying XML writer bug upstream (the
+        RepresentationMap data-type element, PR #556), so this workaround is
+        no longer required. It will be removed in a future release.
+
     The pysdmx XML writer emits ``<str:SourceCodelist>String</str:SourceCodelist>``
     and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
     RepresentationMap uses a plain DataType. The correct SDMX 3.0 tags are
@@ -315,6 +321,14 @@ def fix_sdmx_xml_datatype_tags(
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
     """
+    warnings.warn(
+        "fix_sdmx_xml_datatype_tags is deprecated and will be removed in a "
+        "future release. pysdmx >= 1.14 fixes the underlying XML writer bug, "
+        "so this workaround is no longer needed.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")
