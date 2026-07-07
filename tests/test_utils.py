@@ -11,6 +11,8 @@ from pysdmx.model import (
     Codelist,
     Component,
     Components,
+    Concept,
+    DataType,
     Role,
     Schema,
 )
@@ -243,49 +245,49 @@ class TestGetCodelistIds:
 
 
 class TestExtractCodelistIds:
-    @pytest.mark.skip(reason="Temporary skipping to generate a coverage report")
     def test_extract_component_ids_normal(self):
         """Retrieve IDs from a valid schema with multiple components."""
-        comp1 = Component(id="FREQ")
-        comp2 = Component(id="TIME_PERIOD")
+        comp1 = Component(
+            "FREQ", True, Role.DIMENSION, Concept("FREQ"), DataType.STRING
+        )
+        comp2 = Component(
+            "TIME_PERIOD", True, Role.DIMENSION, Concept("TIME_PERIOD"), DataType.STRING
+        )
         schema = Schema(
             context="datastructure",
             agency="ECB",
-            id_="EXR",
+            id="EXR",
             components=Components([comp1, comp2]),
             version="1.0.0",
-            urns=[],
         )
         result = extract_component_ids(schema)
         assert result == ["FREQ", "TIME_PERIOD"]
         assert all(isinstance(cid, str) for cid in result)
 
-    @pytest.mark.skip(reason="Temporary skipping to generate a coverage report")
     def test_extract_component_ids_single_component(self):
         """Schema with a single component returns a one-element list."""
-        comp = Component(id="OBS_VALUE")
+        comp = Component(
+            "OBS_VALUE", False, Role.MEASURE, Concept("OBS_VALUE"), DataType.INTEGER
+        )
         schema = Schema(
             context="datastructure",
             agency="ECB",
-            id_="EXR",
+            id="EXR",
             components=Components([comp]),
             version="1.0.0",
-            urns=[],
         )
         result = extract_component_ids(schema)
         assert result == ["OBS_VALUE"]
         assert len(result) == 1
 
-    @pytest.mark.skip(reason="Temporary skipping to generate a coverage report")
     def test_extract_component_ids_empty(self):
         """Schema with no components raises ValueError."""
         schema = Schema(
             context="datastructure",
             agency="ECB",
-            id_="EXR",
+            id="EXR",
             components=Components([]),
             version="1.0.0",
-            urns=[],
         )
         with pytest.raises(ValueError):
             extract_component_ids(schema)
@@ -294,21 +296,6 @@ class TestExtractCodelistIds:
         """Non-Schema input raises TypeCheckError."""
         with pytest.raises(TypeCheckError):
             extract_component_ids("not_a_schema")
-
-    @pytest.mark.skip(reason="Temporary skipping to generate a coverage report")
-    def test_extract_component_ids_component_without_id(self):
-        """Component without an ID should raise Error."""
-        comp = Component(id=None)  # Simulate missing ID
-        schema = Schema(
-            context="datastructure",
-            agency="ECB",
-            id_="EXR",
-            components=Components([comp]),
-            version="1.0.0",
-            urns=[],
-        )
-        with pytest.raises(TypeError):
-            extract_component_ids(schema)
 
 
 class TestCreateMappingRules:

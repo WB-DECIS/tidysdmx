@@ -106,12 +106,20 @@ def extract_component_ids(schema: Schema) -> list[str]:
         ValueError: If the schema has no components.
 
     Examples:
-        >>> from pysdmx.model import Schema, Components, Component
-        >>> comp1 = Component(id="FREQ")
-        >>> comp2 = Component(id="TIME_PERIOD")
-        >>> schema = Schema(context="datastructure", agency="ECB", id_="EXR",
-        ...                 components=Components([comp1, comp2]),
-        ...                 version="1.0.0", urns=[])
+        >>> from pysdmx.model import (
+        ...     Component, Components, Concept, DataType, Role, Schema,
+        ... )
+        >>> comp1 = Component(
+        ...     "FREQ", True, Role.DIMENSION, Concept("FREQ"), DataType.STRING
+        ... )
+        >>> comp2 = Component(
+        ...     "TIME_PERIOD", True, Role.DIMENSION, Concept("TIME_PERIOD"),
+        ...     DataType.STRING,
+        ... )
+        >>> schema = Schema(
+        ...     context="datastructure", agency="ECB", id="EXR",
+        ...     components=Components([comp1, comp2]), version="1.0.0",
+        ... )
         >>> extract_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """
