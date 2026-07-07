@@ -161,5 +161,3 @@ notebooks/tidysdmx/config.json
 scripts/*
 ## But keep the scripts directory itself
 !scripts/ 
-## And keep this specific debug script
-!scripts/debug-config-checks.py
