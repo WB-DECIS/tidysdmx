@@ -141,6 +141,15 @@ class TestCodelist:
         """An empty codelist triggers C001."""
         assert any(i.rule_id == "C001" for i in validate(_codelist(items=())))
 
+    def test_subclass_reuses_codelist_checker(self):
+        """A Codelist subclass still triggers C001 via MRO dispatch (BUG-14)."""
+
+        class MyCodelist(Codelist):
+            pass
+
+        cl = MyCodelist(id="CL_SUB", agency="AGY", name="Test", items=())
+        assert any(i.rule_id == "C001" for i in validate(cl))
+
 
 class TestSchemes:
     def test_concept_scheme_empty_flagged(self):

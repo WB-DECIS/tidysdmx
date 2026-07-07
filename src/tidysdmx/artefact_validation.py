@@ -258,7 +258,12 @@ def validate(artefact: MaintainableArtefact) -> list[ValidationIssue]:
         artefact is publish-ready).
     """
     issues = _check_common(artefact)
-    checker = _SPECIFIC.get(type(artefact))
+    # Walk the MRO so subclasses of a registered type reuse its checker
+    # (``_SPECIFIC.get(type(artefact))`` would only match the exact class).
+    checker = next(
+        (fn for t in type(artefact).__mro__ if (fn := _SPECIFIC.get(t)) is not None),
+        None,
+    )
     if checker is not None:
         issues.extend(checker(artefact))
     return issues
