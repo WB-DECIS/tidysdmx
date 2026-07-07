@@ -31,11 +31,14 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.11.9"
-pysdmx = "^1.13.0"
+pysdmx = "^1.17.0"
 pandas = "^2.2.3"
 numpy = ">=1.26"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
+# Security floor for the transitive idna dependency (CVE fixed in 3.15);
+# tidysdmx does not import idna directly.
+idna = ">=3.15"
 
 
 [tool.poetry.group.dev.dependencies]
