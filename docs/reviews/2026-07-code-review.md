@@ -13,6 +13,15 @@ installed 1.13.0 source and the upstream release notes.
 Severity rubric (same as June): **P0** correctness / silent data corruption ·
 **P1** API contract & interoperability · **P2** maintainability · **P3** style/polish.
 
+> **Roadmap update (post-review).** Since this review was written the team adopted a retirement
+> roadmap: `kedro.py` and the bespoke JSON-mapping pipeline (Engine A: `read_mapping`,
+> `transform_source_to_target`, `map_to_sdmx`, `vectorized_lookup_ordered_*`, `standardize_sdmx`)
+> plus the old Excel *writer* template are being **soft-deprecated** in favour of pysdmx
+> `StructureMap`s (Engine B, `mapping.py`). §1–§12 record the findings **as measured on 0.9.0** —
+> where `standardize_sdmx` was still the nominally-supported entry — and remain accurate as of
+> that state. The forward plan lives in **§13**, which resolves bugs inside retiring code by
+> deprecation rather than repair. Read §13's disposition list before actioning any §4–§9 finding.
+
 ---
 
 ## 1. Executive summary
@@ -283,6 +292,14 @@ rep-map field rules) to `artefact_validation`, delete `_validate_rep_map_fields`
 `structure_map_writer` call `raise_if_invalid`. Also collapse `_check_representation_map` /
 `_check_multi_representation_map` (`:152-187`) — they are byte-identical.
 
+> **Update (2026-07, partially upstream in 1.17.0).** pysdmx 1.17's
+> `RepresentationMap`/`MultiRepresentationMap.__post_init__` now raises `Invalid` at
+> **construction** when `source`/`target` is `None` while `maps` are set (and enforces
+> multi-map entry-count consistency) — closing part of this gap upstream. But it still
+> **accepts `source=""`/`target=""`** (verified), which is exactly what
+> `build_structure_map_from_template_wb` emits with no structure ids. So the `_check_structure_map`
+> non-empty check is still needed; only the "required/None" half is now redundant with upstream.
+
 ### DUP-04 (P2) — `create_schema_from_table` bypasses the validated builders and `gen_urn`
 `structures.py:1029-1036, 1261-1277` construct `Codelist`/`ConceptScheme`/`DSD` directly and
 hand-assemble URN strings inline at four sites (`:1025, :1135, :1266, :1275`) despite
@@ -321,6 +338,16 @@ using wrong element for data types" (PR #556) — the exact bug `fix_sdmx_xml_da
 deprecate `fix_sdmx_xml_datatype_tags` (and the related caveat in
 `_resolve_representation_ref`'s docstring, `structures.py:59-65`), delete next minor.
 
+> **Update (2026-07, actioned).** Bumped to **pysdmx 1.17.0** (`pyproject.toml` `^1.17.0`,
+> lock regenerated). Verified the upstream fix: the writer now selects the element
+> conditionally (`io/xml/__structure_aux_writer.py:1006-1010` — `Codelist` only when the value
+> references one, else `DataType`), so `fix_sdmx_xml_datatype_tags` is obsolete and is now
+> `@deprecated` (FutureWarning). **Correction to the "1.16 zero-risk" claim:** 1.17 is *not*
+> drop-in — it added stricter `RepresentationMap`/`MultiRepresentationMap` construction
+> validation that broke 8 `test_structure_map_writer.py` tests (invalid fixture data + tests
+> that built `source=None` maps upstream now rejects). All 8 were fixed; suite is green
+> (550 passed). The `_resolve_representation_ref` docstring caveat remains to be cleaned up.
+
 ### PX-02 (P2) — reference parsing: reuse pysdmx's
 pysdmx ≥1.13 publicly ships `pysdmx.util.parse_urn` / `parse_short_urn` /
 `parse_item_urn` (verified against installed source). tidysdmx's bare
@@ -336,6 +363,13 @@ exported from `pysdmx.model` (verified). `MaintainableArtefact` (`structure_map_
 and `ItemScheme` (`artefact_validation.py:24`) are *not* yet public. **Fix:** switch
 `ItemReference` to the public path now; funnel the remaining private imports through one
 internal shim module and raise the exposure need upstream.
+
+> **Update (2026-07, actioned).** Under 1.17.0, `Agency` (`artefact_builder.py:20`) is **also**
+> public now — the original finding missed it. Both `ItemReference` (`structures.py`) and
+> `Agency` were switched to `from pysdmx.model import …`. `ItemScheme` and `MaintainableArtefact`
+> remain private (still imported from `pysdmx.model.__base` in `artefact_validation.py` /
+> `structure_map_writer.py`) — the shim-module + upstream-exposure recommendation stands for
+> those two.
 
 ### PX-04 (P2) — keep the `artefact_validation` migration plan honest
 The module docstring commits to deleting itself once `pysdmx.model.validate` ships; as of
@@ -539,6 +573,10 @@ the example rule is `fixed:`).
 - **CI-04 (P2)** Runtime `idna 3.11` CVE (June PROD-05, fix 3.15) still locked; there is no
   dependency-audit step. Add `pip-audit` (fail on runtime-dependency CVEs only) or enable
   Dependabot/Renovate.
+  > **Update (2026-07, actioned).** Added an explicit `idna = ">=3.15"` security floor to
+  > `pyproject.toml` and re-locked → **idna 3.18** (CVE closed). The durable process fix
+  > (pip-audit step / Dependabot) is still outstanding — the floor guards this one CVE, not the
+  > next.
 - **CI-05 (P3)** `pr-review.yml:34` pins the long-superseded `claude-sonnet-4-20250514`.
   The pre-push pytest hook requires `pre-commit install --hook-type pre-push`, which
   CONTRIBUTING doesn't mention.
@@ -563,35 +601,76 @@ the example rule is `fixed:`).
 
 ## 13. Prioritized action plan
 
-**Quick wins (small PRs, hours):**
-1. BUG-02 (drop/gate the `"NA"` replace), BUG-13 (`df.copy()`), BUG-09 (regex parse),
-   BUG-15 (narrow try / distinguish empty-vs-missing), BUG-08 (surface suppressed cause).
-2. API-02 (export `apply_component_map`); CI-01 (delete `setup-uv`), CI-02 (gate → 85),
-   CI-03 (3.13 + classifiers).
-3. Delete: `scripts/debug-config-checks.py`, `docs/architecture.md`, one overview twin,
-   `dsd_schema.pkl`, dead `multi_value_map_df` session fixture.
+> **Retirement decision (supersedes parts of §4–§9).** This plan is revised against a roadmap
+> the original findings pre-dated: **`kedro.py` is being retired**, and the **bespoke
+> JSON-mapping pipeline ("Engine A") plus the old JSON/Excel *writer* mapping template are
+> being superseded by pysdmx `StructureMap`s ("Engine B", `mapping.py`)**. A pivotal fact this
+> reframes: `standardize_sdmx` (`tidysdmx.py:176`) is not the supported path — it is Engine A's
+> orchestrator (`transform_source_to_target` → `map_to_sdmx` → deprecated
+> `standardize_data_for_upload`), so it retires with the engine. Consequently, **bugs inside
+> retiring code are resolved by deprecation, not repair.** Dispositions:
+>
+> - **Retire (soft-deprecate, do not fix):** BUG-01, BUG-02, BUG-05, BUG-10, BUG-15 (Engine A);
+>   BUG-04 `standardize_indicator_id`, BUG-16 `qa_coerce_numeric` (indicator/QA utils reachable
+>   only via the deprecated path — carried out with Engine A); BUG-06 (old Excel *writer* trio);
+>   BUG-13 (already deprecated).
+> - **Drop entirely (kedro retiring):** BUG-03, TST-01, API-03, and the `kd_*` slice of TST-02.
+> - **Dissolved by the above:** DUP-01, DUP-05, DUP-06 (Engine A refactors — no longer worth
+>   doing); DUP-07's Engine-A-only idioms.
+> - **Still fix (staying, engine-agnostic):** BUG-07, BUG-08 (the Excel→`StructureMap`
+>   *builder* stays — distinct from the retired writer), BUG-09, BUG-11, BUG-12, BUG-14, and all
+>   of DUP-02/03/04, PX-01/02/03/04, SMP-01/02/03/04, DOC-01/02/04/05, CI-01..05,
+>   TST-03/04/05/06/07, API-01/02/04/05/06. TST-02 shrinks to two staying exports
+>   (`fetch_schema`, `gen_urn`); DOC-03 expands to cover the newly-deprecated names.
+
+**Workstream 0 — Retire the legacy pipeline (do first; it unblocks and dissolves the rest):**
+Deprecate the whole legacy surface in one pass rather than fixing its bugs. Net effect:
+dissolves BUG-01/02/04/05/06/10/13/15/16, DUP-01/05/06, TST-01, API-03, and part of
+TST-02/DOC-03.
+1. **Add a shared `@deprecated` decorator** — the codebase currently hand-writes an inline
+   `warnings.warn(…, FutureWarning, stacklevel=2)` + a `.. deprecated::` docstring directive per
+   function (`tidysdmx.py:82-87`); with ~14 functions to deprecate that boilerplate should be
+   factored into `@deprecated(replacement="map_structures / standardize_output", removal="0.11")`
+   (in `utils.py` or a new `_deprecation.py`), then retrofit the four existing deprecations onto
+   it. Messages point to the Engine-B replacements (`map_structures`, `standardize_output`,
+   `build_structure_map_from_template_wb`).
+2. **Apply it to the retiring surface** (all currently in `__all__`): Engine A —
+   `read_mapping`, `transform_source_to_target`, `map_to_sdmx`, `vectorized_lookup_ordered_v1`,
+   `vectorized_lookup_ordered_v2`, `standardize_sdmx`; old Excel writer —
+   `write_excel_mapping_template`, `build_excel_workbook`, `create_mapping_rules`;
+   indicator/QA utils — `standardize_indicator_id`, `qa_coerce_numeric`; kedro —
+   `kd_read_mappings`, `kd_standardize_sdmx`, `kd_validate_dataset_local`,
+   `kd_validate_datasets_local` (plus the `check_dict_keys`/`remove_extension`/`modify_dict_keys`/
+   `create_keys_dict` aliases that exist only for kedro+tests, SMP-03). Keep them exported but
+   warning; annotate them deprecated in `great-docs.yml` (DOC-03); schedule removal for 0.11.
+
+**Quick wins (staying, small PRs, hours):**
+1. BUG-09 (regex `parse_artefact_id`), BUG-08 (surface the suppressed REP_MAPPING cause),
+   BUG-14 (MRO/`isinstance` dispatch), API-02 (export `apply_component_map`).
+2. CI-01 (delete `setup-uv`), CI-02 (gate → 85), CI-03 (3.13 + classifiers).
+3. Delete: `scripts/debug-config-checks.py`, `docs/architecture.md` (documents the dead Excel
+   format), one overview twin, `dsd_schema.pkl`, dead `multi_value_map_df` session fixture.
 4. TST-04 (fix the four crashing skips + the two wrong docstring examples).
 
-**0.10 milestone (the June P1s, now twice-flagged, plus this review's P0s):**
-1. BUG-01 + TST-01/02: fix the `read_mapping`/`map_to_sdmx` contract, add kedro + pipeline
-   round-trip tests, remove the coverage omit — treat the JSON→standardize→validate chain as
-   the product and test it end-to-end.
-2. BUG-03/04 with tests; API-01 (re-route `standardize_sdmx` internals; drop deprecated
-   names from `__all__` and docs).
-3. PX-01: bump pysdmx lock ≥1.16, deprecate `fix_sdmx_xml_datatype_tags`; PX-03 public
-   `ItemReference` import; CI-04 idna + pip-audit.
-4. BUG-06: rewrite the Excel writer to the current template format + round-trip test.
-5. TST-03: commit cassettes (prefer serialized SDMX over pickle) and hard-fail fixture
-   fallback when `CI` is set.
+**0.10 milestone (staying P1s — the June carry-overs, now twice-flagged):**
+1. BUG-07 (unique-candidate column match in the Excel→`StructureMap` builder), BUG-12
+   (`pd.api.types` dtype checks in `create_schema_from_table`).
+2. API-01 simplified: since the old path is being *deleted* (Workstream 0), no shared-internal
+   extraction is needed — just drop the deprecated names from `__all__` and the docs nav in 0.10,
+   delete in 0.11.
+3. ~~PX-01: bump pysdmx lock ≥1.16, deprecate `fix_sdmx_xml_datatype_tags`; PX-03 public
+   `ItemReference` import; CI-04 idna~~ — **done 2026-07** (pysdmx 1.17.0, +Agency public,
+   `fix_sdmx_xml_datatype_tags` deprecated, idna floored to 3.18, 8 tests fixed). Still open:
+   CI-04 pip-audit/Dependabot step; delete `fix_sdmx_xml_datatype_tags` next minor.
+4. TST-03: commit cassettes (prefer serialized SDMX over pickle) and hard-fail fixture fallback
+   when `CI` is set; TST-02 reduced to adding tests for `fetch_schema` and `gen_urn`.
+5. DOC-01: retire the dead Sphinx/RTD toolchain (or repoint at Quarto).
 
-**Strategic (design decisions, then mechanical work):**
-1. DUP-01: one mapping engine — JSON becomes an input format compiled to pysdmx maps;
-   deprecate `vectorized_lookup_ordered_*`/`map_to_sdmx` (fixes BUG-05/10 by retirement).
-2. DUP-02/03/04: one validated construction path (DataFrame builders delegate to value
-   builders; StructureMap rules move into `artefact_validation`; `create_schema_from_table`
-   uses the validated builders + `gen_urn`) — positions the codebase for the planned
-   pysdmx-validation swap (PX-04).
-3. SMP-02: mechanical split of `structures.py` behind unchanged re-exports.
-4. BUG-11: confirm FMR's accepted SDMX-CSV reference columns and align
-   `sdmx_reference_cols_for`; DOC-05: decide whether `create_schema_from_table` should grow a
-   `to_schema()` bridge.
+**Strategic (staying design work — decisions, then mechanical):**
+1. DUP-02/03/04: one validated construction path (DataFrame builders delegate to value builders;
+   `_check_structure_map` moves into `artefact_validation`, deleting `_validate_rep_map_fields`;
+   `create_schema_from_table` uses the validated builders + `gen_urn`) — positions the codebase
+   for the planned pysdmx-validation swap (PX-04).
+2. SMP-02: mechanical split of `structures.py` behind unchanged re-exports.
+3. BUG-11: confirm FMR's accepted SDMX-CSV reference columns and align `sdmx_reference_cols_for`;
+   DOC-05: decide whether `create_schema_from_table` should grow a `to_schema()` bridge.
