@@ -4,6 +4,7 @@ import logging
 
 import pandas as pd
 
+from ._deprecation import deprecated
 from .tidysdmx import (
     check_dict_keys,
     create_keys_dict,
@@ -17,8 +18,13 @@ from .validation import validate_dataset_local
 logger = logging.getLogger(__name__)
 
 
+@deprecated()
 def kd_read_mappings(mapping_files: dict) -> dict:
     """Fetch multiple mappings from different files.
+
+    .. deprecated::
+        The Kedro integration is being retired and will be removed in a
+        future release.
 
     Args:
         mapping_files: A dictionary where keys are dataset-specific keys
@@ -36,12 +42,17 @@ def kd_read_mappings(mapping_files: dict) -> dict:
     return mappings
 
 
+@deprecated()
 def kd_standardize_sdmx(
     data: dict,
     mappings: dict,
     boolean: bool = True,
 ) -> dict:
     """Standardize a partitioned dataset into SDMX format.
+
+    .. deprecated::
+        The Kedro integration is being retired and will be removed in a
+        future release.
 
     Applies transform_source_to_target to each input dataframe with its
     corresponding mapping.
@@ -93,12 +104,17 @@ def kd_standardize_sdmx(
     return data
 
 
+@deprecated()
 def kd_validate_dataset_local(
     df: pd.DataFrame,
     schema=None,
     valid=None,
 ) -> tuple[bool, dict]:
     """Validate a single DataFrame for SDMX compliance.
+
+    .. deprecated::
+        The Kedro integration is being retired and will be removed in a
+        future release.
 
     Wrapper that calls validate_dataset_local to obtain a DataFrame of errors,
     then logs messages and returns a tuple of (success, errors).
@@ -129,12 +145,17 @@ def kd_validate_dataset_local(
     return True, {}
 
 
+@deprecated()
 def kd_validate_datasets_local(
     datasets: dict,
     schema,
     boolean: bool,
 ) -> tuple[dict, dict]:
     """Validate multiple datasets for SDMX compliance.
+
+    .. deprecated::
+        The Kedro integration is being retired and will be removed in a
+        future release.
 
     Ensures each dataset has ``STRUCTURE``, ``STRUCTURE_ID``, and ``ACTION``
     columns. See the `SDMX-CSV field guide
