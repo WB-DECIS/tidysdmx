@@ -91,15 +91,23 @@ class TestParseArtefactId:
             )
 
     def test_parse_artefact_id_extra_colon(self):
-        # Test with an extra colon in the artefact ID
-        artefact_id = "WB:WDI:Extra(1.0)"
-        try:
-            parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
+        # An extra colon is retained in the id part.
+        assert parse_artefact_id("WB:WDI:Extra(1.0)") == ("WB", "WDI:Extra", "1.0")
+
+    def test_parse_artefact_id_unclosed_parenthesis_raises(self):
+        """A missing closing parenthesis must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0")
+
+    def test_parse_artefact_id_trailing_chars_raises(self):
+        """Characters after the closing parenthesis must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0)x")
+
+    def test_parse_artefact_id_extra_parentheses_raises(self):
+        """Trailing parentheses after the version must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0)))")
 
 
 class TestStandardizeIndicatorId:

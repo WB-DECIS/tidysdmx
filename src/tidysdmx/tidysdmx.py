@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin
@@ -149,15 +150,15 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
     Raises:
         ValueError: If the artefact_id is not in the expected format.
     """
-    try:
-        agency, rest = artefact_id.split(":", 1)
-        id_part, version_part = rest.split("(", 1)
-        version = version_part.rstrip(")")
-        return agency, id_part, version
-    except (ValueError, AttributeError) as err:
+    match = re.fullmatch(
+        r"(?P<agency>[^:]+):(?P<id>[^(]+)\((?P<version>[^)]+)\)",
+        artefact_id,
+    )
+    if match is None:
         raise ValueError(
             "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-        ) from err
+        )
+    return match.group("agency"), match.group("id"), match.group("version")
 
 
 @deprecated(replacement="map_structures and standardize_output")
