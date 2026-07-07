@@ -12,6 +12,7 @@ from tidysdmx.tidysdmx import (
     _add_sdmx_reference_cols,
     _extract_artefact_type,
     create_keys_dict,
+    fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
     standardize_indicator_id,
@@ -108,6 +109,34 @@ class TestParseArtefactId:
         """Trailing parentheses after the version must be rejected (BUG-09)."""
         with pytest.raises(ValueError, match="Invalid artefact_id format"):
             parse_artefact_id("WB:WDI(1.0)))")
+
+
+class TestFetchSchema:
+    def test_fetch_schema_parses_id_and_forwards_to_client(self, monkeypatch):
+        """fetch_schema parses the artefact id and forwards it to the FMR client."""
+        schema = Schema(
+            context="datastructure",
+            agency="WB",
+            id="WDI",
+            components=Components([]),
+        )
+        captured = {}
+
+        class FakeClient:
+            def __init__(self, base_url, format=None):
+                captured["base_url"] = base_url
+
+            def get_schema(self, context, agency, id_part, version):
+                captured["args"] = (context, agency, id_part, version)
+                return schema
+
+        monkeypatch.setattr("tidysdmx.tidysdmx.fmr.RegistryClient", FakeClient)
+
+        result = fetch_schema("https://fmr.example.org", "WB:WDI(1.0)", "datastructure")
+
+        assert result is schema
+        assert captured["args"] == ("datastructure", "WB", "WDI", "1.0")
+        assert captured["base_url"].endswith("/FMR/sdmx/v2/")
 
 
 class TestStandardizeIndicatorId:

@@ -50,6 +50,7 @@ from tidysdmx.structures import (
     build_value_map,
     build_value_map_list,
     create_schema_from_table,
+    gen_urn,
 )
 
 # region fixtures
@@ -1736,6 +1737,28 @@ class TestInferSdmxType:
     def test_infer_sdmx_type(self, series, expected):
         """Nullable/extension and categorical dtypes map to the right SDMX type."""
         assert _infer_sdmx_type(series.dtype) == expected
+
+
+class TestGenUrn:
+    """Tests for `gen_urn` full-URN generation."""
+
+    def test_structure_map_urn(self):
+        """A StructureMap resolves to the structuremapping package."""
+        assert gen_urn("StructureMap", "BIS", "SM_TEST", "1.0") == (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=BIS:SM_TEST(1.0)"
+        )
+
+    def test_codelist_urn_with_default_version(self):
+        """Version defaults to 1.0 and Codelist maps to the codelist package."""
+        assert gen_urn("Codelist", "WB", "CL_TEST") == (
+            "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)"
+        )
+
+    def test_unknown_type_falls_back_to_base_package(self):
+        """An unmapped artefact type uses the 'base' package."""
+        assert gen_urn("MysteryType", "AG", "X", "2.0") == (
+            "urn:sdmx:org.sdmx.infomodel.base.MysteryType=AG:X(2.0)"
+        )
 
 
 class TestExtractArtefactId:
