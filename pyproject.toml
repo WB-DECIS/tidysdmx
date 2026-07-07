@@ -23,6 +23,8 @@ packages = [{ include = "tidysdmx", from = "src" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
@@ -133,7 +135,7 @@ source = ["src/tidysdmx"]
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-fail_under = 70
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
