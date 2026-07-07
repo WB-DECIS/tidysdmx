@@ -27,6 +27,7 @@ from .kedro import (
     kd_validate_datasets_local,
 )
 from .mapping import (
+    apply_component_map,
     apply_fixed_value_maps,
     apply_implicit_component_maps,
     apply_multi_component_map,
@@ -94,6 +95,7 @@ __all__ = [
     "ValidationError",
     "ValidationIssue",
     "add_sdmx_reference_cols",
+    "apply_component_map",
     "apply_fixed_value_maps",
     "apply_implicit_component_maps",
     "apply_multi_component_map",
