@@ -1,6 +1,5 @@
 """SDMX component extraction, mapping rules, and Excel helpers."""
 
-import warnings
 import zipfile
 from collections.abc import Sequence, Set
 from pathlib import Path
@@ -12,6 +11,8 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from pysdmx.model import Schema
 from typeguard import typechecked
+
+from ._deprecation import deprecated
 
 
 @typechecked
@@ -119,6 +120,7 @@ def extract_component_ids(schema: Schema) -> list[str]:
     return [component.id for component in schema.components]
 
 
+@deprecated()
 @typechecked
 def write_excel_mapping_template(
     components: Sequence[str],
@@ -126,6 +128,11 @@ def write_excel_mapping_template(
     output_path: Path = Path("mapping.xlsx"),
 ) -> Path:
     """Generate an Excel mapping template with component and representation tabs.
+
+    .. deprecated::
+        The legacy Excel mapping-template format is being retired in favour of
+        pysdmx ``StructureMap`` artefacts. This writer will be removed in a
+        future release.
 
     Args:
         components: An ordered list of unique target component IDs.
@@ -159,12 +166,17 @@ def write_excel_mapping_template(
     return output_path
 
 
+@deprecated()
 @typechecked
 def create_mapping_rules(
     components: Sequence[str],
     rep_maps: Set[str] | None = None,
 ) -> list[str]:
     """Create Excel hyperlink formulas for components with representation maps.
+
+    .. deprecated::
+        Helper for the retiring Excel mapping-template writer. It will be
+        removed in a future release.
 
     Args:
         components: A list or sequence of SDMX component IDs.
@@ -200,12 +212,17 @@ def create_mapping_rules(
     ]
 
 
+@deprecated()
 @typechecked
 def build_excel_workbook(
     components: Sequence[str],
     rep_maps: Sequence[str] | None = None,
 ) -> Workbook:
     """Build a Workbook with component mapping and representation map sheets.
+
+    .. deprecated::
+        Helper for the retiring Excel mapping-template writer. It will be
+        removed in a future release.
 
     The primary sheet ``comp_mapping`` contains three columns: ``source``,
     ``target``, and ``mapping_rules``, with hyperlinks for components that
@@ -293,6 +310,7 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
         raise RuntimeError(f"Failed to read Excel file: {e}") from e
 
 
+@deprecated()
 @typechecked
 def fix_sdmx_xml_datatype_tags(
     input_path: str | Path,
@@ -321,14 +339,6 @@ def fix_sdmx_xml_datatype_tags(
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
     """
-    warnings.warn(
-        "fix_sdmx_xml_datatype_tags is deprecated and will be removed in a "
-        "future release. pysdmx >= 1.14 fixes the underlying XML writer bug, "
-        "so this workaround is no longer needed.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")
