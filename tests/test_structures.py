@@ -2430,6 +2430,15 @@ class TestExtractRepresentationMap:
         assert len(result_df) == 1
         assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
 
+    def test_empty_rep_data_surfaces_stashed_parse_error(self):
+        """A stashed REP_MAPPING parse error is appended to the message (BUG-08)."""
+        with pytest.raises(
+            ValueError, match="Underlying REP_MAPPING error: bad S:/T: prefixes"
+        ):
+            _extract_representation_map(
+                {}, "src_col", "tgt_col", rep_data_error="bad S:/T: prefixes"
+            )
+
 
 class TestExtractMultiRepresentationMap:
     """Tests for `_extract_multi_representation_map` (N source cols -> 1 target)."""

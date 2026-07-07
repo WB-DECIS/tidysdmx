@@ -1,6 +1,5 @@
 """Build SDMX structure artefacts (StructureMap, ValueMap, Codelist, etc.)."""
 
-import contextlib
 import re
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
@@ -555,8 +554,12 @@ def build_representation_map(
         ... }
         >>> df = pd.DataFrame(data)
         >>> rm = build_representation_map(
-        ...     df, 'urn:source:codelist', 'urn:target:codelist', 'RM1',
-        ...     'Country Map', 'ECB'
+        ...     df,
+        ...     agency='ECB',
+        ...     id='RM1',
+        ...     name='Country Map',
+        ...     source_cl='urn:source:codelist',
+        ...     target_cl='urn:target:codelist',
         ... )
         >>> isinstance(rm, RepresentationMap)
         True
@@ -1831,10 +1834,14 @@ def build_structure_map_from_template_wb(
     comp_df = _parse_comp_mapping_sheet(mappings)
 
     # 3. Prepare Representation Data
+    # Defer invalid-REP_MAPPING failures: a template may not reference it at
+    # all. Stash the parse error so it can be surfaced if a rule *does* need it.
     rep_data: dict[str, pd.DataFrame] = {}
-    # Ignore invalid REP_MAPPING; validation will fail only if used.
-    with contextlib.suppress(ValueError):
+    rep_data_error: str | None = None
+    try:
         rep_data = _parse_rep_mapping_sheet(mappings)
+    except ValueError as exc:
+        rep_data_error = str(exc)
 
     generated_maps: list[
         FixedValueMap | ImplicitComponentMap | ComponentMap | MultiComponentMap
@@ -1865,7 +1872,10 @@ def build_structure_map_from_template_wb(
 
             elif mapping_rule == "representation":
                 rep_mapping_df = _extract_representation_map(
-                    rep_data=rep_data, source_id=source_id, target_id=target_id
+                    rep_data=rep_data,
+                    source_id=source_id,
+                    target_id=target_id,
+                    rep_data_error=rep_data_error,
                 )
 
                 # Generate unique ID for RepresentationMap
@@ -1899,7 +1909,10 @@ def build_structure_map_from_template_wb(
                 source_ids = [s.strip() for s in source_id.split("|") if s.strip()]
 
                 multi_df = _extract_multi_representation_map(
-                    rep_data=rep_data, source_ids=source_ids, target_id=target_id
+                    rep_data=rep_data,
+                    source_ids=source_ids,
+                    target_id=target_id,
+                    rep_data_error=rep_data_error,
                 )
 
                 # Generate unique ID for the MultiRepresentationMap
@@ -2221,7 +2234,10 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
 
 @typechecked
 def _extract_representation_map(
-    rep_data: dict[str, pd.DataFrame], source_id: str, target_id: str
+    rep_data: dict[str, pd.DataFrame],
+    source_id: str,
+    target_id: str,
+    rep_data_error: str | None = None,
 ) -> pd.DataFrame:
     """Build the (source, target) mapping pairs DataFrame for a representation rule.
 
@@ -2234,6 +2250,8 @@ def _extract_representation_map(
             ``rep_data['source']``.
         target_id: Component identifier to be matched to a column in
             ``rep_data['target']``.
+        rep_data_error: Optional message from an earlier REP_MAPPING parse
+            failure, appended to the raised error when ``rep_data`` is empty.
 
     Returns:
         Two-column DataFrame with columns ['source', 'target'], NA rows
@@ -2253,10 +2271,13 @@ def _extract_representation_map(
         or rep_data["source"].empty
         or rep_data["target"].empty
     ):
-        raise ValueError(
+        message = (
             "Mapping rule requires 'REP_MAPPING' sheet with data, but it was "
             "invalid or empty."
         )
+        if rep_data_error:
+            message += f" Underlying REP_MAPPING error: {rep_data_error}"
+        raise ValueError(message)
 
     source_df = rep_data["source"]
     target_df = rep_data["target"]
@@ -2289,7 +2310,10 @@ def _extract_representation_map(
 
 @typechecked
 def _extract_multi_representation_map(
-    rep_data: dict[str, pd.DataFrame], source_ids: list[str], target_id: str
+    rep_data: dict[str, pd.DataFrame],
+    source_ids: list[str],
+    target_id: str,
+    rep_data_error: str | None = None,
 ) -> pd.DataFrame:
     """Build the value-tuple mapping DataFrame for a multi-representation rule.
 
@@ -2305,6 +2329,8 @@ def _extract_multi_representation_map(
             ``rep_data['source']``.
         target_id: Target component ID, matched to a column in
             ``rep_data['target']``.
+        rep_data_error: Optional message from an earlier REP_MAPPING parse
+            failure, appended to the raised error when ``rep_data`` is empty.
 
     Returns:
         A DataFrame with one column per ``source_ids`` entry followed by a
@@ -2324,10 +2350,13 @@ def _extract_multi_representation_map(
         or rep_data["source"].empty
         or rep_data["target"].empty
     ):
-        raise ValueError(
+        message = (
             "Mapping rule requires 'REP_MAPPING' sheet with data, "
             "but it was invalid or empty."
         )
+        if rep_data_error:
+            message += f" Underlying REP_MAPPING error: {rep_data_error}"
+        raise ValueError(message)
 
     source_df = rep_data["source"]
     target_df = rep_data["target"]
