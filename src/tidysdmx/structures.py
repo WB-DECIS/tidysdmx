@@ -933,18 +933,22 @@ def _infer_sdmx_type(dtype: object) -> DataType:
     Returns:
         The corresponding SDMX DataType.
     """
-    dtype_str = str(dtype)
+    # Unwrap categorical dtypes to the dtype of their categories so a
+    # category of numbers/dates is classified by its underlying type.
+    if isinstance(dtype, pd.CategoricalDtype):
+        dtype = dtype.categories.dtype
 
-    if "int" in dtype_str:
-        return DataType.INTEGER
-    elif "float" in dtype_str:
-        return DataType.DOUBLE
-    elif "bool" in dtype_str:
+    # Use pandas' dtype predicates (not substring checks on ``str(dtype)``)
+    # so nullable extension dtypes (Int64, Float64, boolean) are handled.
+    if pd.api.types.is_bool_dtype(dtype):
         return DataType.BOOLEAN
-    elif "datetime" in dtype_str:
+    if pd.api.types.is_integer_dtype(dtype):
+        return DataType.INTEGER
+    if pd.api.types.is_float_dtype(dtype):
+        return DataType.DOUBLE
+    if pd.api.types.is_datetime64_any_dtype(dtype):
         return DataType.DATE_TIME
-    else:
-        return DataType.STRING
+    return DataType.STRING
 
 
 _ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
@@ -1551,16 +1555,34 @@ def _match_column_name(target_name: str, available_columns: list[str]) -> str:
 
     # 2. Normalized match (ignore case, spaces, underscores)
     norm_target = target_name.replace(" ", "").replace("_", "").lower()
+    norm_cols = [
+        (col, col.replace(" ", "").replace("_", "").lower())
+        for col in available_columns
+    ]
 
-    for col in available_columns:
-        norm_col = col.replace(" ", "").replace("_", "").lower()
-        # Check for containment (e.g., 'Series' in 'SeriesCode')
-        if (
-            norm_col == norm_target
-            or norm_col in norm_target
-            or norm_target in norm_col
-        ):
-            return col
+    # 2a. Normalized equality takes priority and must be unambiguous.
+    equal = [col for col, norm in norm_cols if norm == norm_target]
+    if len(equal) == 1:
+        return equal[0]
+    if len(equal) > 1:
+        raise ValueError(
+            f"Ambiguous match for '{target_name}': columns {equal} all normalize "
+            f"identically. Rename the REP_MAPPING header to match the component id."
+        )
+
+    # 2b. Fall back to substring containment, but only when the candidate is
+    # unique — otherwise a header like 'AGE' would silently bind to 'PERCENTAGE'.
+    contained = [
+        col for col, norm in norm_cols if norm in norm_target or norm_target in norm
+    ]
+    if len(contained) == 1:
+        return contained[0]
+    if len(contained) > 1:
+        raise ValueError(
+            f"Ambiguous match for '{target_name}': multiple candidate columns "
+            f"{contained}. Rename the REP_MAPPING header to match the component "
+            f"id exactly."
+        )
 
     raise ValueError(
         f"Could not find a column in REP_MAPPING matching '{target_name}'. "

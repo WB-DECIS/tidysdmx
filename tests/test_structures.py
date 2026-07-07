@@ -30,6 +30,7 @@ from tidysdmx.structures import (
     _extract_metadata_from_info_sheet,
     _extract_multi_representation_map,
     _extract_representation_map,
+    _infer_sdmx_type,
     _is_missing_token,
     _match_column_name,
     _parse_comp_mapping_sheet,
@@ -1697,6 +1698,44 @@ class TestMatchColumnName:
         # Passing a non-list for available_columns should raise a type error
         with pytest.raises((TypeCheckError, AttributeError)):
             _match_column_name("Test", "NotAList")
+
+    def test_match_column_name_ambiguous_substring_raises(self):
+        """Multiple substring candidates must raise, not silently pick one (BUG-07)."""
+        with pytest.raises(ValueError, match="Ambiguous match"):
+            _match_column_name("AGE", ["PERCENTAGE", "AGE_GROUP"])
+
+    def test_match_column_name_exact_wins_over_substring(self):
+        """An exact match is returned even when a substring container exists."""
+        assert _match_column_name("AGE", ["PERCENTAGE", "AGE"]) == "AGE"
+
+    def test_match_column_name_normalized_equality_wins_over_substring(self):
+        """Normalized equality is preferred over a mere substring container."""
+        assert (
+            _match_column_name("age group", ["PERCENTAGE", "AGE_GROUP"]) == "AGE_GROUP"
+        )
+
+
+class TestInferSdmxType:
+    """Tests for `_infer_sdmx_type` dtype classification (BUG-12)."""
+
+    @pytest.mark.parametrize(
+        "series, expected",
+        [
+            (pd.Series([1, 2], dtype="int64"), DataType.INTEGER),
+            (pd.Series([1, 2], dtype="Int64"), DataType.INTEGER),
+            (pd.Series([1.0, 2.0], dtype="float64"), DataType.DOUBLE),
+            (pd.Series([1.0, 2.0], dtype="Float64"), DataType.DOUBLE),
+            (pd.Series([True, False], dtype="bool"), DataType.BOOLEAN),
+            (pd.Series([True, None], dtype="boolean"), DataType.BOOLEAN),
+            (pd.Series(pd.to_datetime(["2020-01-01"])), DataType.DATE_TIME),
+            (pd.Series(["a", "b"], dtype="object"), DataType.STRING),
+            (pd.Series([1, 2]).astype("category"), DataType.INTEGER),
+            (pd.Series(["a", "b"]).astype("category"), DataType.STRING),
+        ],
+    )
+    def test_infer_sdmx_type(self, series, expected):
+        """Nullable/extension and categorical dtypes map to the right SDMX type."""
+        assert _infer_sdmx_type(series.dtype) == expected
 
 
 class TestExtractArtefactId:
