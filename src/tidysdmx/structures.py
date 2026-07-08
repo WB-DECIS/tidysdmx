@@ -556,8 +556,8 @@ def build_representation_map_from_df(
     Raises:
         ValueError: If required columns are missing.
         TypeError: If source or target columns contain non-string values.
-        ValidationError: If ``id``/``name`` are missing or empty, or the
-            DataFrame yields no value mappings — see
+        ValidationError: If ``id``/``name`` resolve to an empty string, or
+            the DataFrame yields no value mappings (rule R003) — see
             :mod:`tidysdmx.artefact_validation`.
 
     Examples:
@@ -617,9 +617,10 @@ def build_representation_map_from_df(
     )
 
 
-build_representation_map = deprecated(replacement="build_representation_map_from_df")(
-    build_representation_map_from_df
-)
+@deprecated(replacement="build_representation_map_from_df")
+def build_representation_map(*args: object, **kwargs: object) -> RepresentationMap:
+    """Deprecated alias for :func:`build_representation_map_from_df`."""
+    return build_representation_map_from_df(*args, **kwargs)
 
 
 @typechecked
@@ -645,6 +646,12 @@ def build_multi_representation_map_from_df(
     :func:`tidysdmx.artefact_builder.build_multi_representation_map`, which
     validates the result (publish-readiness rules ``M001``-``M003`` and
     ``R001``-``R003``) before returning it.
+
+    Unlike :func:`build_representation_map_from_df`, which raises a
+    ``ValidationError`` for an empty DataFrame (rule R003 — no value
+    mappings), this function raises a plain ``ValueError`` for an empty
+    DataFrame, because its ``if df.empty`` guard runs before the value-map
+    builder is ever invoked.
 
     Args:
         df: DataFrame where each row represents a multi-mapping.
@@ -674,12 +681,11 @@ def build_multi_representation_map_from_df(
         A publish-ready MultiRepresentationMap object.
 
     Raises:
-        ValueError: If DataFrame is empty, columns are missing, or the length
-            of ``source_cls``/``target_cls`` does not match the number of
-            source/target columns.
+        ValueError: If the DataFrame is empty, required columns are missing,
+            or the length of ``source_cls``/``target_cls`` does not match
+            the number of source/target columns.
         TypeError: If non-string data is found in source/target columns.
-        ValidationError: If ``id``/``name`` are missing or empty, or the
-            DataFrame yields no value mappings — see
+        ValidationError: If ``id``/``name`` resolve to an empty string — see
             :mod:`tidysdmx.artefact_validation`.
     """
     if df.empty:
@@ -748,9 +754,12 @@ def build_multi_representation_map_from_df(
     )
 
 
-build_multi_representation_map = deprecated(
-    replacement="build_multi_representation_map_from_df"
-)(build_multi_representation_map_from_df)
+@deprecated(replacement="build_multi_representation_map_from_df")
+def build_multi_representation_map(
+    *args: object, **kwargs: object
+) -> MultiRepresentationMap:
+    """Deprecated alias for :func:`build_multi_representation_map_from_df`."""
+    return build_multi_representation_map_from_df(*args, **kwargs)
 
 
 @typechecked
@@ -802,9 +811,9 @@ def build_single_component_map(
         A ComponentMap object mapping the source to the target component.
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
+        ValueError: If the DataFrame is empty or required columns are missing.
         TypeError: If source or target columns contain non-string values.
-        ValidationError: If ``id``/``name`` are missing or empty — see
+        ValidationError: If ``id``/``name`` resolve to an empty string — see
             :mod:`tidysdmx.artefact_validation`.
 
     Examples:
@@ -920,10 +929,9 @@ def build_multi_component_map(
         A MultiComponentMap mapping the source components to the target(s).
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
+        ValueError: If the DataFrame is empty or required columns are missing.
         TypeError: If source or target columns contain non-string values.
-        ValidationError: If ``id``/``name`` are missing or empty, or the
-            DataFrame yields no value mappings — see
+        ValidationError: If ``id``/``name`` resolve to an empty string — see
             :mod:`tidysdmx.artefact_validation`.
 
     Examples:

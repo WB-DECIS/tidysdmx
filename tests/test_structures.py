@@ -880,11 +880,13 @@ class TestBuildRepresentationMapFromDf:
             )
 
     def test_deprecated_shim_warns(self):
-        """The old structures.build_representation_map name warns."""
+        """The old structures.build_representation_map name warns, naming itself."""
         import tidysdmx.structures as s
 
         df = pd.DataFrame({"source": ["BE"], "target": ["BEL"]})
-        with pytest.warns(FutureWarning, match="build_representation_map_from_df"):
+        with pytest.warns(
+            FutureWarning, match=r"build_representation_map is deprecated"
+        ):
             s.build_representation_map(df, agency="ECB", id="RM1", name="Ctry")
 
 
@@ -1158,6 +1160,17 @@ class TestBuildMultiRepresentationMap:
         with pytest.raises(ValueError, match="Length of target_cls"):
             build_multi_representation_map_from_df(
                 sample_df, target_cls=["urn:a:cl", "urn:b:cl"]
+            )
+
+    def test_deprecated_shim_warns(self, sample_df):
+        """The old structures.build_multi_representation_map name warns."""
+        import tidysdmx.structures as s
+
+        with pytest.warns(
+            FutureWarning, match=r"build_multi_representation_map is deprecated"
+        ):
+            s.build_multi_representation_map(
+                sample_df, agency="ECB", id="MRM1", name="Ctry"
             )
 
 
