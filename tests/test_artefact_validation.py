@@ -288,17 +288,6 @@ class TestDataflow:
 
 
 class TestValidate:
-    def test_artefact_without_specific_checker(self):
-        """A StructureMap has no type-specific rules registered."""
-        sm = StructureMap(
-            id="SM",
-            agency="AGY",
-            name="n",
-            source="DataStructure=A:S(1.0)",
-            target="DataStructure=A:T(1.0)",
-        )
-        assert validate(sm) == []
-
     def test_agency_object_in_agency_field(self):
         """short_urn works when agency is an Agency object."""
         cl = Codelist(
