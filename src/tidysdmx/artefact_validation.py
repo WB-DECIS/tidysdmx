@@ -149,7 +149,10 @@ def _check_hierarchy(a: Hierarchy) -> list[ValidationIssue]:
     return []
 
 
-def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
+def _check_rep_map_fields(
+    a: RepresentationMap | MultiRepresentationMap,
+) -> list[ValidationIssue]:
+    """Shared R001/R002/R003 checks for (multi) representation maps."""
     issues: list[ValidationIssue] = []
     if not a.source:
         issues.append(_issue("R001", a, "source must be populated.", "source"))
@@ -165,26 +168,16 @@ def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
             )
         )
     return issues
+
+
+def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
+    return _check_rep_map_fields(a)
 
 
 def _check_multi_representation_map(
     a: MultiRepresentationMap,
 ) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if not a.source:
-        issues.append(_issue("R001", a, "source must be populated.", "source"))
-    if not a.target:
-        issues.append(_issue("R002", a, "target must be populated.", "target"))
-    if not a.maps:
-        issues.append(
-            _issue(
-                "R003",
-                a,
-                "maps must contain at least one value mapping.",
-                "maps",
-            )
-        )
-    return issues
+    return _check_rep_map_fields(a)
 
 
 def _check_dsd(a: DataStructureDefinition) -> list[ValidationIssue]:
