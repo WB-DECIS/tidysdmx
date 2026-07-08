@@ -13,6 +13,7 @@ from pysdmx.model.map import (
 )
 from typeguard import typechecked
 
+from .artefact_validation import raise_if_invalid
 from .structures import gen_urn
 
 MapRule = (
@@ -56,23 +57,6 @@ def _replace_values_with_urn(map_rule: MapRule) -> MapRule:
         version=rep_map.version,
     )
     return type(map_rule)(source=map_rule.source, target=map_rule.target, values=urn)
-
-
-def _validate_rep_map_fields(
-    rep_map: RepresentationMap | MultiRepresentationMap,
-) -> list[str]:
-    """Validate that a RepresentationMap has required fields populated.
-
-    Returns a list of issue descriptions (empty if valid).
-    """
-    issues = []
-    if rep_map.source is None or rep_map.source == "":
-        issues.append("source is None or empty")
-    if rep_map.target is None or rep_map.target == "":
-        issues.append("target is None or empty")
-    if not rep_map.maps:
-        issues.append("no value mappings defined")
-    return issues
 
 
 def _convert_to_urn_references(
@@ -154,61 +138,19 @@ def validate_structure_map_references(structure_map: StructureMap) -> None:
         structure_map: The StructureMap to validate.
 
     Raises:
-        ValueError: If any ComponentMap or MultiComponentMap contains
-            only a URN string reference instead of the actual object,
-            or if RepresentationMaps have missing required fields.
+        ValidationError: If the StructureMap fails publish-readiness
+            validation, e.g. a ComponentMap or MultiComponentMap contains
+            only a URN string reference instead of the actual object, or
+            an embedded RepresentationMap has missing required fields.
 
     Example:
         >>> try:
         ...     validate_structure_map_references(my_structure_map)
         ...     print("All references are resolved!")
-        ... except ValueError as e:
+        ... except ValidationError as e:
         ...     print(f"Unresolved references: {e}")
     """
-    unresolved = []
-    invalid_rep_maps = []
-
-    for i, map_rule in enumerate(structure_map.maps):
-        if not isinstance(map_rule, (ComponentMap, MultiComponentMap)):
-            continue
-
-        type_name = type(map_rule).__name__
-
-        if isinstance(map_rule.values, str):
-            unresolved.append(
-                f"{type_name}[{i}] (source={map_rule.source}, "
-                f"target={map_rule.target}): URN reference '{map_rule.values}'"
-            )
-            continue
-
-        rep_map = _get_embedded_rep_map(map_rule)
-        if rep_map is not None:
-            issues = _validate_rep_map_fields(rep_map)
-            if issues:
-                rep_type_name = type(rep_map).__name__
-                invalid_rep_maps.append(
-                    f"{type_name}[{i}] {rep_type_name} '{rep_map.id}': "
-                    f"{', '.join(issues)}"
-                )
-
-    errors = []
-
-    if unresolved:
-        errors.append(
-            "StructureMap contains unresolved RepresentationMap references. "
-            "These will only be written as URN strings, not full objects:\n"
-            + "\n".join(f"  - {ref}" for ref in unresolved)
-        )
-
-    if invalid_rep_maps:
-        errors.append(
-            "StructureMap contains invalid RepresentationMaps. "
-            "These will cause errors when uploading to FMR:\n"
-            + "\n".join(f"  - {ref}" for ref in invalid_rep_maps)
-        )
-
-    if errors:
-        raise ValueError("\n\n".join(errors))
+    raise_if_invalid(structure_map)
 
 
 @typechecked

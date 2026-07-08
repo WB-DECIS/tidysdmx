@@ -15,7 +15,6 @@ from tidysdmx.structure_map_writer import (
     _convert_to_urn_references,
     _get_embedded_rep_map,
     _replace_values_with_urn,
-    _validate_rep_map_fields,
     collect_structure_map_artifacts,
     prepare_structure_map_for_upload,
     validate_structure_map_references,
@@ -368,82 +367,6 @@ class TestReplaceValuesWithUrn:
 
 
 @pytest.mark.unit
-class TestValidateRepMapFields:
-    """Tests for _validate_rep_map_fields."""
-
-    def test_valid_rep_map_returns_empty_list(self, make_rep_map):
-        """A fully populated RepresentationMap should return no issues."""
-        rep_map = make_rep_map()
-
-        issues = _validate_rep_map_fields(rep_map)
-
-        assert issues == []
-
-    def test_missing_source_reported(self):
-        """A RepresentationMap with an empty source should report it."""
-        # pysdmx >= 1.17 rejects source=None at construction; an empty string
-        # still reaches tidysdmx's own empty-field check.
-        rep_map = RepresentationMap(
-            id="RM",
-            name="RM",
-            agency="ECB",
-            source="",
-            target="urn:target",
-            maps=[ValueMap(source="A", target="B")],
-        )
-
-        issues = _validate_rep_map_fields(rep_map)
-
-        assert any("source" in i for i in issues)
-
-    def test_missing_target_reported(self):
-        """A RepresentationMap with an empty target should report it."""
-        # pysdmx >= 1.17 rejects target=None at construction; an empty string
-        # still reaches tidysdmx's own empty-field check.
-        rep_map = RepresentationMap(
-            id="RM",
-            name="RM",
-            agency="ECB",
-            source="urn:source",
-            target="",
-            maps=[ValueMap(source="A", target="B")],
-        )
-
-        issues = _validate_rep_map_fields(rep_map)
-
-        assert any("target" in i for i in issues)
-
-    def test_empty_maps_reported(self):
-        """A RepresentationMap with no value mappings should report it."""
-        rep_map = RepresentationMap(
-            id="RM",
-            name="RM",
-            agency="ECB",
-            source="urn:source",
-            target="urn:target",
-            maps=[],
-        )
-
-        issues = _validate_rep_map_fields(rep_map)
-
-        assert any("no value mappings" in i for i in issues)
-
-    def test_all_fields_missing_returns_three_issues(self):
-        """source, target and maps all missing should produce three issues."""
-        rep_map = RepresentationMap(id="RM", name="RM", agency="ECB")
-
-        issues = _validate_rep_map_fields(rep_map)
-
-        assert len(issues) == 3
-
-    def test_returns_list(self, make_rep_map):
-        """Return value must always be a list."""
-        issues = _validate_rep_map_fields(make_rep_map())
-
-        assert isinstance(issues, list)
-
-
-@pytest.mark.unit
 class TestConvertToUrnReferences:
     """Tests for _convert_to_urn_references."""
 
@@ -656,7 +579,7 @@ class TestValidateStructureMapReferences:
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=urn)],
         )
 
-        with pytest.raises(ValueError, match="unresolved"):
+        with pytest.raises(ValueError, match="SM003"):
             validate_structure_map_references(sm)
 
     def test_rep_map_missing_source_raises_value_error(self):
@@ -680,7 +603,7 @@ class TestValidateStructureMapReferences:
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
         )
 
-        with pytest.raises(ValueError, match="invalid"):
+        with pytest.raises(ValueError, match="R001"):
             validate_structure_map_references(sm)
 
     def test_rep_map_empty_maps_raises_value_error(self):
@@ -702,7 +625,7 @@ class TestValidateStructureMapReferences:
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
         )
 
-        with pytest.raises(ValueError, match="invalid"):
+        with pytest.raises(ValueError, match="R003"):
             validate_structure_map_references(sm)
 
     def test_non_component_map_rules_are_ignored(self):
