@@ -220,6 +220,10 @@ class TestApplyComponentMap:
         result = apply_component_map(df, component_map)
         assert pd.isna(result["SEX"]).all()
 
+
+class TestApplyComponentMapInMemory:
+    """Unit tests for apply_component_map with in-memory maps (no FMR)."""
+
     @staticmethod
     def _component_map_with_catch_all(value_maps):
         """Build a ComponentMap (AREA -> REGION) from the given value maps."""
@@ -338,6 +342,10 @@ class TestApplyMultiComponentMap:
             assert any("Mapped" in msg for msg in info_messages)
         else:
             assert not info_messages
+
+
+class TestApplyMultiComponentMapInMemory:
+    """Unit tests for apply_multi_component_map with in-memory maps (no FMR)."""
 
     @staticmethod
     def _multi_map_with_catch_all(multi_value_maps):
