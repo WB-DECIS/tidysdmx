@@ -42,9 +42,9 @@ from tidysdmx.structures import (
     build_fixed_map,
     build_implicit_component_map,
     build_multi_component_map,
-    build_multi_representation_map,
+    build_multi_representation_map_from_df,
     build_multi_value_map_list,
-    build_representation_map,
+    build_representation_map_from_df,
     build_single_component_map,
     build_structure_map_from_template_wb,
     build_value_map,
@@ -769,7 +769,7 @@ class TestBuildRepresentationMap:
         description,
     ):
         """Test successful creation of RepresentationMap from valid DataFrame."""
-        rm = build_representation_map(
+        rm = build_representation_map_from_df(
             df=value_map_df_mandatory_cols,
             id=id,
             name=name,
@@ -794,19 +794,19 @@ class TestBuildRepresentationMap:
         """Empty DataFrame should raise ValueError."""
         empty_df = pd.DataFrame(columns=["source", "target"])
         with pytest.raises(ValueError):
-            build_representation_map(empty_df)
+            build_representation_map_from_df(empty_df, id="RM1", name="Ctry")
 
     def test_build_representation_map_missing_columns_raises(self):
         """Missing mandatory columns should raise ValueError."""
         bad_df = pd.DataFrame({"src": ["A"], "tgt": ["B"]})
         with pytest.raises(ValueError):
-            build_representation_map(bad_df)
+            build_representation_map_from_df(bad_df)
 
     def test_build_representation_map_non_string_values_raises(self):
         """Non-string values in source or target columns should raise TypeError."""
         bad_df = pd.DataFrame({"source": [123], "target": ["ABC"]})
         with pytest.raises(TypeError):
-            build_representation_map(bad_df)
+            build_representation_map_from_df(bad_df)
 
     def test_build_representation_map_custom_column_names(self):
         """Test with custom column names for source and target."""
@@ -818,7 +818,7 @@ class TestBuildRepresentationMap:
                 "valid_to": [None, None],
             }
         )
-        rm = build_representation_map(
+        rm = build_representation_map_from_df(
             df=df, source_col="src", target_col="tgt", id="RM_CUSTOM", name="Custom Map"
         )
         assert isinstance(rm, RepresentationMap)
@@ -828,7 +828,9 @@ class TestBuildRepresentationMap:
 
     def test_build_representation_map_validity_dates(self, value_map_df_mandatory_cols):
         """Ensure validity dates are parsed correctly when present."""
-        rm = build_representation_map(df=value_map_df_mandatory_cols)
+        rm = build_representation_map_from_df(
+            df=value_map_df_mandatory_cols, id="RM1", name="Ctry"
+        )
         for vm in rm.maps:
             if vm.valid_from:
                 assert isinstance(vm.valid_from, datetime)
@@ -841,16 +843,49 @@ class TestBuildRepresentationMap:
         self, value_map_df_mandatory_cols
     ):
         """When source_cl/target_cl are omitted, source/target default to 'String'."""
-        rm = build_representation_map(df=value_map_df_mandatory_cols)
+        rm = build_representation_map_from_df(
+            df=value_map_df_mandatory_cols, id="RM1", name="Ctry"
+        )
         assert rm.source == "String"
         assert rm.target == "String"
 
     def test_mixed_codelist_and_dtype(self, value_map_df_mandatory_cols):
         """When only source_cl is provided, target defaults to 'String'."""
         urn = "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)"
-        rm = build_representation_map(df=value_map_df_mandatory_cols, source_cl=urn)
+        rm = build_representation_map_from_df(
+            df=value_map_df_mandatory_cols, source_cl=urn, id="RM1", name="Ctry"
+        )
         assert rm.source == urn
         assert rm.target == "String"
+
+
+class TestBuildRepresentationMapFromDf:
+    def test_delegates_and_validates(self):
+        """A well-formed frame yields a RepresentationMap via the value builder."""
+        df = pd.DataFrame({"source": ["BE"], "target": ["BEL"]})
+        rm = build_representation_map_from_df(df, agency="ECB", id="RM1", name="Ctry")
+        assert isinstance(rm, RepresentationMap)
+        assert rm.urn is not None and "RM1" in rm.urn
+
+    def test_empty_frame_raises_validation_error(self):
+        """An empty frame -> no maps -> R003 -> ValidationError."""
+        from tidysdmx.artefact_validation import ValidationError
+
+        with pytest.raises(ValidationError):
+            build_representation_map_from_df(
+                pd.DataFrame({"source": [], "target": []}),
+                agency="ECB",
+                id="RM1",
+                name="Ctry",
+            )
+
+    def test_deprecated_shim_warns(self):
+        """The old structures.build_representation_map name warns."""
+        import tidysdmx.structures as s
+
+        df = pd.DataFrame({"source": ["BE"], "target": ["BEL"]})
+        with pytest.warns(FutureWarning, match="build_representation_map_from_df"):
+            s.build_representation_map(df, agency="ECB", id="RM1", name="Ctry")
 
 
 class TestBuildSingleComponentMap:
@@ -880,6 +915,8 @@ class TestBuildSingleComponentMap:
             value_map_df_mandatory_cols,
             source_component="COUNTRY",
             target_component="COUNTRY",
+            id="RM1",
+            name="Ctry",
         )
         assert cm.values.source == "String"
         assert cm.values.target == "String"
@@ -920,6 +957,8 @@ class TestBuildSingleComponentMap:
             target_component="COUNTRY",
             source_col="src",
             target_col="tgt",
+            id="RM1",
+            name="Ctry",
         )
         assert isinstance(cm, ComponentMap)
         assert isinstance(cm.values, RepresentationMap)
@@ -932,7 +971,11 @@ class TestBuildSingleComponentMap:
         df["valid_from"] = ["2020-01-01", None, None]
         df["valid_to"] = ["2025-12-31", None, None]
         cm = build_single_component_map(
-            df, source_component="COUNTRY", target_component="COUNTRY"
+            df,
+            source_component="COUNTRY",
+            target_component="COUNTRY",
+            id="RM1",
+            name="Ctry",
         )
         assert isinstance(cm.values, RepresentationMap)
         assert len(cm.values.maps) == len(df)
@@ -959,6 +1002,8 @@ class TestBuildSingleComponentMap:
             target_component="COUNTRY",
             version="2.0",
             description="Test Description",
+            id="RM1",
+            name="Ctry",
         )
         assert cm.values.version == "2.0"
         assert cm.values.description == "Test Description"
@@ -971,6 +1016,7 @@ class TestBuildSingleComponentMap:
             source_component="SRC",
             target_component="TGT",
             id="CM1",
+            name="Ctry",
             default_value="_Z",
         )
         maps = cm.values.maps
@@ -995,7 +1041,7 @@ class TestBuildMultiRepresentationMap:
 
     def test_returns_multi_representation_map(self, sample_df):
         """Tests that the function returns a MultiRepresentationMap for valid input."""
-        result = build_multi_representation_map(
+        result = build_multi_representation_map_from_df(
             sample_df,
             id="MRM1",
             name="Country Multi Map",
@@ -1013,13 +1059,13 @@ class TestBuildMultiRepresentationMap:
         """Tests that ValueError is raised when DataFrame is empty."""
         empty_df = pd.DataFrame()
         with pytest.raises(ValueError, match="Input DataFrame cannot be empty"):
-            build_multi_representation_map(empty_df)
+            build_multi_representation_map_from_df(empty_df)
 
     def test_missing_required_columns_raises_value_error(self, sample_df):
         """Tests that ValueError is raised when required columns are missing."""
         df_missing = sample_df.drop(columns=["target"])
         with pytest.raises(ValueError, match="Missing required columns"):
-            build_multi_representation_map(df_missing)
+            build_multi_representation_map_from_df(df_missing)
 
     @pytest.mark.parametrize(
         "invalid_data",
@@ -1032,7 +1078,7 @@ class TestBuildMultiRepresentationMap:
         """Tests TypeError raised when source/target columns have non-string values."""
         df_invalid = pd.DataFrame(invalid_data)
         with pytest.raises(TypeError):
-            build_multi_representation_map(df_invalid)
+            build_multi_representation_map_from_df(df_invalid)
 
     def test_custom_columns_and_metadata(self):
         """Tests that custom column names and metadata are handled correctly."""
@@ -1043,7 +1089,7 @@ class TestBuildMultiRepresentationMap:
             "valid_to": ["2023-12-31", None],
         }
         df_custom = pd.DataFrame(data)
-        result = build_multi_representation_map(
+        result = build_multi_representation_map_from_df(
             df_custom,
             source_cls=["source"],
             target_cls=["target"],
@@ -1059,23 +1105,25 @@ class TestBuildMultiRepresentationMap:
 
     def test_validity_dates_are_parsed_correctly(self, sample_df):
         """Tests that validity dates are correctly passed to MultiValueMap objects."""
-        result = build_multi_representation_map(sample_df)
+        result = build_multi_representation_map_from_df(
+            sample_df, id="MRM1", name="Ctry"
+        )
         first_map = result.maps[0]
         assert first_map.valid_from == datetime.fromisoformat("2020-01-01")
         assert first_map.valid_to == datetime.fromisoformat("2025-12-31")
 
     def test_generate_urn_true_sets_urn(self, sample_df):
         """Tests that a URN is generated when generate_urn is True and id given."""
-        result = build_multi_representation_map(
-            sample_df, id="MRM1", agency="WB", generate_urn=True
+        result = build_multi_representation_map_from_df(
+            sample_df, id="MRM1", name="Ctry", agency="WB", generate_urn=True
         )
         assert result.urn is not None
         assert "MultiRepresentationMap=WB:MRM1(1.0)" in result.urn
 
     def test_generate_urn_false_leaves_urn_none(self, sample_df):
         """Tests that no URN is generated when generate_urn is False."""
-        result = build_multi_representation_map(
-            sample_df, id="MRM1", agency="WB", generate_urn=False
+        result = build_multi_representation_map_from_df(
+            sample_df, id="MRM1", name="Ctry", agency="WB", generate_urn=False
         )
         assert result.urn is None
 
@@ -1088,11 +1136,12 @@ class TestBuildMultiRepresentationMap:
                 "ISO_CURRENCY": ["EUR", "CHF"],
             }
         )
-        result = build_multi_representation_map(
+        result = build_multi_representation_map_from_df(
             df,
             source_cols=["COUNTRY", "CURRENCY"],
             target_cols=["ISO_CURRENCY"],
             id="MRM1",
+            name="Ctry",
         )
         assert list(result.source) == [str(DataType.STRING)] * 2
         assert list(result.target) == [str(DataType.STRING)]
@@ -1100,14 +1149,14 @@ class TestBuildMultiRepresentationMap:
     def test_source_cls_length_mismatch_raises_value_error(self, sample_df):
         """source_cls must have one entry per source column."""
         with pytest.raises(ValueError, match="Length of source_cls"):
-            build_multi_representation_map(
+            build_multi_representation_map_from_df(
                 sample_df, source_cls=["urn:a:cl", "urn:b:cl"]
             )
 
     def test_target_cls_length_mismatch_raises_value_error(self, sample_df):
         """target_cls must have one entry per target column."""
         with pytest.raises(ValueError, match="Length of target_cls"):
-            build_multi_representation_map(
+            build_multi_representation_map_from_df(
                 sample_df, target_cls=["urn:a:cl", "urn:b:cl"]
             )
 
@@ -1149,6 +1198,7 @@ class TestBuildMultiComponentMap:
             source_components=["COUNTRY", "CURRENCY"],
             target_components=["ISO_CURRENCY"],
             id="MCM1",
+            name="Ctry",
         )
         first = cm.values.maps[0]
         assert list(first.source) == ["DE", "LC"]
@@ -1162,6 +1212,7 @@ class TestBuildMultiComponentMap:
             target_components=["ISO_CURRENCY"],
             agency="WB",
             id="MCM1",
+            name="Ctry",
             generate_urn=True,
         )
         assert cm.values.urn is not None
@@ -1174,6 +1225,7 @@ class TestBuildMultiComponentMap:
             target_components=["ISO_CURRENCY"],
             agency="WB",
             id="MCM1",
+            name="Ctry",
             generate_urn=False,
         )
         assert cm.values.urn is None
@@ -1185,6 +1237,7 @@ class TestBuildMultiComponentMap:
             source_components=["COUNTRY", "CURRENCY"],
             target_components=["ISO_CURRENCY"],
             id="MCM1",
+            name="Ctry",
             default_value="_Z",
         )
         maps = cm.values.maps
@@ -1199,6 +1252,7 @@ class TestBuildMultiComponentMap:
             source_components=["COUNTRY", "CURRENCY"],
             target_components=["ISO_CURRENCY"],
             id="MCM1",
+            name="Ctry",
         )
         assert len(cm.values.maps) == 2
 
@@ -1209,6 +1263,7 @@ class TestBuildMultiComponentMap:
             source_components=["COUNTRY", "CURRENCY"],
             target_components=["ISO_CURRENCY"],
             id="MCM1",
+            name="Ctry",
         )
         assert list(cm.values.source) == [str(DataType.STRING)] * 2
         assert list(cm.values.target) == [str(DataType.STRING)]
