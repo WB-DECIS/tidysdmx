@@ -13,8 +13,6 @@ from pysdmx.model import (
     Component,
     Components,
     Concept,
-    ConceptScheme,
-    DataStructureDefinition,
     DataType,
     ItemReference,
     Role,
@@ -34,6 +32,11 @@ from pysdmx.model.map import (
 from typeguard import typechecked
 
 from ._deprecation import deprecated
+from .artefact_builder import (
+    build_codelist,
+    build_concept_scheme,
+    build_data_structure_definition,
+)
 from .artefact_builder import (
     build_multi_representation_map as _build_multi_representation_map,
 )
@@ -1082,17 +1085,14 @@ def _create_codelist_for_component(
         for value in values
     ]
     cl_id = f"CL_{comp_id}"
-    cl_urn = (
-        f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
-    )
 
-    return Codelist(
+    return build_codelist(
         id=cl_id,
-        name=f"{column} codelist",
         agency=agency_id,
+        name=f"{column} codelist",
+        codes=codes,
         version=version,
-        urn=cl_urn,
-        items=codes,
+        urn=gen_urn("Codelist", agency_id, cl_id, version),
     )
 
 
@@ -1239,6 +1239,8 @@ def create_schema_from_table(
     Raises:
         ValueError: If any of the specified column names are missing from
             the DataFrame.
+        ValidationError: If the generated artefacts are not publish-ready
+            (e.g. an empty codelist).
     """
     attributes = attributes or []
     required = [*dimensions, measure, time_dimension, *attributes]
@@ -1246,7 +1248,8 @@ def create_schema_from_table(
     if missing:
         raise ValueError(f"Columns not found in dataframe: {missing}")
 
-    scheme_id = f"{_to_identifier(schema_id)}_CS"
+    dsd_id = _to_identifier(schema_id)
+    scheme_id = f"{dsd_id}_CS"
     concept_items: list[Concept] = []
     codelists: list[Codelist] = []
     components: list[Component] = []
@@ -1317,23 +1320,23 @@ def create_schema_from_table(
         )
         components.append(component)
 
-    # Create concept scheme and DSD (unchanged)
-    concept_scheme = ConceptScheme(
+    # Create concept scheme and DSD
+    concept_scheme = build_concept_scheme(
         id=scheme_id,
-        name=f"{schema_id} generated concept scheme",
         agency=agency_id,
+        name=f"{schema_id} generated concept scheme",
+        concepts=concept_items,
         version=version,
-        urn=f"urn:sdmx:org.sdmx.infomodel.conceptscheme.ConceptScheme={agency_id}:{scheme_id}({version})",
-        items=concept_items,
+        urn=gen_urn("ConceptScheme", agency_id, scheme_id, version),
     )
 
-    dsd = DataStructureDefinition(
-        id=_to_identifier(schema_id),
-        name=f"{schema_id} generated DSD",
+    dsd = build_data_structure_definition(
+        id=dsd_id,
         agency=agency_id,
-        version=version,
-        urn=f"urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure={agency_id}:{_to_identifier(schema_id)}({version})",
+        name=f"{schema_id} generated DSD",
         components=Components(components),
+        version=version,
+        urn=gen_urn("DataStructure", agency_id, dsd_id, version),
     )
 
     return SchemaComponents(dsd=dsd, concept_scheme=concept_scheme, codelists=codelists)

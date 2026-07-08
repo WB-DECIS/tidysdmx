@@ -1355,6 +1355,29 @@ class TestCreateSchemaFromTable:
             )
         assert "Columns not found" in str(exc.value)
 
+    def test_all_nan_dimension_raises_validation_error(self):
+        """A dimension column with no values -> empty codelist -> C001."""
+        from tidysdmx.artefact_validation import ValidationError
+
+        df = pd.DataFrame({"REF_AREA": [None], "TIME_PERIOD": ["2020"], "OBS": [1]})
+        with pytest.raises(ValidationError):
+            create_schema_from_table(
+                df, dimensions=["REF_AREA"], time_dimension="TIME_PERIOD", measure="OBS"
+            )
+
+    def test_generated_dsd_urn_matches_gen_urn(self):
+        """The generated DSD carries the full gen_urn URN."""
+        df = pd.DataFrame({"FREQ": ["A"], "TIME_PERIOD": ["2020"], "OBS": [1]})
+        sc = create_schema_from_table(
+            df,
+            dimensions=["FREQ"],
+            time_dimension="TIME_PERIOD",
+            measure="OBS",
+            agency_id="WB.DP",
+            schema_id="DP_SCHEMA",
+        )
+        assert sc.dsd.urn == gen_urn("DataStructure", "WB.DP", "DP_SCHEMA", "1.0")
+
 
 class TestBuildSchemaFromWbTemplate:
     def test_parse_info_sheet_basic_scenario(self):
