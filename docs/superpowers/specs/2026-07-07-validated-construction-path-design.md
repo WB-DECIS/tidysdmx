@@ -136,6 +136,12 @@ byte-identical while gaining validation, and matches the review's "route through
 gen_urn**." The `urn=` param is a natural, backward-compatible addition to the canonical value
 builders.
 
+> **Refinement (from planning):** `urn=` is added to **all five** value builders — the three
+> schema builders **and** `build_representation_map` / `build_multi_representation_map` —
+> because the DUP-02 `*_from_df` adapters (which today generate a URN via `gen_urn`) must pass
+> that URN through the canonical value builders to preserve current behaviour. Same rationale
+> (frozen artefacts), applied uniformly.
+
 ## Testing
 
 - **DUP-03:** a StructureMap with `source=""`/`target=""` now raises via `raise_if_invalid`;
