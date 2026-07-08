@@ -26,7 +26,13 @@ from pysdmx.model.category import CategoryScheme
 from pysdmx.model.code import Codelist, Hierarchy
 from pysdmx.model.concept import ConceptScheme
 from pysdmx.model.dataflow import Dataflow, DataStructureDefinition, Role
-from pysdmx.model.map import MultiRepresentationMap, RepresentationMap
+from pysdmx.model.map import (
+    ComponentMap,
+    MultiComponentMap,
+    MultiRepresentationMap,
+    RepresentationMap,
+    StructureMap,
+)
 from pysdmx.model.organisation import AgencyScheme
 from typeguard import typechecked
 
@@ -220,6 +226,42 @@ def _check_dataflow(a: Dataflow) -> list[ValidationIssue]:
     return []
 
 
+def _check_structure_map(a: StructureMap) -> list[ValidationIssue]:
+    """Check that a StructureMap is ready to be published.
+
+    Validates that source and target URNs are populated, and that any
+    embedded RepresentationMaps are also valid.
+
+    Args:
+        a: The StructureMap to check.
+
+    Returns:
+        A list of ValidationIssue instances (empty if valid).
+    """
+    issues: list[ValidationIssue] = []
+    if not a.source:
+        issues.append(_issue("SM001", a, "source must be populated.", "source"))
+    if not a.target:
+        issues.append(_issue("SM002", a, "target must be populated.", "target"))
+    for i, rule in enumerate(a.maps):
+        if not isinstance(rule, (ComponentMap, MultiComponentMap)):
+            continue
+        values = rule.values
+        if isinstance(values, str):
+            issues.append(
+                _issue(
+                    "SM003",
+                    a,
+                    f"map[{i}] references an unresolved RepresentationMap URN "
+                    f"'{values}'; embed the object instead.",
+                    "maps",
+                )
+            )
+        elif isinstance(values, (RepresentationMap, MultiRepresentationMap)):
+            issues.extend(_check_rep_map_fields(values))
+    return issues
+
+
 _SPECIFIC: dict[
     type[MaintainableArtefact],
     Callable[[Any], list[ValidationIssue]],
@@ -233,6 +275,7 @@ _SPECIFIC: dict[
     MultiRepresentationMap: _check_multi_representation_map,
     DataStructureDefinition: _check_dsd,
     Dataflow: _check_dataflow,
+    StructureMap: _check_structure_map,
 }
 
 
