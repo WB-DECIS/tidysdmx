@@ -112,23 +112,29 @@ Chosen shape (clean rename + canonical value builder + module-level deprecation 
 (`_create_dimension_component`, `_create_attribute_component`, and the inline
 `ConceptScheme`/`DSD` construction at `:1268`/`:1277`):
 
-- Route `Codelist` construction → `build_codelist(id, agency, name, codes, version)`.
-- Route `ConceptScheme` → `build_concept_scheme(...)`; `DSD` →
-  `build_data_structure_definition(id, agency, name, components, version)`.
-- Replace the three inline `urn="urn:sdmx:..."` f-strings with `gen_urn(...)` where a full URN
-  is still set. Compute `_to_identifier(schema_id)` **once** and reuse (currently 3×).
+- **Add an optional `urn: str | None = None` parameter** to `build_codelist`,
+  `build_concept_scheme`, and `build_data_structure_definition` (passed straight through to the
+  pysdmx constructor). This is the chosen URN approach — see below.
+- Route `Codelist` → `build_codelist(id, agency, name, codes, version, urn=gen_urn(...))`;
+  `ConceptScheme` → `build_concept_scheme(..., urn=gen_urn(...))`; `DSD` →
+  `build_data_structure_definition(id, agency, name, components, version, urn=gen_urn(...))`.
+  Each `gen_urn(...)` replaces one of the three inline `urn="urn:sdmx:..."` f-strings.
+- Compute `_to_identifier(schema_id)` **once** and reuse (currently 3×).
 - **Confirmed behaviour change (approved):** the validated builders `raise ValidationError`.
   The realistic trigger is an **all-NaN dimension column → empty codelist → C001**. Today
   `create_schema_from_table` builds an invalid schema silently; after this change it raises.
   Update the function's `Raises:` docstring accordingly.
 
-**URN sub-decision (for the plan):** the pysdmx value builders do not accept a `urn=` argument
-and pysdmx artefacts are frozen. **Recommended default:** drop the hand-assembled full URNs and
-let pysdmx manage URNs (its `short_urn`), keeping `gen_urn` for paths that genuinely need a full
-URN (e.g. `structure_map_writer`'s upload flattening). If a downstream consumer of
-`SchemaComponents` turns out to require full URNs on these artefacts, add an optional `urn=`
-parameter to the three `build_*` functions in a follow-up rather than reintroducing inline
-strings. The plan should confirm which consumers, if any, read these URNs.
+**URN handling — decided: Option B (add `urn=` to the builders).** The decision is forced by
+two facts: pysdmx artefacts are **frozen** (verified: setting `.urn` post-construction raises
+`AttributeError: immutable type`), and the value builders currently neither set nor accept a
+`urn`. So there is no "build then set" path. Rather than dropping the full URNs (which would
+change `create_schema_from_table`'s output from full URN to `None`/`short_urn` and risk the
+`schema.dsd.to_schema()` path the tests exercise at `test_structures.py:1234`), we add an
+optional `urn=` to the three builders and pass `gen_urn(...)`. This keeps the output
+byte-identical while gaining validation, and matches the review's "route through builders **and
+gen_urn**." The `urn=` param is a natural, backward-compatible addition to the canonical value
+builders.
 
 ## Testing
 
@@ -141,21 +147,28 @@ strings. The plan should confirm which consumers, if any, read these URNs.
   empty/NaN-only frame (previously silent); a `pytest.warns(FutureWarning)` test on the
   `structures.build_representation_map` shim; internal callers still pass.
 - **DUP-04:** `create_schema_from_table` happy-path schema is unchanged (component ids, dtypes,
-  codelist codes); generated URNs match `gen_urn` (or pysdmx `short_urn` per the sub-decision);
-  an all-NaN dimension column now raises `ValidationError` (C001).
+  codelist codes) and its artefact URNs are byte-identical to today (via `gen_urn`); an all-NaN
+  dimension column now raises `ValidationError` (C001); `schema.dsd.to_schema()` still works.
+  Add a test that `build_codelist`/`build_concept_scheme`/`build_data_structure_definition`
+  accept `urn=` and set it on the returned artefact.
 - Full suite stays green; coverage stays ≥ 85 (the raised gate).
 
-**Existing tests that must change (not just additions):**
-- `tests/test_structure_map_writer.py::TestValidateRepMapFields` tests
-  `_validate_rep_map_fields` directly — that function is deleted, so these migrate to
-  assert on `_check_structure_map` / `raise_if_invalid` (or are removed if the shared
-  rep-map check already covers them in `test_artefact_validation.py`).
-- `TestValidateStructureMapReferences` currently asserts `pytest.raises(ValueError,
-  match="unresolved" / "invalid")`. The raised type becomes `ValidationError` (still a
-  `ValueError` subclass, so `pytest.raises(ValueError)` holds) but the messages/rule-ids
-  change to SM003/R00x — update the `match=` strings.
-- `tests/test_structures.py` tests that call the old DataFrame
-  `build_representation_map(df, …)` switch to `build_representation_map_from_df`.
+**Existing tests that must change (measured — not just additions):**
+- `tests/test_structures.py` — **~24 call sites** of the DataFrame builders (lines 772, 797,
+  803, 809, 821, 831, 844, 851 for `build_representation_map(df, …)`; 998–1110 for
+  `build_multi_representation_map(df, …)`) rename to `*_from_df`, plus the two import lines.
+  Mostly mechanical, but a few change assertions: e.g. `build_representation_map(empty_df)`
+  (`:797`) now raises `ValidationError` (⊂ `ValueError`, so `pytest.raises(ValueError)` holds;
+  any `match=` string changes).
+- `tests/test_structure_map_writer.py::TestValidateRepMapFields` (`:371`) — **6 tests** call the
+  deleted `_validate_rep_map_fields` (`:374, :382, :399, :416, :431, :439`) + its import
+  (`:18`). Migrate to `test_artefact_validation.py` (assert R001/R002/R003 via `validate()`),
+  or drop as redundant with the rep-map tests already there.
+- `tests/test_structure_map_writer.py::TestValidateStructureMapReferences` (`:637`) — **~5
+  tests** keep raising (`ValidationError` ⊂ `ValueError`) but their `match="unresolved"/"invalid"`
+  strings become SM003/R00x — update the `match=` strings only.
+- `tests/test_artefact_builder.py` — **no change** (its `build_representation_map(id=…)` calls
+  target the canonical value builders, which keep their names).
 
 ## Sequencing & commits
 
