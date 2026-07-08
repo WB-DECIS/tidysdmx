@@ -172,7 +172,11 @@ def prepare_structure_map_for_upload(
         A list of all artifacts ready to write/upload.
 
     Raises:
-        ValueError: If validate=True and unresolved references are found.
+        ValidationError: If validate=True and the StructureMap fails
+            publish-readiness validation, e.g. an empty source/target, an
+            unresolved RepresentationMap URN reference, or an embedded
+            RepresentationMap/MultiRepresentationMap with missing required
+            fields.
 
     Example:
         >>> from pysdmx.api.fmr.maintenance import (
