@@ -220,13 +220,24 @@ class TestApplyComponentMap:
         result = apply_component_map(df, component_map)
         assert pd.isna(result["SEX"]).all()
 
+
+class TestApplyComponentMapInMemory:
+    """Unit tests for apply_component_map with in-memory maps (no FMR)."""
+
     @staticmethod
     def _component_map_with_catch_all(value_maps):
         """Build a ComponentMap (AREA -> REGION) from the given value maps."""
         return ComponentMap(
             source="AREA",
             target="REGION",
-            values=RepresentationMap(id="RM", agency="WB", maps=value_maps),
+            values=RepresentationMap(
+                id="RM",
+                agency="WB",
+                name="RM",
+                source="String",
+                target="String",
+                maps=value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -332,13 +343,24 @@ class TestApplyMultiComponentMap:
         else:
             assert not info_messages
 
+
+class TestApplyMultiComponentMapInMemory:
+    """Unit tests for apply_multi_component_map with in-memory maps (no FMR)."""
+
     @staticmethod
     def _multi_map_with_catch_all(multi_value_maps):
         """Build a MultiComponentMap (AREA, NOTE -> URBANISATION) from value maps."""
         return MultiComponentMap(
             source=["AREA", "NOTE"],
             target=["URBANISATION"],
-            values=MultiRepresentationMap(id="MR", agency="WB", maps=multi_value_maps),
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                name="MR",
+                source=["String", "String"],
+                target=["String"],
+                maps=multi_value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -409,6 +431,9 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                name="MR",
+                source=["String"],
+                target=["String"],
                 maps=[MultiValueMap(source=["BE"], target=["BEL"])],
             ),
         )
@@ -431,6 +456,9 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                name="MR",
+                source=["String"],
+                target=["String"],
                 maps=[
                     MultiValueMap(
                         source=[r"regex:2020-01-01 00:00:00"], target=["MATCHED"]

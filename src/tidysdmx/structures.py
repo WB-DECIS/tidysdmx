@@ -13,8 +13,6 @@ from pysdmx.model import (
     Component,
     Components,
     Concept,
-    ConceptScheme,
-    DataStructureDefinition,
     DataType,
     ItemReference,
     Role,
@@ -33,6 +31,18 @@ from pysdmx.model.map import (
 )
 from typeguard import typechecked
 
+from ._deprecation import deprecated
+from .artefact_builder import (
+    build_codelist,
+    build_concept_scheme,
+    build_data_structure_definition,
+)
+from .artefact_builder import (
+    build_multi_representation_map as _build_multi_representation_map,
+)
+from .artefact_builder import (
+    build_representation_map as _build_representation_map,
+)
 from .tidysdmx import parse_artefact_id
 
 
@@ -499,7 +509,7 @@ def build_multi_value_map_list(
 
 
 @typechecked
-def build_representation_map(
+def build_representation_map_from_df(
     df: pd.DataFrame,
     agency: str = "FAKE_AGENCY",
     id: str | None = None,
@@ -515,7 +525,13 @@ def build_representation_map(
     generate_urn: bool = True,
     default_value: str | None = None,
 ) -> RepresentationMap:
-    """Build a RepresentationMap from a DataFrame via build_value_map_list.
+    """Build a validated RepresentationMap from a DataFrame.
+
+    Builds the individual :class:`~pysdmx.model.map.ValueMap` rows via
+    :func:`build_value_map_list`, then delegates the actual construction to
+    :func:`tidysdmx.artefact_builder.build_representation_map`, which
+    validates the result (publish-readiness rules ``M001``-``M003`` and
+    ``R001``-``R003``) before returning it.
 
     Args:
         df: DataFrame where each row represents a mapping.
@@ -538,11 +554,14 @@ def build_representation_map(
             remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
-        A RepresentationMap object containing the mappings.
+        A publish-ready RepresentationMap object containing the mappings.
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
+        ValueError: If required columns are missing.
         TypeError: If source or target columns contain non-string values.
+        ValidationError: If ``id``/``name`` are omitted or empty (rules
+            M001/M003), or the DataFrame yields no value mappings (rule
+            R003) — see :mod:`tidysdmx.artefact_validation`.
 
     Examples:
         >>> import pandas as pd
@@ -553,7 +572,7 @@ def build_representation_map(
         ...     'valid_to': ['2025-12-31', None]
         ... }
         >>> df = pd.DataFrame(data)
-        >>> rm = build_representation_map(
+        >>> rm = build_representation_map_from_df(
         ...     df,
         ...     agency='ECB',
         ...     id='RM1',
@@ -564,36 +583,88 @@ def build_representation_map(
         >>> isinstance(rm, RepresentationMap)
         True
     """
-    # Use the existing function to build value maps
-    value_maps = build_value_map_list(
-        df,
-        source_col=source_col,
-        target_col=target_col,
-        valid_from_col=valid_from_col,
-        valid_to_col=valid_to_col,
-        default_value=default_value,
+    # An empty frame yields no value maps. Defer to the value builder's
+    # publish-readiness check (rule R003) instead of raising here, so an
+    # empty-frame call surfaces the same ValidationError as any other
+    # invalid input, rather than a bespoke ValueError from
+    # build_value_map_list (which still enforces non-empty input for its
+    # own direct callers).
+    value_maps = (
+        []
+        if df.empty
+        else build_value_map_list(
+            df,
+            source_col=source_col,
+            target_col=target_col,
+            valid_from_col=valid_from_col,
+            valid_to_col=valid_to_col,
+            default_value=default_value,
+        )
     )
 
-    # Generate URN if requested and id is provided
-    urn = None
-    if generate_urn and id:
-        urn = gen_urn("RepresentationMap", agency, id, version)
-
-    return RepresentationMap(
-        id=id,
-        name=name,
+    urn = (
+        gen_urn("RepresentationMap", agency, id, version)
+        if (generate_urn and id)
+        else None
+    )
+    # None -> "" so omitted id/name fail the value builder's publish-readiness
+    # checks (M001/M003) instead of typeguard's stricter `str` annotation.
+    return _build_representation_map(
+        id=id or "",
         agency=agency,
+        name=name or "",
         source=_resolve_representation_ref(source_cl),
         target=_resolve_representation_ref(target_cl),
         maps=value_maps,
-        description=description,
         version=version,
+        description=description,
         urn=urn,
     )
 
 
+@deprecated(replacement="build_representation_map_from_df")
+def build_representation_map(
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: str | None = None,
+    name: str | None = None,
+    source_cl: str | None = None,
+    target_cl: str | None = None,
+    version: str = "1.0",
+    description: str | None = None,
+    source_col: str = "source",
+    target_col: str = "target",
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
+    default_value: str | None = None,
+) -> RepresentationMap:
+    """Deprecated alias for :func:`build_representation_map_from_df`.
+
+    Mirrors that function's signature so ``help()``/IDE introspection keep
+    showing the real parameters during the deprecation window; see it for
+    the full documentation.
+    """
+    return build_representation_map_from_df(
+        df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cl=source_cl,
+        target_cl=target_cl,
+        version=version,
+        description=description,
+        source_col=source_col,
+        target_col=target_col,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
+        default_value=default_value,
+    )
+
+
 @typechecked
-def build_multi_representation_map(
+def build_multi_representation_map_from_df(
     df: pd.DataFrame,
     agency: str = "FAKE_AGENCY",
     id: str | None = None,
@@ -609,10 +680,18 @@ def build_multi_representation_map(
     generate_urn: bool = True,
     default_value: str | None = None,
 ) -> MultiRepresentationMap:
-    """Build a MultiRepresentationMap object from a pandas DataFrame.
+    """Build a validated MultiRepresentationMap object from a pandas DataFrame.
 
-    Wraps the creation of individual MultiValueMap objects and bundles them
-    into a MultiRepresentationMap container.
+    Builds the individual MultiValueMap rows, then delegates construction to
+    :func:`tidysdmx.artefact_builder.build_multi_representation_map`, which
+    validates the result (publish-readiness rules ``M001``-``M003`` and
+    ``R001``-``R003``) before returning it.
+
+    Unlike :func:`build_representation_map_from_df`, which raises a
+    ``ValidationError`` for an empty DataFrame (rule R003 — no value
+    mappings), this function raises a plain ``ValueError`` for an empty
+    DataFrame, because its ``if df.empty`` guard runs before the value-map
+    builder is ever invoked.
 
     Args:
         df: DataFrame where each row represents a multi-mapping.
@@ -639,13 +718,15 @@ def build_multi_representation_map(
             catch-all).
 
     Returns:
-        The constructed MultiRepresentationMap object.
+        A publish-ready MultiRepresentationMap object.
 
     Raises:
-        ValueError: If DataFrame is empty, columns are missing, or the length
-            of ``source_cls``/``target_cls`` does not match the number of
-            source/target columns.
+        ValueError: If the DataFrame is empty, required columns are missing,
+            or the length of ``source_cls``/``target_cls`` does not match
+            the number of source/target columns.
         TypeError: If non-string data is found in source/target columns.
+        ValidationError: If ``id``/``name`` are omitted or empty (rules
+            M001/M003) — see :mod:`tidysdmx.artefact_validation`.
     """
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
@@ -691,16 +772,17 @@ def build_multi_representation_map(
         default_value=default_value,
     )
 
-    # Generate URN if requested and id is provided
-    urn = None
-    if generate_urn and id:
-        urn = gen_urn("MultiRepresentationMap", agency, id, version)
-
-    # Instantiate MultiRepresentationMap with CORRECT arguments
-    return MultiRepresentationMap(
-        id=id,
-        name=name,
+    urn = (
+        gen_urn("MultiRepresentationMap", agency, id, version)
+        if (generate_urn and id)
+        else None
+    )
+    # None -> "" so omitted id/name fail the value builder's publish-readiness
+    # checks (M001/M003) instead of typeguard's stricter `str` annotation.
+    return _build_multi_representation_map(
+        id=id or "",
         agency=agency,
+        name=name or "",
         source=[_resolve_representation_ref(s) for s in source_cls]
         if source_cls
         else [str(DataType.STRING)] * len(_source_cols),
@@ -708,9 +790,50 @@ def build_multi_representation_map(
         if target_cls
         else [str(DataType.STRING)] * len(_target_cols),
         maps=multi_value_maps,
-        description=description,
         version=version,
+        description=description,
         urn=urn,
+    )
+
+
+@deprecated(replacement="build_multi_representation_map_from_df")
+def build_multi_representation_map(
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: str | None = None,
+    name: str | None = None,
+    source_cls: list[str] | None = None,
+    target_cls: list[str] | None = None,
+    version: str = "1.0",
+    description: str | None = None,
+    source_cols: list[str] | None = None,
+    target_cols: list[str] | None = None,
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
+    default_value: str | None = None,
+) -> MultiRepresentationMap:
+    """Deprecated alias for :func:`build_multi_representation_map_from_df`.
+
+    Mirrors that function's signature so ``help()``/IDE introspection keep
+    showing the real parameters during the deprecation window; see it for
+    the full documentation.
+    """
+    return build_multi_representation_map_from_df(
+        df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cls=source_cls,
+        target_cls=target_cls,
+        version=version,
+        description=description,
+        source_cols=source_cols,
+        target_cols=target_cols,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
+        default_value=default_value,
     )
 
 
@@ -763,8 +886,10 @@ def build_single_component_map(
         A ComponentMap object mapping the source to the target component.
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
+        ValueError: If the DataFrame is empty or required columns are missing.
         TypeError: If source or target columns contain non-string values.
+        ValidationError: If ``id``/``name`` resolve to an empty string — see
+            :mod:`tidysdmx.artefact_validation`.
 
     Examples:
         >>> import pandas as pd
@@ -802,7 +927,7 @@ def build_single_component_map(
         )
 
     # Build RepresentationMap using the provided helper
-    representation_map = build_representation_map(
+    representation_map = build_representation_map_from_df(
         df=df,
         agency=agency,
         id=id,
@@ -879,8 +1004,10 @@ def build_multi_component_map(
         A MultiComponentMap mapping the source components to the target(s).
 
     Raises:
-        ValueError: If DataFrame is empty or required columns are missing.
+        ValueError: If the DataFrame is empty or required columns are missing.
         TypeError: If source or target columns contain non-string values.
+        ValidationError: If ``id``/``name`` resolve to an empty string — see
+            :mod:`tidysdmx.artefact_validation`.
 
     Examples:
         >>> import pandas as pd
@@ -894,11 +1021,12 @@ def build_multi_component_map(
         ...     source_components=["COUNTRY", "CURRENCY"],
         ...     target_components=["ISO_CURRENCY"],
         ...     id="MCM1",
+        ...     name="Currency by country",
         ... )
         >>> isinstance(cm, MultiComponentMap)
         True
     """
-    multi_representation_map = build_multi_representation_map(
+    multi_representation_map = build_multi_representation_map_from_df(
         df=df,
         agency=agency,
         id=id,
@@ -1029,17 +1157,14 @@ def _create_codelist_for_component(
         for value in values
     ]
     cl_id = f"CL_{comp_id}"
-    cl_urn = (
-        f"urn:sdmx:org.sdmx.infomodel.codelist.Codelist={agency_id}:{cl_id}({version})"
-    )
 
-    return Codelist(
+    return build_codelist(
         id=cl_id,
-        name=f"{column} codelist",
         agency=agency_id,
+        name=f"{column} codelist",
+        codes=codes,
         version=version,
-        urn=cl_urn,
-        items=codes,
+        urn=gen_urn("Codelist", agency_id, cl_id, version),
     )
 
 
@@ -1186,6 +1311,8 @@ def create_schema_from_table(
     Raises:
         ValueError: If any of the specified column names are missing from
             the DataFrame.
+        ValidationError: If the generated artefacts are not publish-ready
+            (e.g. an empty codelist).
     """
     attributes = attributes or []
     required = [*dimensions, measure, time_dimension, *attributes]
@@ -1193,7 +1320,8 @@ def create_schema_from_table(
     if missing:
         raise ValueError(f"Columns not found in dataframe: {missing}")
 
-    scheme_id = f"{_to_identifier(schema_id)}_CS"
+    dsd_id = _to_identifier(schema_id)
+    scheme_id = f"{dsd_id}_CS"
     concept_items: list[Concept] = []
     codelists: list[Codelist] = []
     components: list[Component] = []
@@ -1264,23 +1392,23 @@ def create_schema_from_table(
         )
         components.append(component)
 
-    # Create concept scheme and DSD (unchanged)
-    concept_scheme = ConceptScheme(
+    # Create concept scheme and DSD
+    concept_scheme = build_concept_scheme(
         id=scheme_id,
-        name=f"{schema_id} generated concept scheme",
         agency=agency_id,
+        name=f"{schema_id} generated concept scheme",
+        concepts=concept_items,
         version=version,
-        urn=f"urn:sdmx:org.sdmx.infomodel.conceptscheme.ConceptScheme={agency_id}:{scheme_id}({version})",
-        items=concept_items,
+        urn=gen_urn("ConceptScheme", agency_id, scheme_id, version),
     )
 
-    dsd = DataStructureDefinition(
-        id=_to_identifier(schema_id),
-        name=f"{schema_id} generated DSD",
+    dsd = build_data_structure_definition(
+        id=dsd_id,
         agency=agency_id,
-        version=version,
-        urn=f"urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure={agency_id}:{_to_identifier(schema_id)}({version})",
+        name=f"{schema_id} generated DSD",
         components=Components(components),
+        version=version,
+        urn=gen_urn("DataStructure", agency_id, dsd_id, version),
     )
 
     return SchemaComponents(dsd=dsd, concept_scheme=concept_scheme, codelists=codelists)
