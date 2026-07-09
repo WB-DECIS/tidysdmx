@@ -31,8 +31,8 @@ def _parse_info_sheet(
 
     Extracts a specific DataFrame from the provided dictionary. Handles arbitrary
     layouts by treating headers as potential data, unless the headers appear to be
-    auto-generated (RangeIndex). Filters for rows containing exactly two non-empty
-    values.
+    auto-generated (RangeIndex). Keeps key-value rows containing one or two
+    non-empty values (the value may be empty).
 
     Args:
         sheets: Dictionary containing DataFrames, typically from pd.read_excel.
@@ -207,11 +207,11 @@ def _extract_artefact_id(
     info_df: pd.DataFrame,
     structure_type: Literal["dataflow", "dsd", "provision-agreement"],
 ) -> str:
-    """Extract the SDMX ID for a specific structure type from the parsed INFO DataFrame.
+    """Extract the SDMX reference for a structure type from the parsed INFO DataFrame.
 
-    Searches the provided DataFrame (output of ``_parse_info_sheet``) for specific
-    keys corresponding to the requested structure type. Handles standard SDMX
-    reference formats like 'Agency:ID(Version)' by parsing out just the 'ID'.
+    Searches the provided DataFrame (output of ``_parse_info_sheet``) for the
+    key corresponding to the requested structure type and returns its value
+    unchanged — typically a full 'Agency:ID(Version)' reference string.
 
     Args:
         info_df: DataFrame containing metadata with 'Key' and 'Value' columns.
@@ -219,7 +219,7 @@ def _extract_artefact_id(
             'dataflow', 'dsd', 'provision-agreement'.
 
     Returns:
-        The extracted SDMX ID.
+        The raw reference string as found in the sheet (e.g. 'AGENCY:DF_ID(1.0)').
 
     Raises:
         ValueError: If the `structure_type` is invalid, the key is not found,
@@ -518,7 +518,9 @@ def build_structure_map_from_template_wb(
 
     Examples:
         >>> mappings = {
-        ...     "INFO": pd.DataFrame({"Key": ["FMR_AGENCY"], "Value": ["TEST_AGENCY"]}),
+        ...     "INFO": pd.DataFrame(
+        ...         {"Key": ["datastructure"], "Value": ["TEST_AGENCY:DSD_ID(1.0)"]}
+        ...     ),
         ...     "COMP_MAPPING": pd.DataFrame(
         ...         {
         ...             "SOURCE": ["src"],
@@ -526,9 +528,11 @@ def build_structure_map_from_template_wb(
         ...             "MAPPING_RULES": ["fixed:VAL"],
         ...         }
         ...     ),
-        ...     "REP_MAPPING": pd.DataFrame({"source": ["a"], "target": ["b"]})
+        ...     "REP_MAPPING": pd.DataFrame({"S:src": ["a"], "T:tgt": ["b"]})
         ... }
         >>> smap = build_structure_map_from_template_wb(mappings)
+        >>> smap.agency
+        'TEST_AGENCY'
         >>> isinstance(smap, StructureMap)
         True
     """
@@ -702,13 +706,15 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> dict[str, str]:
 
     Scans the DataFrame for keys corresponding to SDMX artefacts such as
     'dataflow', 'datastructure', and 'provisionagreement', and returns a
-    dictionary where each structure type is linked to its parsed ID.
+    dictionary where each structure type is linked to its raw reference
+    string as found in the sheet.
 
     Args:
         info_df: DataFrame containing metadata with 'Key' and 'Value' columns.
 
     Returns:
-        Dictionary mapping structure types to artefact IDs.
+        Dictionary mapping structure types to reference strings
+        (e.g. 'AGENCY:DSD1(1.0)').
 
     Raises:
         ValueError: If the DataFrame is empty, lacks required columns, or no
@@ -717,11 +723,11 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> dict[str, str]:
 
     Examples:
         >>> df = pd.DataFrame({
-        ...     'Key': ['dataflow', 'datastructure', 'provisionagreement'],
-        ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
+        ...     'Key': ['dataflow', 'datastructure'],
+        ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)']
         ... })
         >>> _extract_all_artefact_ids(df)
-        {'dataflow': 'DF1', 'datastructure': 'DSD1', 'provisionagreement': 'PA1'}
+        {'dataflow': 'AGENCY:DF1(1.0)', 'datastructure': 'AGENCY:DSD1(1.0)'}
     """
     if not isinstance(info_df, pd.DataFrame):
         raise TypeError("info_df must be a pandas DataFrame.")
@@ -748,7 +754,6 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> dict[str, str]:
         raw_value = row["Value"]
         if pd.isna(raw_value) or str(raw_value).strip() == "":
             continue
-        # Extract ID from 'Agency:ID(Version)' format
         value_str = str(raw_value).strip()
         artefact_dict[row["Key"]] = value_str
 
@@ -769,8 +774,9 @@ def _extract_metadata_from_info_sheet(
 ) -> tuple[str, str, str | None]:
     """Extract (agency, version, artefact_ref) from the INFO sheet.
 
-    Uses ``structure_type`` preference, falling back to other artefacts
-    and FMR_AGENCY when needed.
+    Uses ``structure_type`` preference, falling back to other artefact
+    references when needed. The ``agency``/``version`` arguments are used
+    when no reference can be found or parsed.
 
     Args:
         info_df: INFO sheet with 'Key'/'Value' columns.
@@ -833,14 +839,16 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
     data.
 
     Returns a dict with the following keys:
-      - mapping_rule: one of {"skip", "fixed", "implicit", "representation"}
+      - mapping_rule: one of {"skip", "fixed", "implicit", "representation",
+        "multi_representation"}
       - source_id: normalized SOURCE (may be empty for fixed)
       - target_id: normalized TARGET (empty only if mapping_rule == "skip")
-      - fixed_value: present only for mapping_rule == "fixed", else None
+      - fixed_value: non-None only when mapping_rule == "fixed"
       - source_cl: codelist URN for the source component, or None
       - target_cl: codelist URN for the target component, or None
-      - default_value: catch-all target for unlisted source values, or None
-        (only on "representation" and "multi_representation" rules)
+      - default_value: catch-all target for unlisted source values, or None;
+        this key is only present on "representation" and
+        "multi_representation" rules
 
     Raises:
       - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
