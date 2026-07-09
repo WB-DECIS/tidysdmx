@@ -559,9 +559,9 @@ def build_representation_map_from_df(
     Raises:
         ValueError: If required columns are missing.
         TypeError: If source or target columns contain non-string values.
-        ValidationError: If ``id``/``name`` resolve to an empty string, or
-            the DataFrame yields no value mappings (rule R003) — see
-            :mod:`tidysdmx.artefact_validation`.
+        ValidationError: If ``id``/``name`` are omitted or empty (rules
+            M001/M003), or the DataFrame yields no value mappings (rule
+            R003) — see :mod:`tidysdmx.artefact_validation`.
 
     Examples:
         >>> import pandas as pd
@@ -607,10 +607,12 @@ def build_representation_map_from_df(
         if (generate_urn and id)
         else None
     )
+    # None -> "" so omitted id/name fail the value builder's publish-readiness
+    # checks (M001/M003) instead of typeguard's stricter `str` annotation.
     return _build_representation_map(
-        id=id,
+        id=id or "",
         agency=agency,
-        name=name,
+        name=name or "",
         source=_resolve_representation_ref(source_cl),
         target=_resolve_representation_ref(target_cl),
         maps=value_maps,
@@ -621,9 +623,44 @@ def build_representation_map_from_df(
 
 
 @deprecated(replacement="build_representation_map_from_df")
-def build_representation_map(*args: object, **kwargs: object) -> RepresentationMap:
-    """Deprecated alias for :func:`build_representation_map_from_df`."""
-    return build_representation_map_from_df(*args, **kwargs)
+def build_representation_map(
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: str | None = None,
+    name: str | None = None,
+    source_cl: str | None = None,
+    target_cl: str | None = None,
+    version: str = "1.0",
+    description: str | None = None,
+    source_col: str = "source",
+    target_col: str = "target",
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
+    default_value: str | None = None,
+) -> RepresentationMap:
+    """Deprecated alias for :func:`build_representation_map_from_df`.
+
+    Mirrors that function's signature so ``help()``/IDE introspection keep
+    showing the real parameters during the deprecation window; see it for
+    the full documentation.
+    """
+    return build_representation_map_from_df(
+        df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cl=source_cl,
+        target_cl=target_cl,
+        version=version,
+        description=description,
+        source_col=source_col,
+        target_col=target_col,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
+        default_value=default_value,
+    )
 
 
 @typechecked
@@ -688,8 +725,8 @@ def build_multi_representation_map_from_df(
             or the length of ``source_cls``/``target_cls`` does not match
             the number of source/target columns.
         TypeError: If non-string data is found in source/target columns.
-        ValidationError: If ``id``/``name`` resolve to an empty string — see
-            :mod:`tidysdmx.artefact_validation`.
+        ValidationError: If ``id``/``name`` are omitted or empty (rules
+            M001/M003) — see :mod:`tidysdmx.artefact_validation`.
     """
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
@@ -740,10 +777,12 @@ def build_multi_representation_map_from_df(
         if (generate_urn and id)
         else None
     )
+    # None -> "" so omitted id/name fail the value builder's publish-readiness
+    # checks (M001/M003) instead of typeguard's stricter `str` annotation.
     return _build_multi_representation_map(
-        id=id,
+        id=id or "",
         agency=agency,
-        name=name,
+        name=name or "",
         source=[_resolve_representation_ref(s) for s in source_cls]
         if source_cls
         else [str(DataType.STRING)] * len(_source_cols),
@@ -759,10 +798,43 @@ def build_multi_representation_map_from_df(
 
 @deprecated(replacement="build_multi_representation_map_from_df")
 def build_multi_representation_map(
-    *args: object, **kwargs: object
+    df: pd.DataFrame,
+    agency: str = "FAKE_AGENCY",
+    id: str | None = None,
+    name: str | None = None,
+    source_cls: list[str] | None = None,
+    target_cls: list[str] | None = None,
+    version: str = "1.0",
+    description: str | None = None,
+    source_cols: list[str] | None = None,
+    target_cols: list[str] | None = None,
+    valid_from_col: str = "valid_from",
+    valid_to_col: str = "valid_to",
+    generate_urn: bool = True,
+    default_value: str | None = None,
 ) -> MultiRepresentationMap:
-    """Deprecated alias for :func:`build_multi_representation_map_from_df`."""
-    return build_multi_representation_map_from_df(*args, **kwargs)
+    """Deprecated alias for :func:`build_multi_representation_map_from_df`.
+
+    Mirrors that function's signature so ``help()``/IDE introspection keep
+    showing the real parameters during the deprecation window; see it for
+    the full documentation.
+    """
+    return build_multi_representation_map_from_df(
+        df,
+        agency=agency,
+        id=id,
+        name=name,
+        source_cls=source_cls,
+        target_cls=target_cls,
+        version=version,
+        description=description,
+        source_cols=source_cols,
+        target_cols=target_cols,
+        valid_from_col=valid_from_col,
+        valid_to_col=valid_to_col,
+        generate_urn=generate_urn,
+        default_value=default_value,
+    )
 
 
 @typechecked

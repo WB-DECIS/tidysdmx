@@ -1,3 +1,4 @@
+import inspect
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -879,6 +880,14 @@ class TestBuildRepresentationMapFromDf:
                 name="Ctry",
             )
 
+    def test_missing_id_name_raises_validation_error(self):
+        """A valid frame without id/name -> M001/M003 -> ValidationError."""
+        from tidysdmx.artefact_validation import ValidationError
+
+        df = pd.DataFrame({"source": ["BE"], "target": ["BEL"]})
+        with pytest.raises(ValidationError, match=r"(?s)\[M001\].*\[M003\]"):
+            build_representation_map_from_df(df, agency="ECB")
+
     def test_deprecated_shim_warns(self):
         """The old structures.build_representation_map name warns, naming itself."""
         import tidysdmx.structures as s
@@ -888,6 +897,13 @@ class TestBuildRepresentationMapFromDf:
             FutureWarning, match=r"build_representation_map is deprecated"
         ):
             s.build_representation_map(df, agency="ECB", id="RM1", name="Ctry")
+
+    def test_deprecated_shim_preserves_signature(self):
+        """The shim exposes the adapter's real parameters, not *args/**kwargs."""
+        import tidysdmx.structures as s
+
+        params = inspect.signature(s.build_representation_map).parameters
+        assert list(params)[:4] == ["df", "agency", "id", "name"]
 
 
 class TestBuildSingleComponentMap:
@@ -1026,6 +1042,19 @@ class TestBuildSingleComponentMap:
         assert maps[-1].source == "regex:.*"
         assert maps[-1].target == "_Z"
 
+    def test_build_single_component_map_missing_id_name_raises_validation_error(
+        self, value_map_df_mandatory_cols
+    ):
+        """Omitted id/name propagate M001/M003 from the embedded rep map."""
+        from tidysdmx.artefact_validation import ValidationError
+
+        with pytest.raises(ValidationError, match=r"(?s)\[M001\].*\[M003\]"):
+            build_single_component_map(
+                value_map_df_mandatory_cols,
+                source_component="COUNTRY",
+                target_component="COUNTRY",
+            )
+
 
 class TestBuildMultiRepresentationMap:
     """Tests for the build_multi_representation_map function."""
@@ -1162,6 +1191,13 @@ class TestBuildMultiRepresentationMap:
                 sample_df, target_cls=["urn:a:cl", "urn:b:cl"]
             )
 
+    def test_missing_id_name_raises_validation_error(self, sample_df):
+        """A valid frame without id/name -> M001/M003 -> ValidationError."""
+        from tidysdmx.artefact_validation import ValidationError
+
+        with pytest.raises(ValidationError, match=r"(?s)\[M001\].*\[M003\]"):
+            build_multi_representation_map_from_df(sample_df, agency="ECB")
+
     def test_deprecated_shim_warns(self, sample_df):
         """The old structures.build_multi_representation_map name warns."""
         import tidysdmx.structures as s
@@ -1172,6 +1208,13 @@ class TestBuildMultiRepresentationMap:
             s.build_multi_representation_map(
                 sample_df, agency="ECB", id="MRM1", name="Ctry"
             )
+
+    def test_deprecated_shim_preserves_signature(self):
+        """The shim exposes the adapter's real parameters, not *args/**kwargs."""
+        import tidysdmx.structures as s
+
+        params = inspect.signature(s.build_multi_representation_map).parameters
+        assert list(params)[:4] == ["df", "agency", "id", "name"]
 
 
 class TestBuildMultiComponentMap:
