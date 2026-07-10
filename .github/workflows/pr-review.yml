@@ -31,7 +31,7 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: "claude-sonnet-4-20250514"
+          model: "claude-sonnet-5"
           direct_prompt: |
             Review this PR. Focus on:
             1. SDMX correctness — do artefacts conform to the information model?

@@ -63,6 +63,15 @@ Ready to contribute? Here's how to set up `tidysdmx` for local development.
     $ poetry install
     ```
 
+    Then install the pre-commit hooks. The pre-push hook runs the unit tests, so
+    install it explicitly with `--hook-type pre-push` in addition to the default
+    commit-stage hooks:
+
+    ```console
+    $ pre-commit install
+    $ pre-commit install --hook-type pre-push
+    ```
+
 4. Use `git` (or similar) to create a branch for local development and make your changes:
 
     ```console

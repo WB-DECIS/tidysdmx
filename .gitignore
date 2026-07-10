@@ -68,8 +68,6 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
-docs/_build/
 # Input for AI agent
 docs/.local-docs
 .pysdmx-src/
