@@ -22,6 +22,7 @@ pip install tidysdmx
 ## Quick start
 
 ```python
+import pandas as pd
 import pysdmx as px
 from tidysdmx import (
     parse_mapping_template_wb,
@@ -46,7 +47,8 @@ sm = build_structure_map_from_template_wb(
     source_structure_id="WB.DP:DP_SCHEMA(1.0)",
 )
 
-# 3. Map your tidy data and validate the output
+# 3. Load your tidy data, map it, and validate the output
+tidy_raw_df = pd.read_csv("my_tidy_data.csv")
 mapped = map_structures(df=tidy_raw_df, structure_map=sm)
 out = standardize_output(
     df=mapped, artefact_id="WB.GGH.HSP:DS_ASPIRE(1.0.0)",
@@ -74,7 +76,7 @@ errors = validate_dataset_local(df=out, schema=dis_schema)
 ## Documentation
 
 Full documentation, including the user guide and API reference, is published at the
-[tidysdmx docs site](https://github.com/WB-DECIS/tidysdmx).
+[tidysdmx docs site](https://wb-decis.github.io/tidysdmx/).
 
 ## Contributing
 
