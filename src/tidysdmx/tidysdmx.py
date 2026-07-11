@@ -57,7 +57,6 @@ def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
 
 # Keep old names as aliases for backwards compatibility with existing tests.
 check_dict_keys = _check_dict_keys
-remove_extension = _remove_extension
 modify_dict_keys = _modify_dict_keys
 create_keys_dict = _create_keys_dict
 

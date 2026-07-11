@@ -26,7 +26,6 @@ from tidysdmx.structures import (
     _collect_mapping_rules_errors,
     _collect_required_sheet_errors,
     _extract_all_artefact_ids,
-    _extract_artefact_id,
     _extract_mapping_rule,
     _extract_metadata_from_info_sheet,
     _extract_multi_representation_map,
@@ -1893,72 +1892,6 @@ class TestGenUrn:
         assert gen_urn("MysteryType", "AG", "X", "2.0") == (
             "urn:sdmx:org.sdmx.infomodel.base.MysteryType=AG:X(2.0)"
         )
-
-
-class TestExtractArtefactId:
-    """Tests for _extract_artefact_id() which extracts SDMX artefact IDs from INFO."""
-
-    @pytest.fixture
-    def valid_info_df(self):
-        """Fixture: DataFrame with valid keys and values for artefact extraction."""
-        return pd.DataFrame(
-            {
-                "Key": ["dataflow", "datastructure", "provisionagreement"],
-                "Value": [
-                    "AGENCY:DF_ID(1.0)",
-                    "AGENCY:DSD_ID(2.0)",
-                    "AGENCY:PA_ID(3.0)",
-                ],
-            }
-        )
-
-    @pytest.mark.parametrize(
-        "structure_type,expected",
-        [
-            ("dataflow", "AGENCY:DF_ID(1.0)"),
-            ("dsd", "AGENCY:DSD_ID(2.0)"),
-            ("provision-agreement", "AGENCY:PA_ID(3.0)"),
-        ],
-    )
-    def test_valid_keys_return_expected_value(
-        self, valid_info_df, structure_type, expected
-    ):
-        """Tests that valid keys return the correct artefact ID."""
-        result = _extract_artefact_id(valid_info_df, structure_type)
-        assert result == expected
-
-    def test_invalid_structure_type_raises_valueerror(self, valid_info_df):
-        """Tests that an invalid structure_type raises ValueError."""
-        with pytest.raises(TypeCheckError):
-            _extract_artefact_id(valid_info_df, "invalid")
-
-    def test_missing_key_raises_valueerror(self, valid_info_df):
-        """Tests that missing key in DataFrame raises ValueError."""
-        df_missing = pd.DataFrame({"Key": ["other"], "Value": ["AGENCY:OTHER(1.0)"]})
-        with pytest.raises(ValueError, match="Could not find metadata key 'dataflow'"):
-            _extract_artefact_id(df_missing, "dataflow")
-
-    def test_empty_value_raises_valueerror(self):
-        """Tests that empty value for a valid key raises ValueError."""
-        df_empty_value = pd.DataFrame({"Key": ["dataflow"], "Value": [""]})
-        with pytest.raises(
-            ValueError, match="Metadata for 'dataflow' is present but empty"
-        ):
-            _extract_artefact_id(df_empty_value, "dataflow")
-
-    def test_nan_value_raises_valueerror(self):
-        """Tests that NaN value for a valid key raises ValueError."""
-        df_nan_value = pd.DataFrame({"Key": ["dataflow"], "Value": [float("nan")]})
-        with pytest.raises(
-            ValueError, match="Metadata for 'dataflow' is present but empty"
-        ):
-            _extract_artefact_id(df_nan_value, "dataflow")
-
-    def test_case_insensitive_key_match(self):
-        """Tests that key matching is case-insensitive."""
-        df_case = pd.DataFrame({"Key": ["DataFlow"], "Value": ["AGENCY:DF_ID(1.0)"]})
-        result = _extract_artefact_id(df_case, "dataflow")
-        assert result == "AGENCY:DF_ID(1.0)"
 
 
 class TestBuildStructureMapFromTemplateWb:

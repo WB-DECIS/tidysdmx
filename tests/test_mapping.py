@@ -281,6 +281,19 @@ class TestApplyComponentMapInMemory:
         assert result["REGION"].iloc[0] == "EU"
         assert result["REGION"].iloc[1:].isna().all()
 
+    def test_invalid_regex_raises_valueerror_even_when_unused(self):
+        """A malformed regex pattern fails fast even if no value needs it."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:[unclosed", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR"]})  # fully literal-mapped
+
+        with pytest.raises(ValueError, match="Invalid regex pattern"):
+            apply_component_map(df, cm)
+
 
 @pytest.mark.integration
 class TestApplyMultiComponentMap:
