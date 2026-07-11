@@ -1,4 +1,5 @@
 # tests/fixtures/fxtr_mapping.py
+import os
 import pickle as pkl
 from pathlib import Path
 
@@ -39,7 +40,16 @@ def ifpri_asti_sm(api_params_sm):
         assert isinstance(sm, StructureMap)
         return sm
 
-    # Cassette missing — try live FMR, skip on failure
+    # Cassette missing. Under CI, fail loudly rather than silently skipping and
+    # live-fetching from FMR (which would mask a missing or renamed cassette).
+    if os.environ.get("CI"):
+        raise RuntimeError(
+            f"Cassette {cache_file.name} missing under CI; refusing to live-fetch "
+            f"FMR. Regenerate it locally with `python -m tests.fixtures.fxtr_mapping` "
+            f"and commit it."
+        )
+
+    # Local dev only — try live FMR, skip on failure.
     try:
         client = fmr.RegistryClient(api_params_sm["fmr_url"])
         sm = client.get_mapping(
