@@ -219,16 +219,21 @@ def apply_component_map(
         (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
         key=lambda vm: _value_map_rank([vm.source]),
     )
+    # Compile each rule's pattern once and reuse it across every cell below,
+    # rather than recompiling on each re.fullmatch call.
+    compiled_regex_maps = [
+        (re.compile(vm.source.removeprefix("regex:")), vm.target) for vm in regex_maps
+    ]
 
     mapped = result_df[source_col].map(literal_mapping)
 
-    if regex_maps:
+    if compiled_regex_maps:
 
         def _regex_target(value: object) -> object:
-            for vm in regex_maps:
-                pattern = vm.source.removeprefix("regex:")
-                if re.fullmatch(pattern, str(value)):
-                    return vm.target
+            text = str(value)
+            for pattern, target in compiled_regex_maps:
+                if pattern.fullmatch(text):
+                    return target
             return None
 
         # Missing source values stay unmapped: str(NaN) is "nan", which a

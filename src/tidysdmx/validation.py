@@ -64,7 +64,9 @@ def _get_codelist_violations(
     """
     violations: list[tuple[str, str]] = []
     for col, valid_ids in codelist_ids.items():
-        if col not in df.columns or len(violations) >= max_errors:
+        if len(violations) >= max_errors:
+            break
+        if col not in df.columns:
             continue
         col_as_str = df[col].astype(str)
         valid_ids_set = {str(vid) for vid in valid_ids}
@@ -293,8 +295,9 @@ def validate_duplicates(
     """
     duplicate_mask = df.duplicated(subset=dim_comp, keep=False)
     if duplicate_mask.any():
-        dup_keys = df.loc[duplicate_mask, dim_comp].drop_duplicates().head(max_errors)
-        total = df.loc[duplicate_mask, dim_comp].drop_duplicates().shape[0]
+        dedup = df.loc[duplicate_mask, dim_comp].drop_duplicates()
+        dup_keys = dedup.head(max_errors)
+        total = len(dedup)
         truncated = _truncation_note(len(dup_keys), total, max_errors)
         raise ValueError(
             f"Found {duplicate_mask.sum()} duplicate rows across {total} key "
