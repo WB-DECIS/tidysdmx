@@ -17,6 +17,7 @@ The pipeline steps are:
   7. Collect artifacts for FMR upload
 """
 
+import os
 import pickle as pkl
 import re
 from pathlib import Path
@@ -92,7 +93,16 @@ def _load_dis_schema() -> Schema:
         assert isinstance(schema, Schema)
         return schema
 
-    # Attempt real API call — requires FMR network access
+    # Cache missing. Under CI, fail loudly rather than silently skipping and
+    # live-fetching from FMR (which would mask a missing or renamed cassette).
+    if os.environ.get("CI"):
+        raise RuntimeError(
+            f"Cassette {DIS_SCHEMA_CACHE.name} missing under CI; refusing to "
+            f"live-fetch FMR. Regenerate it locally (see this function's docstring) "
+            f"and commit it."
+        )
+
+    # Local dev only — attempt real API call, requires FMR network access.
     try:
         client = fmr.RegistryClient(DIS_FMR_URL)
         schema = client.get_schema(
