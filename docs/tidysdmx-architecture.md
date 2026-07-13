@@ -269,12 +269,12 @@ This layer is intentionally thin. Each builder function validates its inputs, th
 
 ### 6. Schema Creation from Data
 
-`create_schema_from_table()` runs in the opposite direction: it produces a pysdmx `Schema` from a pandas DataFrame. It is used when no SDMX registry is available and a schema needs to be inferred from data alone.
+`create_schema_from_table()` runs in the opposite direction: it infers the components of an SDMX schema — returned as a `SchemaComponents` namedtuple bundling the `dsd`, `concept_scheme`, and `codelists` — from a pandas DataFrame. It is used when no SDMX registry is available and the structural artefacts need to be inferred from data alone.
 
 ```python
 from tidysdmx import create_schema_from_table
 
-schema = create_schema_from_table(
+schema_components = create_schema_from_table(
     dataframe=df,
     dimensions=["FREQ", "REF_AREA"],
     time_dimension="YEAR",         # mapped to standard TIME_PERIOD component
@@ -290,9 +290,9 @@ The function:
 2. Builds a `Codelist` from unique values in each dimension column
 3. Creates `Component` objects with the correct `Role` and `local_codes`
 4. Maps the `time_dimension` column to the standardised `TIME_PERIOD` concept (with `DataType.PERIOD`)
-5. Returns a `Schema` that is structurally identical to one fetched from a registry
+5. Returns a `SchemaComponents` namedtuple (`dsd`, `concept_scheme`, `codelists`) holding the inferred artefacts
 
-**Why this matters:** Once created, this schema can be passed to `validate_dataset_local()`, `standardize_output()`, or `filter_tidy_raw()` exactly like a registry-fetched schema. The analyst's workflow is identical regardless of whether the schema came from a registry or was inferred.
+**Why this matters:** You get the inferred DSD, concept scheme, and codelists as first-class pysdmx artefacts, ready to publish to a registry via the `build_*` builders — without writing a line of XML. Note that the returned bundle is *not* itself a pysdmx `Schema`: the schema-consuming helpers (`validate_dataset_local()`, `standardize_output()`, `filter_tidy_raw()`) require a pysdmx `Schema` instance — however it was obtained — so validating inferred structures against themselves is not yet a one-call round-trip.
 
 ---
 
@@ -397,7 +397,7 @@ tidysdmx/
 │
 ├── structures.py   ← Translation layer: DataFrames → pysdmx objects
 │                     All build_*() functions live here
-│                     Also create_schema_from_table() (DataFrame → Schema)
+│                     Also create_schema_from_table() (DataFrame → SchemaComponents)
 │
 ├── mapping.py      ← DataFrame-level application of pysdmx map objects
 │                     map_structures(), apply_fixed_value_maps(), etc.

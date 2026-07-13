@@ -77,7 +77,7 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 
 ## What does tidysdmx give me on top of pysdmx?
 
-- **Schema inference from tidy data** — `create_schema_from_table()` builds a pysdmx `Schema` (with DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe and validate your raw input without writing a line of XML.
+- **Schema inference from tidy data** — `create_schema_from_table()` builds the schema components (a `SchemaComponents` bundle of DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe your raw input without writing a line of XML.
 - **Excel-driven structure maps** — `parse_mapping_template_wb()` + `build_structure_map_from_template_wb()` turn the World Bank mapping workbook format into a fully-formed `StructureMap` with all the `FixedValueMap`, `ComponentMap`, and `RepresentationMap` instances pysdmx expects.
 - **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
 - **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
