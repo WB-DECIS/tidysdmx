@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -178,6 +179,29 @@ class TestValidateCodelistIds:
         """Tests that an empty DataFrame passes without error."""
         df = pd.DataFrame(columns=["col1", "col2"])
         validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_missing_values_are_not_codelist_violations(self, sample_codelist_ids):
+        """Missing cells (NaN or None) are not codelist violations (API-06).
+
+        Missing values are the missing-values check's job; a NaN must not be
+        stringified into a spurious ``'nan'`` code here, nor a None into a
+        spurious ``'None'`` code.
+        """
+        df = pd.DataFrame({"col1": ["A1", np.nan, None], "col2": ["B1", "B2", "B1"]})
+        # No ValueError, and in particular no 'nan'/'None' reported.
+        validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_missing_value_alongside_real_violation(self, sample_codelist_ids):
+        """NaN/None are ignored while a genuine out-of-codelist value still fails."""
+        df = pd.DataFrame(
+            {"col1": ["A1", np.nan, None, "WRONG"], "col2": ["B1", "B2", "B1", "B1"]}
+        )
+        with pytest.raises(ValueError, match="Invalid codelist values found") as exc:
+            validate_codelist_ids(df, sample_codelist_ids)
+        msg = str(exc.value)
+        assert "WRONG" in msg
+        assert "nan" not in msg
+        assert "None" not in msg
 
     @pytest.mark.parametrize(
         "df_values,expected_error",
