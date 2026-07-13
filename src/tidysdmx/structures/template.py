@@ -1,6 +1,7 @@
 """Parse Excel mapping templates and build StructureMaps from them."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Literal
 
 import pandas as pd
@@ -508,15 +509,15 @@ def build_structure_map_from_template_wb(
     for _, row in comp_df.iterrows():
         try:
             parsed = _extract_mapping_rule(row)
-            mapping_rule = parsed["mapping_rule"]
-            source_id = parsed["source_id"] or ""  # normalize to str
-            target_id = parsed["target_id"] or ""  # normalize to str
+            mapping_rule = parsed.mapping_rule
+            source_id = parsed.source_id or ""  # normalize to str
+            target_id = parsed.target_id or ""  # normalize to str
 
             if mapping_rule == "skip":
                 continue
 
             if mapping_rule == "fixed":
-                fixed_val = parsed["fixed_value"]  # guaranteed non-empty by parser
+                fixed_val = parsed.fixed_value  # guaranteed non-empty by parser
                 generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
 
             elif mapping_rule == "implicit":
@@ -532,14 +533,9 @@ def build_structure_map_from_template_wb(
                     rep_data_error=rep_data_error,
                 )
 
-                # Generate unique ID for RepresentationMap
-                base_id = f"RM_{source_id}_{target_id}"
-                if base_id in rep_map_counter:
-                    rep_map_counter[base_id] += 1
-                    rep_map_id = f"{base_id}_{rep_map_counter[base_id]}"
-                else:
-                    rep_map_counter[base_id] = 0
-                    rep_map_id = base_id
+                rep_map_id = _unique_map_id(
+                    rep_map_counter, f"RM_{source_id}_{target_id}"
+                )
 
                 comp_map = build_single_component_map(
                     df=rep_mapping_df,
@@ -548,13 +544,13 @@ def build_structure_map_from_template_wb(
                     agency=current_agency,
                     id=rep_map_id,  # Use unique ID
                     name=f"Mapping {source_id} to {target_id}",
-                    source_cl=parsed.get("source_cl"),
-                    target_cl=parsed.get("target_cl"),
+                    source_cl=parsed.source_cl,
+                    target_cl=parsed.target_cl,
                     source_col="source",
                     target_col="target",
                     version=current_version,
                     generate_urn=generate_urns,  # Pass flag through
-                    default_value=parsed.get("default_value"),
+                    default_value=parsed.default_value,
                 )
                 generated_maps.append(comp_map)
 
@@ -569,14 +565,9 @@ def build_structure_map_from_template_wb(
                     rep_data_error=rep_data_error,
                 )
 
-                # Generate unique ID for the MultiRepresentationMap
-                base_id = f"MRM_{'_'.join(source_ids)}_{target_id}"
-                if base_id in rep_map_counter:
-                    rep_map_counter[base_id] += 1
-                    rep_map_id = f"{base_id}_{rep_map_counter[base_id]}"
-                else:
-                    rep_map_counter[base_id] = 0
-                    rep_map_id = base_id
+                rep_map_id = _unique_map_id(
+                    rep_map_counter, f"MRM_{'_'.join(source_ids)}_{target_id}"
+                )
 
                 multi_comp_map = build_multi_component_map(
                     df=multi_df,
@@ -585,12 +576,10 @@ def build_structure_map_from_template_wb(
                     agency=current_agency,
                     id=rep_map_id,  # Use unique ID
                     name=f"Mapping {'|'.join(source_ids)} to {target_id}",
-                    target_cls=[parsed["target_cl"]]
-                    if parsed.get("target_cl")
-                    else None,
+                    target_cls=[parsed.target_cl] if parsed.target_cl else None,
                     version=current_version,
                     generate_urn=generate_urns,  # Pass flag through
-                    default_value=parsed.get("default_value"),
+                    default_value=parsed.default_value,
                 )
                 generated_maps.append(multi_comp_map)
 
@@ -765,29 +754,76 @@ def _is_missing_token(s: str) -> bool:
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
 
+def _unique_map_id(counter: dict[str, int], base: str) -> str:
+    """Return a collision-free map ID for *base*, tracking seen bases in *counter*.
+
+    The first time a base ID is seen it is returned unchanged; each subsequent
+    collision gets an incrementing numeric suffix (``base``, ``base_1``,
+    ``base_2``, …). *counter* is mutated in place.
+
+    Args:
+        counter: Mapping of base ID to the number of times it has been reused.
+        base: The desired base identifier.
+
+    Returns:
+        A unique identifier derived from *base*.
+    """
+    if base in counter:
+        counter[base] += 1
+        return f"{base}_{counter[base]}"
+    counter[base] = 0
+    return base
+
+
+@dataclass(frozen=True)
+class MappingRule:
+    """A syntactically-parsed COMP_MAPPING row.
+
+    Every field is always present, so consumers never have to guard for a
+    key that only some rule types populate.
+
+    Attributes:
+        mapping_rule: One of ``"skip"``, ``"fixed"``, ``"implicit"``,
+            ``"representation"``, ``"multi_representation"``.
+        source_id: Normalized SOURCE (may be empty for a fixed rule).
+        target_id: Normalized TARGET (empty only when ``mapping_rule`` is
+            ``"skip"``).
+        fixed_value: The literal value for a ``"fixed"`` rule, else ``None``.
+        source_cl: Codelist URN for the source component, or ``None``.
+        target_cl: Codelist URN for the target component, or ``None``.
+        default_value: Catch-all target for unlisted source values, or
+            ``None``. Only ``representation``/``multi_representation`` rules
+            ever set it, but the field exists on every rule.
+    """
+
+    mapping_rule: str
+    source_id: str
+    target_id: str
+    fixed_value: str | None = None
+    source_cl: str | None = None
+    target_cl: str | None = None
+    default_value: str | None = None
+
+
 @typechecked
-def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
-    """Parse a COMP_MAPPING row into a dict of mapping rules.
+def _extract_mapping_rule(row: "pd.Series") -> MappingRule:
+    """Parse a COMP_MAPPING row into a :class:`MappingRule`.
 
     This performs *syntax-level* validation only; it never touches external
     data.
 
-    Returns a dict with the following keys:
-      - mapping_rule: one of {"skip", "fixed", "implicit", "representation",
-        "multi_representation"}
-      - source_id: normalized SOURCE (may be empty for fixed)
-      - target_id: normalized TARGET (empty only if mapping_rule == "skip")
-      - fixed_value: non-None only when mapping_rule == "fixed"
-      - source_cl: codelist URN for the source component, or None
-      - target_cl: codelist URN for the target component, or None
-      - default_value: catch-all target for unlisted source values, or None;
-        this key is only present on "representation" and
-        "multi_representation" rules
+    Args:
+        row: A COMP_MAPPING row with (at least) ``SOURCE``, ``TARGET`` and
+            ``MAPPING_RULES`` entries, plus optional ``SOURCE_CL``,
+            ``TARGET_CL`` and ``DEFAULT_VALUE``.
+
+    Returns:
+        A :class:`MappingRule` with every field populated.
 
     Raises:
-      - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
-                    or for implicit/representation if SOURCE is missing,
-                    or for unknown rule strings.
+        ValueError: If the rule is syntactically invalid (e.g. a bad ``fixed:``
+            format), if ``SOURCE`` is missing for an implicit/representation
+            rule, or for unknown rule strings.
     """
     source_id = str(row.get("SOURCE", "")).strip()
     target_id = str(row.get("TARGET", "")).strip()
@@ -808,14 +844,13 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
 
     # Skip when TARGET is empty or rule is missing-ish
     if not target_id or _is_missing_token(raw_rule):
-        return {
-            "mapping_rule": "skip",
-            "source_id": source_id,
-            "target_id": target_id,
-            "fixed_value": None,
-            "source_cl": source_cl,
-            "target_cl": target_cl,
-        }
+        return MappingRule(
+            mapping_rule="skip",
+            source_id=source_id,
+            target_id=target_id,
+            source_cl=source_cl,
+            target_cl=target_cl,
+        )
 
     rule_lower = raw_rule.lower()
 
@@ -825,14 +860,14 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
         if len(parts) < 2 or not parts[1].strip():
             raise ValueError(f"Invalid fixed rule format: {raw_rule}")
         fixed_val = parts[1].strip()
-        return {
-            "mapping_rule": "fixed",
-            "source_id": source_id,
-            "target_id": target_id,
-            "fixed_value": fixed_val,
-            "source_cl": source_cl,
-            "target_cl": target_cl,
-        }
+        return MappingRule(
+            mapping_rule="fixed",
+            source_id=source_id,
+            target_id=target_id,
+            fixed_value=fixed_val,
+            source_cl=source_cl,
+            target_cl=target_cl,
+        )
 
     # implicit
     if rule_lower == "implicit":
@@ -840,14 +875,13 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             raise ValueError(
                 "Implicit map rule requires a non-empty 'SOURCE' component ID."
             )
-        return {
-            "mapping_rule": "implicit",
-            "source_id": source_id,
-            "target_id": target_id,
-            "fixed_value": None,
-            "source_cl": source_cl,
-            "target_cl": target_cl,
-        }
+        return MappingRule(
+            mapping_rule="implicit",
+            source_id=source_id,
+            target_id=target_id,
+            source_cl=source_cl,
+            target_cl=target_cl,
+        )
 
     # representation
     if rule_lower == "representation":
@@ -856,15 +890,14 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
                 "Representation map rule requires non-empty 'SOURCE' and "
                 "'TARGET' component ID."
             )
-        return {
-            "mapping_rule": "representation",
-            "source_id": source_id,
-            "target_id": target_id,
-            "fixed_value": None,
-            "source_cl": source_cl,
-            "target_cl": target_cl,
-            "default_value": default_value,
-        }
+        return MappingRule(
+            mapping_rule="representation",
+            source_id=source_id,
+            target_id=target_id,
+            source_cl=source_cl,
+            target_cl=target_cl,
+            default_value=default_value,
+        )
 
     # multi_representation: SOURCE is a '|'-delimited list of >= 2 components
     if rule_lower == "multi_representation":
@@ -875,15 +908,14 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
                 "components joined by '|' (e.g. 'FREQ|REF_AREA'). Use "
                 "'representation' for a single source component."
             )
-        return {
-            "mapping_rule": "multi_representation",
-            "source_id": source_id,
-            "target_id": target_id,
-            "fixed_value": None,
-            "source_cl": source_cl,
-            "target_cl": target_cl,
-            "default_value": default_value,
-        }
+        return MappingRule(
+            mapping_rule="multi_representation",
+            source_id=source_id,
+            target_id=target_id,
+            source_cl=source_cl,
+            target_cl=target_cl,
+            default_value=default_value,
+        )
 
     # unknown
     raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
