@@ -382,5 +382,5 @@ class TestRaiseIfInvalid:
 
     def test_raises_on_bad_sequence(self):
         """Any invalid artefact in a sequence triggers a raise."""
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match=r"\[C001\]"):
             raise_if_invalid([_codelist(), _codelist(items=())])

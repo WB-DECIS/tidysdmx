@@ -289,7 +289,7 @@ class TestExtractCodelistIds:
             components=Components([]),
             version="1.0.0",
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Schema contains no components"):
             extract_component_ids(schema)
 
     def test_extract_component_ids_invalid_type(self):
@@ -435,7 +435,7 @@ class TestWriteExcelMappingTemplate:
 
         assert not non_existent_dir.exists()
 
-        with pytest.raises(FileNotFoundError) as excinfo:
+        with pytest.raises(FileNotFoundError, match="does not exist") as excinfo:
             write_excel_mapping_template(components, rep_maps, output_path)
 
         assert "does not exist" in str(excinfo.value)
@@ -474,12 +474,12 @@ class TestParseMappingTemplateWb:
 
     def test_parse_mapping_template_wb_file_not_found(self):
         """FileNotFoundError is raised for non-existent file."""
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError, match="File not found"):
             parse_mapping_template_wb("non_existent.xlsx")
 
     def test_parse_mapping_template_wb_invalid_file_type(
         self, invalid_mapping_template_path
     ):
         """ValueError is raised for invalid file type."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid file type"):
             parse_mapping_template_wb(invalid_mapping_template_path)

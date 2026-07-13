@@ -677,7 +677,7 @@ class TestPrepareStructureMapForUpload:
             maps=[ComponentMap(source="COUNTRY", target="GEO", values=urn)],
         )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="SM003"):
             prepare_structure_map_for_upload(sm, validate=True)
 
     def test_validate_false_skips_validation(self):
