@@ -124,7 +124,12 @@ def _load_dis_schema() -> Schema:
     return schema
 
 
-@pytest.mark.integration
+# Deliberately NOT marked `integration` (the marker was already removed once,
+# in 54144b7): under CI these tests are hermetic — the dissemination schema
+# loads from the committed cassette and `_load_dis_schema` refuses to
+# live-fetch when CI is set — and ci.yml deselects integration tests, so the
+# marker would drop the only end-to-end pipeline test from CI. FMR is reached
+# solely as a local-dev fallback to regenerate a missing cassette.
 class TestPipelineWorkflow:
     """End-to-end pipeline integration test mirroring the notebook workflow.
 
