@@ -736,14 +736,9 @@ def build_multi_representation_map_from_df(
             f"of target columns ({len(_target_cols)})."
         )
 
-    # Validate data types (String check)
-    for col in _source_cols + _target_cols:
-        _validate_string_columns(
-            df,
-            [col],
-            allow_na=True,
-            message=f"Column '{col}' contains non-string values.",
-        )
+    # Value-column string validation is deferred to build_multi_value_map_list,
+    # the single source of truth for the no-NaN policy (API-04). A redundant
+    # allow_na=True check here only contradicted the strict delegate.
 
     # Build list of maps (Using the new target_cols signature)
     multi_value_maps = build_multi_value_map_list(
@@ -896,18 +891,16 @@ def build_single_component_map(
         >>> isinstance(cm, ComponentMap)
         True
     """
-    # Validate DataFrame
+    # Validate DataFrame structure only. Value-column string validation is
+    # deferred to the innermost value builder (build_value_map_list), which is
+    # the single source of truth for the no-NaN policy (API-04). Validating
+    # here with allow_na=True as well only misled callers, since the delegate
+    # rejects NaN regardless.
     if df.empty:
         raise ValueError("Input DataFrame cannot be empty.")
     for col in [source_col, target_col]:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
-        _validate_string_columns(
-            df,
-            [col],
-            allow_na=True,
-            message=f"Column '{col}' must contain only string values or NaN.",
-        )
 
     # Build RepresentationMap using the provided helper
     representation_map = build_representation_map_from_df(

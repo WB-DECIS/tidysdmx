@@ -958,6 +958,19 @@ class TestBuildSingleComponentMap:
         with pytest.raises(TypeError):
             build_single_component_map(df, "COUNTRY", "COUNTRY")
 
+    def test_build_single_component_map_nan_rejected_once(self):
+        """NaN in a value column is rejected once by the strict value builder.
+
+        Regression for API-04: the builder no longer runs a permissive
+        allow_na=True check that contradicts the strict inner validation.
+        """
+        df = pd.DataFrame({"source": ["BE", None], "target": ["BEL", "FRA"]})
+        with pytest.raises(
+            TypeError,
+            match="Source and target columns must contain only string values",
+        ):
+            build_single_component_map(df, "COUNTRY", "COUNTRY")
+
     def test_build_single_component_map_custom_columns(self):
         """Test with custom column names for source and target."""
         df = pd.DataFrame(
@@ -1109,6 +1122,16 @@ class TestBuildMultiRepresentationMap:
         df_invalid = pd.DataFrame(invalid_data)
         with pytest.raises(TypeError):
             build_multi_representation_map_from_df(df_invalid)
+
+    def test_nan_rejected_once(self):
+        """NaN in a value column is rejected once by the strict value builder.
+
+        Regression for API-04: no permissive allow_na=True pre-check precedes
+        the strict multi-value builder validation.
+        """
+        df = pd.DataFrame({"source": ["BE", None], "target": ["BEL", "FRA"]})
+        with pytest.raises(TypeError, match="must contain only string values"):
+            build_multi_representation_map_from_df(df)
 
     def test_custom_columns_and_metadata(self):
         """Tests that custom column names and metadata are handled correctly."""
