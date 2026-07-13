@@ -28,6 +28,27 @@ jobs:
       - name: Ruff format check
         run: poetry run ruff format --check .
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Export locked runtime requirements
+        run: |
+          pip install poetry poetry-plugin-export
+          poetry export --only main --without-hashes -f requirements.txt -o requirements-runtime.txt
+      - name: Audit runtime dependencies for known CVEs
+        # Scoped to runtime deps only (dev tooling is out of the shipped surface).
+        # If a flagged advisory has no fix yet, add `--ignore-vuln <ID>` with a
+        # comment rather than weakening the gate.
+        run: |
+          pip install pip-audit
+          pip-audit --strict -r requirements-runtime.txt
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
