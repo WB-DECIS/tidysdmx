@@ -39,14 +39,15 @@ jobs:
           python-version: "3.11"
       - name: Export locked runtime requirements
         run: |
-          pip install poetry
-          poetry self add poetry-plugin-export || true
+          pip install poetry poetry-plugin-export
           poetry export --only main --without-hashes -f requirements.txt -o requirements-runtime.txt
       - name: Audit runtime dependencies for known CVEs
         # Scoped to runtime deps only (dev tooling is out of the shipped surface).
         # If a flagged advisory has no fix yet, add `--ignore-vuln <ID>` with a
         # comment rather than weakening the gate.
-        run: pipx run pip-audit --strict -r requirements-runtime.txt
+        run: |
+          pip install pip-audit
+          pip-audit --strict -r requirements-runtime.txt
 
   test:
     name: Test (Python ${{ matrix.python-version }})
