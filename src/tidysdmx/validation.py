@@ -68,7 +68,12 @@ def _get_codelist_violations(
             break
         if col not in df.columns:
             continue
-        col_as_str = df[col].astype(str)
+        # Missing values are the missing-values check's job, not a codelist
+        # violation. Excluding them here keeps this consistent with filter_rows
+        # (tidy_raw.py) and avoids reporting a spurious 'nan'/'None' code
+        # (API-06).
+        non_missing = df[col].dropna()
+        col_as_str = non_missing.astype(str)
         valid_ids_set = {str(vid) for vid in valid_ids}
         invalid_values = col_as_str[~col_as_str.isin(valid_ids_set)].unique()
         for val in invalid_values:
