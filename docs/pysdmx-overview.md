@@ -445,7 +445,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | **Column validation** | Component `required` flag, `local_codes` | `validate_dataset_local()` — full validation pipeline; `validate_columns()`, `validate_mandatory_columns()`, `validate_codelist_ids()`, `validate_duplicates()`, `validate_no_missing_values()` |
 | **Apply structure maps** | `StructureMap`, `FixedValueMap`, `ImplicitComponentMap`, `ComponentMap`, `MultiComponentMap` | `map_structures()` — applies a StructureMap to a DataFrame; individual `apply_*` functions |
 | **Build structure maps** | Raw pysdmx map constructors | `build_fixed_map()`, `build_implicit_component_map()`, `build_date_pattern_map()`, `build_value_map()`, `build_representation_map()`, `build_multi_representation_map()`, `build_single_component_map()`, `build_structure_map_from_template_wb()` |
-| **Create schema from data** | `Schema`, `Components`, `Component`, `Codelist`, `Code`, `Concept`, `DataType`, `Role` | `create_schema_from_table()` — infers the schema components (a `SchemaComponents` namedtuple: `dsd`, `concept_scheme`, `codelists`) from a pandas DataFrame |
+| **Create schema from data** | `Components`, `Component`, `Codelist`, `Code`, `Concept`, `ItemReference`, `DataType`, `Role` | `create_schema_from_table()` — infers the schema components (a `SchemaComponents` namedtuple: `dsd`, `concept_scheme`, `codelists`) from a pandas DataFrame |
 | **Output standardisation** | None | `standardize_output()` — adds SDMX reference columns (`STRUCTURE`/`DATAFLOW`/`PROVISIONAGREEMENT`, `*_ID`, `ACTION`) and reorders columns |
 | **Excel mapping workflow** | None | `write_excel_mapping_template()`, `parse_mapping_template_wb()`, `build_structure_map_from_template_wb()` |
 
