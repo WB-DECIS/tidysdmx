@@ -10,8 +10,8 @@ from typeguard import TypeCheckError
 
 from tidysdmx.tidysdmx import (
     _add_sdmx_reference_cols,
+    _create_keys_dict,
     _extract_artefact_type,
-    create_keys_dict,
     fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
@@ -456,22 +456,22 @@ class TestCreateKeysDict:
             "file2": "file2.json",
             "file3": "file3.txt",
         }
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_no_extension(self):
         input_dict = {"file1": "data1", "file2": "data2"}
         expected_output = {"file1": "file1", "file2": "file2"}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_mixed_keys(self):
         input_dict = {"file1.csv": "data1", "file2": "data2", "file3.txt": "data3"}
         expected_output = {"file1": "file1.csv", "file2": "file2", "file3": "file3.txt"}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_empty_dict(self):
         input_dict = {}
         expected_output = {}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_multiple_periods(self):
         input_dict = {
@@ -482,7 +482,7 @@ class TestCreateKeysDict:
             "file.with.periods": "file.with.periods.csv",
             "another.file.with.periods": "another.file.with.periods.json",
         }
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
 
 class TestTransformSourceToTarget:

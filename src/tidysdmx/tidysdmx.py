@@ -55,12 +55,6 @@ def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
     return {_remove_extension(key): key for key in input_dict}
 
 
-# Keep old names as aliases for backwards compatibility with existing tests.
-check_dict_keys = _check_dict_keys
-modify_dict_keys = _modify_dict_keys
-create_keys_dict = _create_keys_dict
-
-
 @deprecated(replacement="fetch_schema")
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
