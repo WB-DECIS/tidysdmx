@@ -292,7 +292,7 @@ The function:
 4. Maps the `time_dimension` column to the standardised `TIME_PERIOD` concept (with `DataType.PERIOD`)
 5. Returns a `SchemaComponents` namedtuple (`dsd`, `concept_scheme`, `codelists`) holding the inferred artefacts
 
-**Why this matters:** You get the inferred DSD, concept scheme, and codelists as first-class pysdmx artefacts, ready to publish to a registry via the `build_*` builders — without writing a line of XML. Note that the returned bundle is *not* itself a pysdmx `Schema`: the schema-consuming helpers (`validate_dataset_local()`, `standardize_output()`, `filter_tidy_raw()`) expect a registry-fetched `Schema` object, so validating inferred structures against themselves is not yet a one-call round-trip.
+**Why this matters:** You get the inferred DSD, concept scheme, and codelists as first-class pysdmx artefacts, ready to publish to a registry via the `build_*` builders — without writing a line of XML. Note that the returned bundle is *not* itself a pysdmx `Schema`: the schema-consuming helpers (`validate_dataset_local()`, `standardize_output()`, `filter_tidy_raw()`) require a pysdmx `Schema` instance — however it was obtained — so validating inferred structures against themselves is not yet a one-call round-trip.
 
 ---
 
