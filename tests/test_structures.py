@@ -52,6 +52,7 @@ from tidysdmx.structures import (
     create_schema_from_table,
     gen_urn,
 )
+from tidysdmx.structures.template import _unique_map_id
 
 # region fixtures
 
@@ -2307,16 +2308,16 @@ class TestExtractMappingRule:
         """Tests that rule is 'skip' when TARGET is empty."""
         row = pd.Series({"SOURCE": "SRC", "TARGET": "", "MAPPING_RULES": "implicit"})
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "skip"
-        assert result["source_id"] == "SRC"
-        assert result["target_id"] == ""
-        assert result["fixed_value"] is None
+        assert result.mapping_rule == "skip"
+        assert result.source_id == "SRC"
+        assert result.target_id == ""
+        assert result.fixed_value is None
 
     def test_skip_rule_when_rule_missing(self):
         """Tests that rule is 'skip' when MAPPING_RULES is missing-like."""
         row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "nan"})
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "skip"
+        assert result.mapping_rule == "skip"
 
     def test_fixed_rule_valid(self):
         """Tests that a valid fixed rule returns correct mapping."""
@@ -2324,12 +2325,12 @@ class TestExtractMappingRule:
             {"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "fixed:123"}
         )
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "fixed"
-        assert result["source_id"] == "SRC"
-        assert result["target_id"] == "TGT"
-        assert result["fixed_value"] == "123"
-        assert result["source_cl"] is None
-        assert result["target_cl"] is None
+        assert result.mapping_rule == "fixed"
+        assert result.source_id == "SRC"
+        assert result.target_id == "TGT"
+        assert result.fixed_value == "123"
+        assert result.source_cl is None
+        assert result.target_cl is None
 
     def test_fixed_rule_invalid_format(self):
         """Tests that an invalid fixed rule raises ValueError."""
@@ -2341,7 +2342,7 @@ class TestExtractMappingRule:
         """Tests that implicit rule works when SOURCE is present."""
         row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "implicit"})
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "implicit"
+        assert result.mapping_rule == "implicit"
 
     def test_implicit_rule_missing_source(self):
         """Tests that implicit rule raises ValueError when SOURCE is missing."""
@@ -2355,7 +2356,7 @@ class TestExtractMappingRule:
             {"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation"}
         )
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "representation"
+        assert result.mapping_rule == "representation"
 
     def test_representation_rule_missing_source(self):
         """Tests that representation rule raises ValueError when SOURCE is missing."""
@@ -2390,11 +2391,11 @@ class TestExtractMappingRule:
         )
         result = _extract_mapping_rule(row)
         assert (
-            result["source_cl"]
+            result.source_cl
             == "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_SRC(1.0)"
         )
         assert (
-            result["target_cl"]
+            result.target_cl
             == "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=ECB:CL_TGT(1.0)"
         )
 
@@ -2404,8 +2405,8 @@ class TestExtractMappingRule:
             {"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation"}
         )
         result = _extract_mapping_rule(row)
-        assert result["source_cl"] is None
-        assert result["target_cl"] is None
+        assert result.source_cl is None
+        assert result.target_cl is None
 
     def test_multi_representation_rule_valid(self):
         """A multi_representation rule keeps the raw delimited SOURCE string."""
@@ -2417,9 +2418,9 @@ class TestExtractMappingRule:
             }
         )
         result = _extract_mapping_rule(row)
-        assert result["mapping_rule"] == "multi_representation"
-        assert result["source_id"] == "FREQ|REF_AREA"
-        assert result["target_id"] == "INDICATOR"
+        assert result.mapping_rule == "multi_representation"
+        assert result.source_id == "FREQ|REF_AREA"
+        assert result.target_id == "INDICATOR"
 
     def test_multi_representation_single_source_raises(self):
         """A multi_representation rule with only one source component is rejected."""
@@ -2456,7 +2457,7 @@ class TestExtractMappingRule:
             }
         )
         result = _extract_mapping_rule(row)
-        assert result["default_value"] == "_Z"
+        assert result.default_value == "_Z"
 
     def test_default_value_extracted_for_multi_representation(self):
         """DEFAULT_VALUE is parsed into the multi_representation rule."""
@@ -2469,15 +2470,15 @@ class TestExtractMappingRule:
             }
         )
         result = _extract_mapping_rule(row)
-        assert result["default_value"] == "_Z"
+        assert result.default_value == "_Z"
 
     def test_default_value_none_when_absent(self):
-        """Missing DEFAULT_VALUE yields None in the rule dict."""
+        """Missing DEFAULT_VALUE yields None on the parsed rule."""
         row = pd.Series(
             {"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": "representation"}
         )
         result = _extract_mapping_rule(row)
-        assert result["default_value"] is None
+        assert result.default_value is None
 
     def test_default_value_blank_is_none(self):
         """A whitespace-only DEFAULT_VALUE is treated as absent (None)."""
@@ -2490,7 +2491,48 @@ class TestExtractMappingRule:
             }
         )
         result = _extract_mapping_rule(row)
-        assert result["default_value"] is None
+        assert result.default_value is None
+
+    @pytest.mark.parametrize(
+        "rule",
+        ["", "implicit", "fixed:123", "representation"],
+    )
+    def test_all_fields_present_on_every_rule_type(self, rule):
+        """Every parsed rule exposes all fields, incl. default_value (SMP-01).
+
+        Previously the parser omitted ``default_value`` on skip/fixed/implicit
+        rules, so consumers had to guard with ``.get()``. The dataclass makes
+        every field addressable on every rule type.
+        """
+        row = pd.Series({"SOURCE": "SRC", "TARGET": "TGT", "MAPPING_RULES": rule})
+        result = _extract_mapping_rule(row)
+        # Access does not raise for any rule type.
+        assert result.default_value is None
+        assert result.source_cl is None
+        assert result.target_cl is None
+
+
+class TestUniqueMapId:
+    """Tests for the `_unique_map_id` de-duplication helper (SMP-01)."""
+
+    def test_first_use_returns_base_unchanged(self):
+        """The first time a base is seen it is returned as-is."""
+        counter: dict[str, int] = {}
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B"
+
+    def test_collisions_get_incrementing_suffixes(self):
+        """Repeated bases get 1-based numeric suffixes."""
+        counter: dict[str, int] = {}
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B"
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B_1"
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B_2"
+
+    def test_distinct_bases_are_independent(self):
+        """Different base IDs don't interfere with each other's counters."""
+        counter: dict[str, int] = {}
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B"
+        assert _unique_map_id(counter, "MRM_C_D") == "MRM_C_D"
+        assert _unique_map_id(counter, "RM_A_B") == "RM_A_B_1"
 
 
 class TestResolveRepresentationRef:
