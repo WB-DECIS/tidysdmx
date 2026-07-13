@@ -177,7 +177,7 @@ class TestStandardizeIndicatorId:
                 "INDICATOR": ["indicator.one", "indicator.two", "indicator.three"],
             }
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Expected exactly 1 unique value"):
             standardize_indicator_id(df)
 
     def test_standardize_indicator_id_missing_id_column(self):
@@ -630,7 +630,7 @@ class TestExtractArtefactType:
             [],
             generated=datetime.now(UTC),
         )
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Invalid schema context") as exc_info:
             _extract_artefact_type(schema)
         assert "Invalid schema context" in str(exc_info.value)
 
@@ -646,7 +646,7 @@ class TestExtractArtefactType:
             [],
             generated=datetime.now(UTC),
         )
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Invalid schema context") as exc_info:
             _extract_artefact_type(schema)
         message = str(exc_info.value)
         assert "dataflow" in message
@@ -767,7 +767,9 @@ class TestStandardizeOutput:
 
     def test_empty_parameters_raise(self, ifpri_asti_schema, sample_df):
         """Tests that ValueError is raised when artefact_id is empty."""
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError, match=r"`artefact_id` and `schema` cannot be empty"
+        ):
             standardize_output(sample_df, artefact_id="", schema=ifpri_asti_schema)
 
     def test_action_default_is_insert(self, sample_df, ifpri_asti_schema):

@@ -118,7 +118,7 @@ class TestValidateColumns:
     ):
         """Tests that validate_columns raises ValueError for unexpected columns."""
         df = pd.DataFrame(columns=df_columns)
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Found unexpected columns") as exc_info:
             validate_columns(df, valid_columns=valid_columns, sdmx_cols=sdmx_cols)
         assert "Found unexpected columns" in str(exc_info.value)
         assert invalid_col in str(exc_info.value)
@@ -165,7 +165,9 @@ class TestValidateCodelistIds:
         df = pd.DataFrame(
             {"col1": ["INVALID1", "INVALID2"], "col2": ["INVALID3", "B2"]}
         )
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(
+            ValueError, match="Invalid codelist values found"
+        ) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         msg = str(excinfo.value)
         assert "col1" in msg and "col2" in msg
@@ -215,7 +217,9 @@ class TestValidateCodelistIds:
     ):
         """Tests invalid values in different columns using parametrization."""
         df = pd.DataFrame(df_values)
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(
+            ValueError, match="Invalid codelist values found"
+        ) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         assert expected_error in str(excinfo.value)
 
@@ -390,7 +394,7 @@ class TestValidateDatasetLocal:
     def test_raises_error_if_no_schema_or_valid(self):
         """Tests that ValueError is raised if neither schema nor valid is provided."""
         df = pd.DataFrame({"TIME_PERIOD": ["2020"]})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Either a schema or precomputed"):
             validate_dataset_local(df)
 
     def test_dataflow_schema_accepts_dataflow_columns(self, sdmx_schema):

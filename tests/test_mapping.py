@@ -329,7 +329,7 @@ class TestApplyMultiComponentMap:
     def test_missing_source_columns_raises(self, multi_component_map):
         """Tests that KeyError is raised when source columns are missing."""
         df = pd.DataFrame({"AREA": ["COL"], "OTHER": ["one"]})
-        with pytest.raises(KeyError) as excinfo:
+        with pytest.raises(KeyError, match="Missing source columns") as excinfo:
             apply_multi_component_map(df, multi_component_map)
         assert "Missing source columns" in str(excinfo.value)
 
@@ -578,7 +578,7 @@ class TestMapStructures:
             }
         )
 
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="not found in DataFrame"):
             map_structures(df, ifpri_asti_sm)
 
     @pytest.mark.parametrize("verbose", [True, False])

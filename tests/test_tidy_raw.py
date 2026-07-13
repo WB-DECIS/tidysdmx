@@ -171,9 +171,9 @@ class TestFilterTidyRaw:
 
     def test_filter_tidy_raw_raises_on_missing_input(self, sdmx_df):
         """Schema and dataframe must be provided; expect TypeError otherwise."""
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="required positional argument"):
             filter_tidy_raw(sdmx_df)
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="required positional argument"):
             filter_tidy_raw()
 
     @pytest.mark.parametrize(
