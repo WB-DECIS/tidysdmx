@@ -61,6 +61,13 @@ src/tidysdmx/
 ├── validation.py           — Validate datasets against schemas and codelists
 ├── artefact_builder.py     — Build pysdmx artefacts with publish-readiness validation
 ├── artefact_validation.py  — Validate artefacts before publishing (rules + ValidationError)
+├── fmr/                    — Enhanced FMR client layer (read/write facade, artefact
+│   │                         diffing, automated versioning, plan/execute upsert workflow)
+│   ├── client.py           — FmrClient facade (env-var credentials, lazy write client)
+│   ├── diff.py             — compare_artefacts: breaking/additive/cosmetic change records
+│   ├── versioning.py       — SDMX version parse/compare/bump + VersionPolicy
+│   ├── publish.py          — plan_publication / execute_plan / publish upsert workflow
+│   └── report.py           — pandas DataFrame views of diffs, plans, reports
 ├── utils.py                — Utilities: extract components, build mapping rules, Excel helpers
 ├── qa_utils.py             — QA helpers: coerce numeric, remove duplicates
 ├── kedro.py                — Kedro pipeline node wrappers
@@ -72,7 +79,8 @@ tests/
     ├── fxtr_schemas.py     — Pickled Schema fixtures
     ├── fxtr_dummy_data.py  — Dummy DataFrame fixtures
     ├── fxtr_structures.py  — SDMX structure artefact fixtures
-    └── fxtr_mapping.py     — StructureMap fixtures
+    ├── fxtr_mapping.py     — StructureMap fixtures
+    └── fxtr_fmr.py         — Artefact-pair fixtures + FakeFmrClient for fmr tests
 
 .claude/
 ├── settings.json           — Pre-approved permissions for common commands
