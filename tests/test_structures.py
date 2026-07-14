@@ -21,23 +21,9 @@ from pysdmx.model.map import (
 )
 from typeguard import TypeCheckError
 
-# Import tidysdmx functions
+# Public builders come from the package; the private helpers are imported from
+# their defining submodules (the package __all__ no longer re-exports them).
 from tidysdmx.structures import (
-    _collect_mapping_rules_errors,
-    _collect_required_sheet_errors,
-    _extract_all_artefact_ids,
-    _extract_mapping_rule,
-    _extract_metadata_from_info_sheet,
-    _extract_multi_representation_map,
-    _extract_representation_map,
-    _infer_sdmx_type,
-    _is_missing_token,
-    _match_column_name,
-    _parse_comp_mapping_sheet,
-    _parse_info_sheet,
-    _parse_rep_mapping_sheet,
-    _resolve_representation_ref,
-    _validate_mapping_template_wb,
     build_date_pattern_map,
     build_fixed_map,
     build_implicit_component_map,
@@ -52,8 +38,37 @@ from tidysdmx.structures import (
     create_schema_from_table,
     gen_urn,
 )
-from tidysdmx.structures.template import _cell_str, _unique_map_id
+from tidysdmx.structures.map_builders import _resolve_representation_ref
+from tidysdmx.structures.schema_from_table import _infer_sdmx_type
+from tidysdmx.structures.template import (
+    _cell_str,
+    _collect_mapping_rules_errors,
+    _collect_required_sheet_errors,
+    _extract_all_artefact_ids,
+    _extract_mapping_rule,
+    _extract_metadata_from_info_sheet,
+    _extract_multi_representation_map,
+    _extract_representation_map,
+    _is_missing_token,
+    _match_column_name,
+    _parse_comp_mapping_sheet,
+    _parse_info_sheet,
+    _parse_rep_mapping_sheet,
+    _unique_map_id,
+    _validate_mapping_template_wb,
+)
 from tidysdmx.utils import parse_mapping_template_wb
+
+
+def test_structures_star_import_exposes_no_private_names():
+    """`from tidysdmx.structures import *` must not leak private helpers."""
+    namespace: dict[str, object] = {}
+    exec("from tidysdmx.structures import *", namespace)
+    leaked = [
+        name for name in namespace if name.startswith("_") and not name.startswith("__")
+    ]
+    assert leaked == []
+
 
 # region fixtures
 
@@ -1522,23 +1537,30 @@ class TestBuildSchemaFromWbTemplate:
         assert result.iloc[0]["Key"] == "Valid_Key"
         assert result.iloc[0]["Value"] == "Valid_Value"
 
-    def test_parse_info_sheet_ignore_rows_with_wrong_count(self):
-        """Test that rows with 1 item or more than 2 items are excluded."""
+    def test_parse_info_sheet_normalizes_rows_to_key_value(self):
+        """Rows are normalised to (Key, Value); extra trailing cells are ignored.
+
+        Regression for TPL-02: a row with a third non-empty cell (e.g. a
+        comment) must keep its Key/Value rather than being dropped, which would
+        silently lose agency/version metadata.
+        """
         df = pd.DataFrame(
             [
-                ["OnlyOne"],  # 1 valid cell -> Keep
-                ["Key", "Value", "Extra"],  # 3 valid cells -> Ignore
-                # [None, None, "SingleValid"],  # 1 valid cell post-nan -> Ignore
-                ["Key2", "Value2", None],  # 2 valid cells -> Keep
+                ["OnlyOne"],  # lone key -> padded with empty value
+                ["Key", "Value", "Extra"],  # extra cell -> first two kept
+                ["Key2", "Value2", None],  # 2 valid cells -> kept
             ]
         )
         sheets = {"INFO": df}
         result = _parse_info_sheet(sheets)
 
-        assert len(result) == 2
+        assert len(result) == 3
         assert result.iloc[0]["Key"] == "OnlyOne"
-        assert result.iloc[1]["Key"] == "Key2"
-        assert result.iloc[1]["Value"] == "Value2"
+        assert result.iloc[0]["Value"] == ""
+        assert result.iloc[1]["Key"] == "Key"
+        assert result.iloc[1]["Value"] == "Value"
+        assert result.iloc[2]["Key"] == "Key2"
+        assert result.iloc[2]["Value"] == "Value2"
 
     def test_parse_info_sheet_empty_input(self):
         """Test parsing an empty DataFrame yields empty result with correct columns."""
@@ -2681,7 +2703,7 @@ class TestExtractRepresentationMap:
 
     @pytest.fixture
     def sample_rep_data(self):
-        """Provides valid source and target DataFrames for tests."""
+        """Provides source and target DataFrames with one-sided rows (TPL-03)."""
         source_df = pd.DataFrame(
             {"src_col": ["A", "B", None, "C"], "extra": [1, 2, 3, 4]}
         )
@@ -2690,11 +2712,42 @@ class TestExtractRepresentationMap:
         )
         return {"source": source_df, "target": target_df}
 
-    def test_valid_mapping(self, sample_rep_data):
-        """Tests valid mapping returns correct DataFrame with dups and NA removed."""
-        result_df = _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
-        expected = pd.DataFrame({"source": ["A", "B"], "target": ["X", "Y"]})
-        pd.testing.assert_frame_equal(result_df, expected)
+    def test_valid_mapping(self):
+        """Aligned pairs return a two-column DataFrame with duplicates removed."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A", "B", "A"]}),
+            "target": pd.DataFrame({"tgt_col": ["X", "Y", "X"]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        expected = pd.DataFrame(
+            {"source": ["A", "B"], "target": ["X", "Y"]}, dtype="string"
+        )
+        pd.testing.assert_frame_equal(result_df.reset_index(drop=True), expected)
+
+    def test_one_sided_rows_raise(self, sample_rep_data):
+        """A one-sided row (source XOR target) raises rather than dropping (TPL-03)."""
+        with pytest.raises(ValueError, match="one-sided rows"):
+            _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
+
+    def test_surrounding_whitespace_is_stripped(self):
+        """Leading/trailing whitespace is trimmed so ' FR ' == 'FR' (TPL-04)."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": [" FR ", "FR"]}),
+            "target": pd.DataFrame({"tgt_col": ["FRA", " FRA "]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 1
+        assert result_df.iloc[0]["source"] == "FR"
+        assert result_df.iloc[0]["target"] == "FRA"
+
+    def test_blank_rows_on_both_sides_are_dropped(self):
+        """Rows blank on both sides are spacer rows and are dropped, not raised."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A", None, "B"]}),
+            "target": pd.DataFrame({"tgt_col": ["X", None, "Y"]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 2
 
     @pytest.mark.skip(reason="Not sure this is expected behavior")
     def test_raises_value_error_on_missing_rep_data(self):

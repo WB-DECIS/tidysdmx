@@ -1,15 +1,9 @@
 """Build SDMX structure artefacts (StructureMap, ValueMap, Codelist, etc.)."""
 
 from ._ids import (
-    _ID_PATTERN,
-    _code_id,
-    _to_identifier,
     sanitize_variable,
 )
 from .map_builders import (
-    _parse_validity_date,
-    _resolve_representation_ref,
-    _validate_string_columns,
     build_date_pattern_map,
     build_fixed_map,
     build_implicit_component_map,
@@ -25,29 +19,10 @@ from .map_builders import (
 )
 from .schema_from_table import (
     SchemaComponents,
-    _create_attribute_component,
-    _create_codelist_for_component,
-    _create_dimension_component,
-    _infer_sdmx_type,
-    _mk_concept_helper,
     create_schema_from_table,
 )
 from .template import (
-    _MISSING_RULE_TOKENS,
     STRUCTURE_TYPE_TO_ARTEFACT,
-    _collect_mapping_rules_errors,
-    _collect_required_sheet_errors,
-    _extract_all_artefact_ids,
-    _extract_mapping_rule,
-    _extract_metadata_from_info_sheet,
-    _extract_multi_representation_map,
-    _extract_representation_map,
-    _is_missing_token,
-    _match_column_name,
-    _parse_comp_mapping_sheet,
-    _parse_info_sheet,
-    _parse_rep_mapping_sheet,
-    _validate_mapping_template_wb,
     build_structure_map_from_template_wb,
 )
 from .urn import (
@@ -55,35 +30,14 @@ from .urn import (
     gen_urn,
 )
 
+# Only the public surface is advertised via ``__all__`` (so ``from
+# tidysdmx.structures import *`` does not leak the ``_``-prefixed helpers).
+# The private helpers remain importable by their explicit name for tests and
+# internal callers; import them from their defining submodule where practical.
 __all__ = [
     "SDMX_PACKAGE_MAP",
     "STRUCTURE_TYPE_TO_ARTEFACT",
-    "_ID_PATTERN",
-    "_MISSING_RULE_TOKENS",
     "SchemaComponents",
-    "_code_id",
-    "_collect_mapping_rules_errors",
-    "_collect_required_sheet_errors",
-    "_create_attribute_component",
-    "_create_codelist_for_component",
-    "_create_dimension_component",
-    "_extract_all_artefact_ids",
-    "_extract_mapping_rule",
-    "_extract_metadata_from_info_sheet",
-    "_extract_multi_representation_map",
-    "_extract_representation_map",
-    "_infer_sdmx_type",
-    "_is_missing_token",
-    "_match_column_name",
-    "_mk_concept_helper",
-    "_parse_comp_mapping_sheet",
-    "_parse_info_sheet",
-    "_parse_rep_mapping_sheet",
-    "_parse_validity_date",
-    "_resolve_representation_ref",
-    "_to_identifier",
-    "_validate_mapping_template_wb",
-    "_validate_string_columns",
     "build_date_pattern_map",
     "build_fixed_map",
     "build_implicit_component_map",
