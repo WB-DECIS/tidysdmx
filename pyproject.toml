@@ -23,6 +23,8 @@ packages = [{ include = "tidysdmx", from = "src" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
@@ -31,20 +33,20 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.11.9"
-pysdmx = "^1.13.0"
+pysdmx = "^1.17.0"
 pandas = "^2.2.3"
 numpy = ">=1.26"
 typeguard = "^4.4.4"
 openpyxl = "^3.1.5"
+# Security floor for the transitive idna dependency (CVE fixed in 3.15);
+# tidysdmx does not import idna directly.
+idna = ">=3.15"
 
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 pytest-cov = "^6.1.1"
 python-semantic-release = {version = "^10.2.0", python = ">=3.11.9"}
-myst-nb = "^1.3.0"
-sphinx-autoapi = "^3.6.1"
-sphinx-rtd-theme = "^3.0.2"
 jupyterlab = "^4.4.10"
 ipykernel = "^7.1.0"
 ipython = "^9.6.0"
@@ -120,17 +122,25 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "unit: fast, isolated unit tests (no network)",
-    "integration: tests that hit FMR or external services",
+    "unit: fast, isolated unit tests (no live network)",
+    "integration: opens a live network connection (e.g. live FMR). Cassette-backed tests are NOT integration; they replay committed fixtures and run in the default lane.",
 ]
 addopts = "--strict-markers"
+# Turn every warning into an error so third-party deprecations and any new,
+# un-asserted warning fail loudly. The one exception is tidysdmx's own
+# deprecation notices, which legacy-behaviour tests emit by design; the
+# deprecation *contract* is still asserted explicitly in test_deprecation.py.
+filterwarnings = [
+    "error",
+    "ignore:.* is deprecated and will be removed.*:FutureWarning",
+]
 
 [tool.coverage.run]
 source = ["src/tidysdmx"]
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-fail_under = 70
+fail_under = 88
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

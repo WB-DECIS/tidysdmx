@@ -5,15 +5,22 @@ import logging
 import pandas as pd
 from typeguard import typechecked
 
+from ._deprecation import deprecated
+
 logger = logging.getLogger(__name__)
 
 
+@deprecated()
 @typechecked
 def qa_coerce_numeric(
     df: pd.DataFrame,
     numeric_columns: list[str],
 ) -> pd.DataFrame:
     """Coerce specified columns to numeric, removing rows with invalid values.
+
+    .. deprecated::
+        This QA helper is part of the retiring standardisation pipeline and
+        will be removed in a future release.
 
     Args:
         df: The input DataFrame.

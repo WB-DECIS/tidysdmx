@@ -17,7 +17,7 @@ without reinventing validation.
 from collections.abc import Sequence
 from typing import Literal
 
-from pysdmx.model.__base import Agency
+from pysdmx.model import Agency
 from pysdmx.model.category import Category, CategoryScheme
 from pysdmx.model.code import Code, Codelist, HierarchicalCode, Hierarchy
 from pysdmx.model.concept import Concept, ConceptScheme
@@ -48,6 +48,7 @@ def build_codelist(
     version: str = "1.0",
     description: str | None = None,
     sdmx_type: Literal["codelist", "valuelist"] = "codelist",
+    urn: str | None = None,
 ) -> Codelist:
     """Build a validated :class:`Codelist`.
 
@@ -59,6 +60,7 @@ def build_codelist(
         version: Codelist version. Defaults to ``"1.0"``.
         description: Optional description.
         sdmx_type: Either ``"codelist"`` (default) or ``"valuelist"``.
+        urn: Optional full SDMX URN; when omitted pysdmx derives the short URN.
 
     Returns:
         A publish-ready :class:`Codelist`.
@@ -75,6 +77,7 @@ def build_codelist(
         description=description,
         items=tuple(codes),
         sdmx_type=sdmx_type,
+        urn=urn,
     )
     raise_if_invalid(cl)
     return cl
@@ -88,6 +91,7 @@ def build_concept_scheme(
     concepts: Sequence[Concept] = (),
     version: str = "1.0",
     description: str | None = None,
+    urn: str | None = None,
 ) -> ConceptScheme:
     """Build a validated :class:`ConceptScheme`.
 
@@ -98,6 +102,7 @@ def build_concept_scheme(
         concepts: The concepts to include. Must be non-empty.
         version: ConceptScheme version. Defaults to ``"1.0"``.
         description: Optional description.
+        urn: Optional full SDMX URN; when omitted pysdmx derives the short URN.
 
     Returns:
         A publish-ready :class:`ConceptScheme`.
@@ -113,6 +118,7 @@ def build_concept_scheme(
         version=version,
         description=description,
         items=tuple(concepts),
+        urn=urn,
     )
     raise_if_invalid(cs)
     return cs
@@ -247,6 +253,7 @@ def build_data_structure_definition(
     components: Sequence[Component] | Components,
     version: str = "1.0",
     description: str | None = None,
+    urn: str | None = None,
 ) -> DataStructureDefinition:
     """Build a validated :class:`DataStructureDefinition`.
 
@@ -261,6 +268,7 @@ def build_data_structure_definition(
             sequence of :class:`Component` instances.
         version: DSD version. Defaults to ``"1.0"``.
         description: Optional description.
+        urn: Optional full SDMX URN; when omitted pysdmx derives the short URN.
 
     Returns:
         A publish-ready :class:`DataStructureDefinition`.
@@ -281,6 +289,7 @@ def build_data_structure_definition(
         version=version,
         description=description,
         components=comps,
+        urn=urn,
     )
     raise_if_invalid(dsd)
     return dsd
@@ -335,6 +344,7 @@ def build_representation_map(
     maps: Sequence[ValueMap] = (),
     version: str = "1.0",
     description: str | None = None,
+    urn: str | None = None,
 ) -> RepresentationMap:
     """Build a validated :class:`RepresentationMap` from values.
 
@@ -352,6 +362,7 @@ def build_representation_map(
         maps: The individual value mappings. Must be non-empty.
         version: RepresentationMap version. Defaults to ``"1.0"``.
         description: Optional description.
+        urn: Optional full SDMX URN; when omitted pysdmx derives the short URN.
 
     Returns:
         A publish-ready :class:`RepresentationMap`.
@@ -369,6 +380,7 @@ def build_representation_map(
         source=source,
         target=target,
         maps=list(maps),
+        urn=urn,
     )
     raise_if_invalid(rm)
     return rm
@@ -384,6 +396,7 @@ def build_multi_representation_map(
     maps: Sequence[MultiValueMap] = (),
     version: str = "1.0",
     description: str | None = None,
+    urn: str | None = None,
 ) -> MultiRepresentationMap:
     """Build a validated :class:`MultiRepresentationMap` from values.
 
@@ -396,6 +409,7 @@ def build_multi_representation_map(
         maps: The individual multi-value mappings. Must be non-empty.
         version: MultiRepresentationMap version. Defaults to ``"1.0"``.
         description: Optional description.
+        urn: Optional full SDMX URN; when omitted pysdmx derives the short URN.
 
     Returns:
         A publish-ready :class:`MultiRepresentationMap`.
@@ -413,6 +427,7 @@ def build_multi_representation_map(
         source=list(source),
         target=list(target),
         maps=list(maps),
+        urn=urn,
     )
     raise_if_invalid(mrm)
     return mrm

@@ -26,7 +26,13 @@ from pysdmx.model.category import CategoryScheme
 from pysdmx.model.code import Codelist, Hierarchy
 from pysdmx.model.concept import ConceptScheme
 from pysdmx.model.dataflow import Dataflow, DataStructureDefinition, Role
-from pysdmx.model.map import MultiRepresentationMap, RepresentationMap
+from pysdmx.model.map import (
+    ComponentMap,
+    MultiComponentMap,
+    MultiRepresentationMap,
+    RepresentationMap,
+    StructureMap,
+)
 from pysdmx.model.organisation import AgencyScheme
 from typeguard import typechecked
 
@@ -121,7 +127,25 @@ def _items_rule(rule_id: str, a: ItemScheme, label: str) -> list[ValidationIssue
 
 
 def _check_codelist(a: Codelist) -> list[ValidationIssue]:
-    return _items_rule("C001", a, "Codelist")
+    issues = _items_rule("C001", a, "Codelist")
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in a.items or ():
+        if item.id in seen and item.id not in duplicates:
+            duplicates.append(item.id)
+        seen.add(item.id)
+    if duplicates:
+        issues.append(
+            _issue(
+                "C002",
+                a,
+                "Codelist has duplicate code IDs: "
+                + ", ".join(repr(d) for d in duplicates)
+                + ". Every code ID must be unique.",
+                "items",
+            )
+        )
+    return issues
 
 
 def _check_concept_scheme(a: ConceptScheme) -> list[ValidationIssue]:
@@ -149,7 +173,10 @@ def _check_hierarchy(a: Hierarchy) -> list[ValidationIssue]:
     return []
 
 
-def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
+def _check_rep_map_fields(
+    a: RepresentationMap | MultiRepresentationMap,
+) -> list[ValidationIssue]:
+    """Shared R001/R002/R003 checks for (multi) representation maps."""
     issues: list[ValidationIssue] = []
     if not a.source:
         issues.append(_issue("R001", a, "source must be populated.", "source"))
@@ -165,26 +192,16 @@ def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
             )
         )
     return issues
+
+
+def _check_representation_map(a: RepresentationMap) -> list[ValidationIssue]:
+    return _check_rep_map_fields(a)
 
 
 def _check_multi_representation_map(
     a: MultiRepresentationMap,
 ) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if not a.source:
-        issues.append(_issue("R001", a, "source must be populated.", "source"))
-    if not a.target:
-        issues.append(_issue("R002", a, "target must be populated.", "target"))
-    if not a.maps:
-        issues.append(
-            _issue(
-                "R003",
-                a,
-                "maps must contain at least one value mapping.",
-                "maps",
-            )
-        )
-    return issues
+    return _check_rep_map_fields(a)
 
 
 def _check_dsd(a: DataStructureDefinition) -> list[ValidationIssue]:
@@ -227,6 +244,46 @@ def _check_dataflow(a: Dataflow) -> list[ValidationIssue]:
     return []
 
 
+def _check_structure_map(a: StructureMap) -> list[ValidationIssue]:
+    """Check that a StructureMap is ready to be published.
+
+    Validates that source and target URNs are populated, and that any
+    embedded RepresentationMaps are fully publish-ready. Embedded maps are run
+    through the same common checks (id/version/name) as top-level artefacts
+    because ``collect_structure_map_artifacts`` extracts them for upload as
+    standalone artefacts, and FMR requires those fields on every one.
+
+    Args:
+        a: The StructureMap to check.
+
+    Returns:
+        A list of ValidationIssue instances (empty if valid).
+    """
+    issues: list[ValidationIssue] = []
+    if not a.source:
+        issues.append(_issue("SM001", a, "source must be populated.", "source"))
+    if not a.target:
+        issues.append(_issue("SM002", a, "target must be populated.", "target"))
+    for i, rule in enumerate(a.maps):
+        if not isinstance(rule, (ComponentMap, MultiComponentMap)):
+            continue
+        values = rule.values
+        if isinstance(values, str):
+            issues.append(
+                _issue(
+                    "SM003",
+                    a,
+                    f"map[{i}] references an unresolved RepresentationMap URN "
+                    f"'{values}'; embed the object instead.",
+                    "maps",
+                )
+            )
+        elif isinstance(values, (RepresentationMap, MultiRepresentationMap)):
+            issues.extend(_check_common(values))
+            issues.extend(_check_rep_map_fields(values))
+    return issues
+
+
 _SPECIFIC: dict[
     type[MaintainableArtefact],
     Callable[[Any], list[ValidationIssue]],
@@ -240,6 +297,7 @@ _SPECIFIC: dict[
     MultiRepresentationMap: _check_multi_representation_map,
     DataStructureDefinition: _check_dsd,
     Dataflow: _check_dataflow,
+    StructureMap: _check_structure_map,
 }
 
 
@@ -258,7 +316,12 @@ def validate(artefact: MaintainableArtefact) -> list[ValidationIssue]:
         artefact is publish-ready).
     """
     issues = _check_common(artefact)
-    checker = _SPECIFIC.get(type(artefact))
+    # Walk the MRO so subclasses of a registered type reuse its checker
+    # (``_SPECIFIC.get(type(artefact))`` would only match the exact class).
+    checker = next(
+        (fn for t in type(artefact).__mro__ if (fn := _SPECIFIC.get(t)) is not None),
+        None,
+    )
     if checker is not None:
         issues.extend(checker(artefact))
     return issues

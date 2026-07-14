@@ -1,105 +1,56 @@
 # tests/fixtures/fxtr_structures.py
-import pickle as pkl
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 import pytest
 
-# Directory for cached responses
-CACHE_DIR = Path(__file__).parent / "data/structures"
-CACHE_DIR.mkdir(exist_ok=True)
 
-
-@pytest.fixture(scope="session")
+@pytest.fixture
 def value_map_df_mandatory_cols():
-    """Return a session-scoped DataFrame with 'source' and 'target' columns.
+    """Return a DataFrame with 'source' and 'target' columns.
 
-    Caches the data to CSV on first run and reloads it on subsequent runs.
+    Function-scoped and rebuilt from its inline definition on every use so
+    tests never share (or accidentally mutate) a single instance, and so the
+    inputs can never be silently shadowed by a stale on-disk cache.
     """
-    cache_file = CACHE_DIR / "value_map_df_mandatory_cols.csv"
-
-    if cache_file.exists():
-        # Load cached response
-        df = pd.read_csv(cache_file)
-        assert {"source", "target"}.issubset(df.columns)
-
-    else:
-        df = pd.DataFrame(
-            {"source": ["regex:^A", "UY", "FR"], "target": ["ARG", "URY", "FRA"]}
-        )
-
-        # Cache as CSV
-        df.to_csv(cache_file, index=False)
-
-    return df
+    return pd.DataFrame(
+        {"source": ["regex:^A", "UY", "FR"], "target": ["ARG", "URY", "FRA"]}
+    )
 
 
-@pytest.fixture(scope="session")
-def multi_value_map_df():
-    """Return a session-scoped DataFrame for build_multi_value_map_list tests.
+@pytest.fixture
+def template_workbook_factory(tmp_path) -> Callable[..., Path]:
+    """Return a factory that writes an Excel mapping template to ``tmp_path``.
 
-    Covers:
-        - Normal case with multiple source columns and single target column.
-        - Edge case with regex pattern in source.
-        - Missing validity dates.
-        - Validity dates present.
-        - Empty strings in source.
-        - Mixed valid and invalid rows for type checking.
+    The factory takes a mapping of sheet name to rows (each row a sequence of
+    cell values; the first row is the header) and returns the path to a real
+    ``.xlsx`` file. Using a real workbook — rather than passing hand-built
+    object-dtype DataFrames straight to the builder — exercises
+    :func:`tidysdmx.utils.parse_mapping_template_wb`, so Excel-specific
+    behaviour (empty cells, ``dtype="string"`` coercion, ``"NA"`` handling,
+    numeric cells) is covered end to end.
 
-    Caches the data to CSV on first run and reloads it on subsequent runs.
+    Example:
+        >>> path = template_workbook_factory({
+        ...     "INFO": [["Key", "Value"], ["dataflow", "AG:DF(1.0)"]],
+        ...     "COMP_MAPPING": [["SOURCE", "TARGET", "MAPPING_RULES"],
+        ...                      ["S1", "T1", "implicit"]],
+        ... })
     """
-    cache_file = CACHE_DIR / "multi_value_map_df.pkl"
+    counter = {"n": 0}
 
-    if cache_file.exists():
-        # Load cached DataFrame with preserved types
-        with open(cache_file, "rb") as f:
-            df = pkl.load(f)
-        expected_cols = {"country", "currency", "iso_code", "valid_from", "valid_to"}
-        assert expected_cols.issubset(df.columns)
+    def _make(sheets: dict[str, Sequence[Sequence[object]]]) -> Path:
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        for sheet_name, rows in sheets.items():
+            ws = wb.create_sheet(title=sheet_name)
+            for row in rows:
+                ws.append(list(row))
+        counter["n"] += 1
+        path = tmp_path / f"template_{counter['n']}.xlsx"
+        wb.save(path)
+        return path
 
-    else:
-        df = pd.DataFrame(
-            {
-                "country": [
-                    "DE",  # Normal case
-                    "regex:^A",  # Regex pattern
-                    "",  # Empty string
-                    "FR",  # Normal case with validity
-                    123,  # Invalid type for edge case
-                ],
-                "currency": [
-                    "LC",  # Normal case
-                    "LC",  # Regex case
-                    "LC",  # Empty source case
-                    "LC",  # Validity case
-                    "LC",  # Invalid type case
-                ],
-                "iso_code": [
-                    "EUR",  # Normal target
-                    "ARG",  # Regex target
-                    "CHF",  # Empty source case
-                    "FRA",  # Validity case
-                    "CHF",  # Invalid type case
-                ],
-                "valid_from": [
-                    None,  # No validity
-                    None,  # No validity
-                    None,  # No validity
-                    "2020-01-01",  # Validity start
-                    None,  # Invalid type row
-                ],
-                "valid_to": [
-                    None,  # No validity
-                    None,  # No validity
-                    None,  # No validity
-                    "2025-12-31",  # Validity end
-                    None,  # Invalid type row
-                ],
-            }
-        )
-
-        # Cache using pickle
-        with open(cache_file, "wb") as f:
-            pkl.dump(df, f)
-
-    return df
+    return _make

@@ -4,6 +4,7 @@ import pickle as pkl
 from pathlib import Path
 
 import pytest
+from fixtures.cassette_utils import FMR_TEST_URL, load_pickle_cassette
 from pysdmx.api import fmr
 from pysdmx.model import (
     Code,
@@ -26,7 +27,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 def api_params_schema():
     """Fixture for API parameters."""
     return {
-        "fmr_url": "https://fmrqa.worldbank.org/FMR/sdmx/v2",
+        "fmr_url": FMR_TEST_URL,
         "raw_structure_agency": "WB",
         "raw_structure_id": "IFPRI_ASTI",
         "raw_structure_version": "1.0",
@@ -45,13 +46,13 @@ def ifpri_asti_schema(api_params_schema):
     """
     cache_file = CACHE_DIR / "ifpri_asti_schema.pkl"
 
-    if cache_file.exists():
-        with open(cache_file, "rb") as f:
-            schema = pkl.load(f)
-        assert isinstance(schema, Schema)
-        return schema
+    cached = load_pickle_cassette(
+        cache_file, Schema, "python -m tests.fixtures.fxtr_schemas"
+    )
+    if cached is not None:
+        return cached
 
-    # Cassette missing — try live FMR, skip on failure
+    # Local dev only — try live FMR, skip on failure.
     try:
         client = fmr.RegistryClient(api_params_schema["fmr_url"])
         schema = client.get_schema(
@@ -118,8 +119,7 @@ if __name__ == "__main__":
     Run from repo root:
         python -m tests.fixtures.fxtr_schemas
     """
-    base_url = "https://fmrqa.worldbank.org/FMR/sdmx/v2"
-    client = fmr.RegistryClient(base_url)
+    client = fmr.RegistryClient(FMR_TEST_URL)
 
     cassettes = {
         "ifpri_asti_schema.pkl": {

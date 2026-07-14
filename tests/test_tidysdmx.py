@@ -10,8 +10,9 @@ from typeguard import TypeCheckError
 
 from tidysdmx.tidysdmx import (
     _add_sdmx_reference_cols,
+    _create_keys_dict,
     _extract_artefact_type,
-    create_keys_dict,
+    fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
     standardize_indicator_id,
@@ -91,15 +92,51 @@ class TestParseArtefactId:
             )
 
     def test_parse_artefact_id_extra_colon(self):
-        # Test with an extra colon in the artefact ID
-        artefact_id = "WB:WDI:Extra(1.0)"
-        try:
-            parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
+        # An extra colon is retained in the id part.
+        assert parse_artefact_id("WB:WDI:Extra(1.0)") == ("WB", "WDI:Extra", "1.0")
+
+    def test_parse_artefact_id_unclosed_parenthesis_raises(self):
+        """A missing closing parenthesis must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0")
+
+    def test_parse_artefact_id_trailing_chars_raises(self):
+        """Characters after the closing parenthesis must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0)x")
+
+    def test_parse_artefact_id_extra_parentheses_raises(self):
+        """Trailing parentheses after the version must be rejected (BUG-09)."""
+        with pytest.raises(ValueError, match="Invalid artefact_id format"):
+            parse_artefact_id("WB:WDI(1.0)))")
+
+
+class TestFetchSchema:
+    def test_fetch_schema_parses_id_and_forwards_to_client(self, monkeypatch):
+        """fetch_schema parses the artefact id and forwards it to the FMR client."""
+        schema = Schema(
+            context="datastructure",
+            agency="WB",
+            id="WDI",
+            components=Components([]),
+        )
+        captured = {}
+
+        class FakeClient:
+            def __init__(self, base_url, format=None):
+                captured["base_url"] = base_url
+
+            def get_schema(self, context, agency, id_part, version):
+                captured["args"] = (context, agency, id_part, version)
+                return schema
+
+        monkeypatch.setattr("tidysdmx.tidysdmx.fmr.RegistryClient", FakeClient)
+
+        result = fetch_schema("https://fmr.example.org", "WB:WDI(1.0)", "datastructure")
+
+        assert result is schema
+        assert captured["args"] == ("datastructure", "WB", "WDI", "1.0")
+        assert captured["base_url"].endswith("/FMR/sdmx/v2/")
 
 
 class TestStandardizeIndicatorId:
@@ -140,7 +177,7 @@ class TestStandardizeIndicatorId:
                 "INDICATOR": ["indicator.one", "indicator.two", "indicator.three"],
             }
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Expected exactly 1 unique value"):
             standardize_indicator_id(df)
 
     def test_standardize_indicator_id_missing_id_column(self):
@@ -419,22 +456,22 @@ class TestCreateKeysDict:
             "file2": "file2.json",
             "file3": "file3.txt",
         }
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_no_extension(self):
         input_dict = {"file1": "data1", "file2": "data2"}
         expected_output = {"file1": "file1", "file2": "file2"}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_mixed_keys(self):
         input_dict = {"file1.csv": "data1", "file2": "data2", "file3.txt": "data3"}
         expected_output = {"file1": "file1.csv", "file2": "file2", "file3": "file3.txt"}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_empty_dict(self):
         input_dict = {}
         expected_output = {}
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
     def test_multiple_periods(self):
         input_dict = {
@@ -445,7 +482,7 @@ class TestCreateKeysDict:
             "file.with.periods": "file.with.periods.csv",
             "another.file.with.periods": "another.file.with.periods.json",
         }
-        assert create_keys_dict(input_dict) == expected_output
+        assert _create_keys_dict(input_dict) == expected_output
 
 
 class TestTransformSourceToTarget:
@@ -593,7 +630,7 @@ class TestExtractArtefactType:
             [],
             generated=datetime.now(UTC),
         )
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Invalid schema context") as exc_info:
             _extract_artefact_type(schema)
         assert "Invalid schema context" in str(exc_info.value)
 
@@ -609,7 +646,7 @@ class TestExtractArtefactType:
             [],
             generated=datetime.now(UTC),
         )
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Invalid schema context") as exc_info:
             _extract_artefact_type(schema)
         message = str(exc_info.value)
         assert "dataflow" in message
@@ -629,23 +666,21 @@ class TestAddSdmxReferenceCols:
     """
 
     @pytest.mark.parametrize(
-        "artefact_type,expected_cols",
-        [
-            ("dataflow", ["OBS_VALUE", "DATAFLOW", "DATAFLOW_ID", "ACTION"]),
-            ("datastructure", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            (
-                "provisionagreement",
-                ["OBS_VALUE", "PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
-            ),
-        ],
+        "artefact_type",
+        ["dataflow", "datastructure", "provisionagreement"],
     )
-    def test_add_columns_for_valid_types(self, artefact_type, expected_cols):
-        """Tests that correct columns are added for each valid artefact_type."""
+    def test_add_columns_for_valid_types(self, artefact_type):
+        """SDMX-CSV 2.0 STRUCTURE columns are added for every artefact_type.
+
+        The STRUCTURE column carries the artefact *type* and STRUCTURE_ID the
+        ID, for every context (BUG-11).
+        """
+        expected_cols = ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]
         df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         result = _add_sdmx_reference_cols(df, "TEST_ID", artefact_type, "I")
         assert list(result.columns) == expected_cols
-        assert all(result[expected_cols[1]] == artefact_type)
-        assert all(result[expected_cols[2]] == "TEST_ID")
+        assert all(result["STRUCTURE"] == artefact_type)
+        assert all(result["STRUCTURE_ID"] == "TEST_ID")
         assert all(result["ACTION"] == "I")
 
     @pytest.mark.parametrize("action", ["I", "U", "D"])
@@ -673,7 +708,6 @@ class TestAddSdmxReferenceCols:
             _add_sdmx_reference_cols(df, "ID123", "dataflow", "X")
 
 
-@pytest.mark.integration
 class TestStandardizeOutput:
     """Tests for the `standardize_output` function using real schema fixture."""
 
@@ -730,7 +764,9 @@ class TestStandardizeOutput:
 
     def test_empty_parameters_raise(self, ifpri_asti_schema, sample_df):
         """Tests that ValueError is raised when artefact_id is empty."""
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError, match=r"`artefact_id` and `schema` cannot be empty"
+        ):
             standardize_output(sample_df, artefact_id="", schema=ifpri_asti_schema)
 
     def test_action_default_is_insert(self, sample_df, ifpri_asti_schema):

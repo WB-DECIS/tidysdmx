@@ -69,6 +69,17 @@ class TestBuildCodelist:
         )
         assert cl.sdmx_type == "valuelist"
 
+    def test_build_codelist_sets_urn(self):
+        """build_codelist stores an explicitly supplied urn."""
+        cl = build_codelist(
+            id="CL",
+            agency="AG",
+            name="n",
+            codes=[Code(id="A")],
+            urn="urn:sdmx:org.sdmx.infomodel.codelist.Codelist=AG:CL(1.0)",
+        )
+        assert cl.urn == "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=AG:CL(1.0)"
+
 
 class TestBuildConceptScheme:
     def test_happy_path(self):

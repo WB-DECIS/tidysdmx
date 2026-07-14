@@ -41,9 +41,9 @@ The table below captures the philosophical gap at each stage of the workflow:
 │                                                                         │
 │  extract_validation_info()   — Schema → plain dict                      │
 │  extract_component_ids()     — Schema → list[str]                       │
-│  build_value_map_list()      — pd.DataFrame → list[ValueMap]            │
-│  build_representation_map()  — pd.DataFrame → RepresentationMap         │
-│  build_single_component_map()— pd.DataFrame + str → ComponentMap        │
+│  build_value_map_list()          — pd.DataFrame → list[ValueMap]        │
+│  build_representation_map_from_df()— pd.DataFrame → RepresentationMap    │
+│  build_single_component_map()    — pd.DataFrame + str → ComponentMap     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                          pysdmx                                         │
 │                                                                         │
@@ -257,7 +257,7 @@ Analyst input (tabular)          →   pysdmx object
 (source, target, pattern, freq)  →   DatePatternMap
 (source: str, target: str)       →   ValueMap
 pd.DataFrame[source, target, ...]→   list[ValueMap]         (via build_value_map_list)
-pd.DataFrame + agency/id/...     →   RepresentationMap      (via build_representation_map)
+pd.DataFrame + agency/id/...     →   RepresentationMap      (via build_representation_map_from_df)
 pd.DataFrame + source/target_comp→   ComponentMap           (via build_single_component_map)
 Workbook (openpyxl)              →   StructureMap           (via build_structure_map)
 dict[str, pd.DataFrame]          →   StructureMap           (via build_structure_map_from_template_wb)
@@ -269,12 +269,12 @@ This layer is intentionally thin. Each builder function validates its inputs, th
 
 ### 6. Schema Creation from Data
 
-`create_schema_from_table()` runs in the opposite direction: it produces a pysdmx `Schema` from a pandas DataFrame. It is used when no SDMX registry is available and a schema needs to be inferred from data alone.
+`create_schema_from_table()` runs in the opposite direction: it infers the components of an SDMX schema — returned as a `SchemaComponents` namedtuple bundling the `dsd`, `concept_scheme`, and `codelists` — from a pandas DataFrame. It is used when no SDMX registry is available and the structural artefacts need to be inferred from data alone.
 
 ```python
 from tidysdmx import create_schema_from_table
 
-schema = create_schema_from_table(
+schema_components = create_schema_from_table(
     dataframe=df,
     dimensions=["FREQ", "REF_AREA"],
     time_dimension="YEAR",         # mapped to standard TIME_PERIOD component
@@ -290,9 +290,9 @@ The function:
 2. Builds a `Codelist` from unique values in each dimension column
 3. Creates `Component` objects with the correct `Role` and `local_codes`
 4. Maps the `time_dimension` column to the standardised `TIME_PERIOD` concept (with `DataType.PERIOD`)
-5. Returns a `Schema` that is structurally identical to one fetched from a registry
+5. Returns a `SchemaComponents` namedtuple (`dsd`, `concept_scheme`, `codelists`) holding the inferred artefacts
 
-**Why this matters:** Once created, this schema can be passed to `validate_dataset_local()`, `standardize_output()`, or `filter_tidy_raw()` exactly like a registry-fetched schema. The analyst's workflow is identical regardless of whether the schema came from a registry or was inferred.
+**Why this matters:** You get the inferred DSD, concept scheme, and codelists as first-class pysdmx artefacts, ready to publish to a registry via the `build_*` builders — without writing a line of XML. Note that the returned bundle is *not* itself a pysdmx `Schema`: the schema-consuming helpers (`validate_dataset_local()`, `standardize_output()`, `filter_tidy_raw()`) require a pysdmx `Schema` instance — however it was obtained — so validating inferred structures against themselves is not yet a one-call round-trip.
 
 ---
 
@@ -363,6 +363,62 @@ There is no new pysdmx usage in the Kedro layer. It is purely an orchestration a
 
 ---
 
+### 10. FMR Publication Layer (`tidysdmx.fmr`)
+
+pysdmx's FMR clients are CRUD: `RegistryClient` reads, and the (experimental) `RegistryMaintenanceClient` uploads whatever it is given. The `tidysdmx.fmr` subpackage adds the workflow layer real pipelines need — change detection, automated versioning, and a dry-run-able upsert — and supersedes the notebook-only `RegistryMaintenanceClient` upload recipe.
+
+```
+tidysdmx/fmr/
+├── client.py      ← FmrClient: unified read/write facade
+│                    env-var credentials (TIDYSDMX_FMR_URL/_USER/_PASSWORD/_TOKEN),
+│                    registry-agnostic URLs (no hardcoded /FMR/ path — PYSDMX-04),
+│                    lazy write client, generic get_artefact() dispatch
+├── diff.py        ← compare_artefacts(existing, updated) → ArtefactDiff
+│                    typed ArtefactChange records classified by impact
+├── versioning.py  ← SDMX version algebra: parse/compare/bump/suggest_version
+│                    two-part "1.0" and semver "1.0.0"/"1.0.0-draft" schemes
+├── publish.py     ← plan_publication() → PublicationPlan → execute_plan()
+│                    CREATE / UPDATE-at-bumped-version / SKIP-unchanged
+└── report.py      ← pandas DataFrame views (the ONLY fmr module using pandas)
+```
+
+**Change impact taxonomy** — every detected change carries one of three impacts, which drive the version bump:
+
+| Impact | Meaning | Examples | Default bump |
+|---|---|---|---|
+| `BREAKING` | consumers can break | item/component removed, representation narrowed, reference changed | major |
+| `ADDITIVE` | new capability, consumers fine | item added, optional attribute added | minor |
+| `COSMETIC` | presentation only | names, descriptions, annotations, ordering | patch (minor on two-part) |
+
+Unknown fields and unregistered artefact types fall through to a generic field walk that classifies conservatively as breaking — new pysdmx model fields may therefore over-trigger major bumps until a specialized differ handles them (watch the pysdmx changelog).
+
+**Version policy** — `suggest_version(diff, current_version, policy)` auto-detects the version scheme from the registry's current version and never migrates schemes. `VersionPolicy` controls the impact→bump mapping, draft handling (`finalize` drops the `-draft` extension without a numeric bump), and `replace_non_final` (in-place republish of non-final versions; note two-part versions are never final per SDMX 3.0, so this disables bumping entirely on two-part registries).
+
+**Plan → execute flow** —
+
+```
+plan_publication(client, artefacts)          # read-only
+  1. order dependencies first (codelists → rep maps/hierarchies → DSDs
+     → dataflows/structure maps → PAs/categorisations)
+  2. per artefact: get_existing() → compare_artefacts() →
+     CREATE | UPDATE @ suggest_version() | SKIP
+  3. validate publish-readiness; detect version conflicts (registry
+     ahead of local baseline → blocking P002)
+  4. propagate bumps to intra-batch references (a Dataflow pointing at
+     a bumped DSD is rewritten and promoted from SKIP to UPDATE)
+print(plan.summary())                        # or plan_to_dataframe(plan)
+execute_plan(client, plan, dry_run=..., batch=...)
+  - blocking issues raise BEFORE any network call
+  - batch=True: one transactional FMR submission (default)
+  - batch=False: per-artefact, fail-fast, dependents never attempted
+```
+
+**Import boundary (extraction rule)** — `fmr` core modules import only pysdmx, the stdlib, typeguard, and each other; the single tidysdmx-internal import is `artefact_validation` (itself pysdmx-only). pandas is quarantined in `report.py`. This keeps the subpackage extractable into a standalone package if adoption outside tidysdmx warrants it.
+
+**Known limitations (v1)** — references *from* registry artefacts outside the submitted batch are not updated; the plan is trusted at execute time (the P002 pre-flight is the mitigation); `PublicationResult.submission` is reserved but always `None` until pysdmx's maintenance client stops discarding the FMR response (upstream candidate, together with an async maintenance client).
+
+---
+
 ## Key Design Decisions
 
 ### pysdmx objects as opaque handles
@@ -395,9 +451,10 @@ tidysdmx/
 │                     Owns the JSON mapping format (read_mapping, map_to_sdmx)
 │                     Wraps fmr.RegistryClient (fetch_schema)
 │
-├── structures.py   ← Translation layer: DataFrames → pysdmx objects
-│                     All build_*() functions live here
-│                     Also create_schema_from_table() (DataFrame → Schema)
+├── structures/     ← Translation layer: DataFrames → pysdmx objects (package)
+│                     All build_*() functions live here (map_builders.py,
+│                     template.py) and are re-exported from tidysdmx.structures
+│                     Also create_schema_from_table() (DataFrame → SchemaComponents)
 │
 ├── mapping.py      ← DataFrame-level application of pysdmx map objects
 │                     map_structures(), apply_fixed_value_maps(), etc.
@@ -416,6 +473,10 @@ tidysdmx/
 │
 ├── qa_utils.py     ← Data quality operations independent of SDMX
 │                     qa_coerce_numeric(), qa_remove_duplicates()
+│
+├── fmr/            ← FMR publication layer (see Functional Area 10)
+│                     FmrClient facade, artefact diffing, version bumping,
+│                     plan/execute upsert workflow, DataFrame reporting
 │
 └── kedro.py        ← Production/Kedro adapter layer
                       kd_* wrappers for partitioned dataset patterns

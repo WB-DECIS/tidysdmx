@@ -1,0 +1,23 @@
+# Dependency update automation.
+# Keeps runtime and dev dependencies patched (notably security fixes such as the
+# idna CVE floored in pyproject.toml) and keeps GitHub Actions pinned versions
+# current. See CI-04 in docs/reviews/2026-07-code-review.md.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Batch routine version bumps into one PR to reduce noise; security
+      # updates are still opened individually and promptly by Dependabot.
+      python-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

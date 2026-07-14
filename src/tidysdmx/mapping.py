@@ -60,6 +60,13 @@ def map_structures(
 
     Returns:
         Modified DataFrame with all mappings applied.
+
+    Raises:
+        NotImplementedError: If the StructureMap contains a ``DatePatternMap``.
+            Applying date-pattern rules is not yet supported by this engine;
+            build such maps with :func:`~tidysdmx.build_date_pattern_map` for
+            FMR upload, but convert the dates in a separate step for now.
+        TypeError: If the StructureMap contains an unrecognised map type.
     """
     fixed_value_maps = []
     implicit_maps = []
@@ -75,6 +82,13 @@ def map_structures(
             component_maps.append(m)
         elif isinstance(m, px.model.map.MultiComponentMap):
             multi_component_maps.append(m)
+        elif isinstance(m, px.model.map.DatePatternMap):
+            raise NotImplementedError(
+                "DatePatternMap rules are not yet supported by map_structures. "
+                f"Map for target '{m.target}' cannot be applied; convert the "
+                "date column separately, or drop the DatePatternMap from the "
+                "StructureMap before applying it."
+            )
         else:
             raise TypeError(f"Unknown map type: {type(m)}")
 
@@ -197,6 +211,12 @@ def apply_component_map(
 
     Returns:
         DataFrame with the target column added or overwritten.
+
+    Raises:
+        KeyError: If the source column is not present in ``df``.
+        ValueError: If a regex value map contains an invalid pattern.
+            Patterns are compiled eagerly, so this is raised even when
+            every value is already mapped by a literal value map.
     """
     result_df = df.copy()
 
@@ -219,16 +239,30 @@ def apply_component_map(
         (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
         key=lambda vm: _value_map_rank([vm.source]),
     )
+    # Compile each rule once and reuse it across every cell below. Compilation
+    # is deliberately eager: a malformed pattern fails fast and deterministically
+    # (as in apply_multi_component_map), instead of only when some value happens
+    # to fall through to regex matching.
+    compiled_regex_maps = []
+    for vm in regex_maps:
+        raw_pattern = vm.source.removeprefix("regex:")
+        try:
+            compiled_regex_maps.append((re.compile(raw_pattern), vm.target))
+        except re.error as exc:
+            raise ValueError(
+                f"Invalid regex pattern {vm.source!r} in representation map "
+                f"for '{source_col}' -> '{target_col}': {exc}"
+            ) from exc
 
     mapped = result_df[source_col].map(literal_mapping)
 
-    if regex_maps:
+    if compiled_regex_maps:
 
         def _regex_target(value: object) -> object:
-            for vm in regex_maps:
-                pattern = vm.source.removeprefix("regex:")
-                if re.fullmatch(pattern, str(value)):
-                    return vm.target
+            text = str(value)
+            for pattern, target in compiled_regex_maps:
+                if pattern.fullmatch(text):
+                    return target
             return None
 
         # Missing source values stay unmapped: str(NaN) is "nan", which a

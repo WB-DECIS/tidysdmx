@@ -64,9 +64,16 @@ def _get_codelist_violations(
     """
     violations: list[tuple[str, str]] = []
     for col, valid_ids in codelist_ids.items():
-        if col not in df.columns or len(violations) >= max_errors:
+        if len(violations) >= max_errors:
+            break
+        if col not in df.columns:
             continue
-        col_as_str = df[col].astype(str)
+        # Missing values are the missing-values check's job, not a codelist
+        # violation. Excluding them here keeps this consistent with filter_rows
+        # (tidy_raw.py) and avoids reporting a spurious 'nan'/'None' code
+        # (API-06).
+        non_missing = df[col].dropna()
+        col_as_str = non_missing.astype(str)
         valid_ids_set = {str(vid) for vid in valid_ids}
         invalid_values = col_as_str[~col_as_str.isin(valid_ids_set)].unique()
         for val in invalid_values:
@@ -98,11 +105,10 @@ def validate_dataset_local(
             :func:`~tidysdmx.utils.extract_validation_info`. This argument
             will be removed in a future release; pass ``schema`` directly
             instead.
-        sdmx_cols: SDMX reference columns expected in the dataset. When
-            omitted, the columns are inferred from the schema's context
-            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
-            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
-            datastructure schema).
+        sdmx_cols: SDMX-CSV reference columns expected in the dataset. When
+            omitted, they default to ``['STRUCTURE', 'STRUCTURE_ID',
+            'ACTION']`` — the SDMX-CSV 2.0 reference columns used for every
+            schema context.
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -293,8 +299,9 @@ def validate_duplicates(
     """
     duplicate_mask = df.duplicated(subset=dim_comp, keep=False)
     if duplicate_mask.any():
-        dup_keys = df.loc[duplicate_mask, dim_comp].drop_duplicates().head(max_errors)
-        total = df.loc[duplicate_mask, dim_comp].drop_duplicates().shape[0]
+        dedup = df.loc[duplicate_mask, dim_comp].drop_duplicates()
+        dup_keys = dedup.head(max_errors)
+        total = len(dedup)
         truncated = _truncation_note(len(dup_keys), total, max_errors)
         raise ValueError(
             f"Found {duplicate_mask.sum()} duplicate rows across {total} key "

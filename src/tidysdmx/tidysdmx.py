@@ -2,7 +2,7 @@
 
 import json
 import logging
-import warnings
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin
@@ -14,6 +14,7 @@ from pysdmx.io.format import StructureFormat
 from pysdmx.model import Schema
 from typeguard import typechecked
 
+from ._deprecation import deprecated
 from .qa_utils import qa_coerce_numeric, qa_remove_duplicates
 from .utils import extract_component_ids, sdmx_reference_cols_for
 
@@ -54,13 +55,7 @@ def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
     return {_remove_extension(key): key for key in input_dict}
 
 
-# Keep old names as aliases for backwards compatibility with existing tests.
-check_dict_keys = _check_dict_keys
-remove_extension = _remove_extension
-modify_dict_keys = _modify_dict_keys
-create_keys_dict = _create_keys_dict
-
-
+@deprecated(replacement="fetch_schema")
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
 
@@ -79,13 +74,6 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     Raises:
         ValueError: If the URL is not syntactically valid.
     """
-    warnings.warn(
-        "fetch_dsd_schema is deprecated and will be removed in a future release. "
-        "Please use fetch_schema instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     structure_format = StructureFormat.FUSION_JSON
     fmr_url = fmr_params[env]["url"]
     base_url = urljoin(fmr_url, "/FMR/sdmx/v2/")
@@ -121,6 +109,7 @@ def fetch_schema(
     return client.get_schema(context, agency, id_part, version)
 
 
+@deprecated(replacement="parse_artefact_id")
 @typechecked
 def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
     """Parse a DSD identifier into its components.
@@ -137,13 +126,6 @@ def parse_dsd_id(dsd_id: str) -> tuple[str, str, str]:
     Raises:
         ValueError: If the dsd_id is not in the expected format.
     """
-    warnings.warn(
-        "parse_dsd_id is deprecated and will be removed in a future release. "
-        "Please use parse_artefact_id instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     return parse_artefact_id(dsd_id)
 
 
@@ -161,17 +143,18 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
     Raises:
         ValueError: If the artefact_id is not in the expected format.
     """
-    try:
-        agency, rest = artefact_id.split(":", 1)
-        id_part, version_part = rest.split("(", 1)
-        version = version_part.rstrip(")")
-        return agency, id_part, version
-    except (ValueError, AttributeError) as err:
+    match = re.fullmatch(
+        r"(?P<agency>[^:]+):(?P<id>[^(]+)\((?P<version>[^)]+)\)",
+        artefact_id,
+    )
+    if match is None:
         raise ValueError(
             "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-        ) from err
+        )
+    return match.group("agency"), match.group("id"), match.group("version")
 
 
+@deprecated(replacement="map_structures and standardize_output")
 @typechecked
 def standardize_sdmx(
     df: pd.DataFrame,
@@ -179,6 +162,11 @@ def standardize_sdmx(
     cat_indicator: bool = False,
 ) -> pd.DataFrame:
     """Standardize a DataFrame by applying column and value transformations.
+
+    .. deprecated::
+        The bespoke JSON-mapping pipeline is being retired. Use
+        :func:`map_structures` with a pysdmx ``StructureMap`` followed by
+        :func:`standardize_output` instead.
 
     Args:
         df: The input DataFrame with raw data.
@@ -191,20 +179,28 @@ def standardize_sdmx(
         The standardized DataFrame with columns transformed according to
         the mapping.
     """
-    df = transform_source_to_target(df, mapping)
-    df = map_to_sdmx(df, mapping)
-    df = standardize_data_for_upload(
+    # Call the undecorated (.__wrapped__) implementations so a single user call
+    # emits only this function's FutureWarning, not a cascade pointing at
+    # tidysdmx's own source for functions the user never called (DEP-02).
+    df = transform_source_to_target.__wrapped__(df, mapping)
+    df = map_to_sdmx.__wrapped__(df, mapping)
+    df = standardize_data_for_upload.__wrapped__(
         df, dsd=mapping["dsd_id"], cat_indicator=cat_indicator
     )
     return df
 
 
+@deprecated(replacement="map_structures")
 @typechecked
 def transform_source_to_target(
     df: pd.DataFrame,
     mapping: dict,
 ) -> pd.DataFrame:
     """Transform a raw DataFrame into the format defined by a components map.
+
+    .. deprecated::
+        The bespoke JSON-mapping pipeline is being retired. Use
+        :func:`map_structures` with a pysdmx ``StructureMap`` instead.
 
     Creates a new DataFrame with columns as defined in
     ``mapping["components"]["TARGET"]`` and populates it with data from the
@@ -248,11 +244,16 @@ def transform_source_to_target(
         ) from e
 
 
+@deprecated(replacement="map_structures")
 @typechecked
 def vectorized_lookup_ordered_v1(
     series: pd.Series, mapping_df: pd.DataFrame
 ) -> pd.Series:
     """Apply ordered regex matching to a Pandas Series.
+
+    .. deprecated::
+        The bespoke JSON-mapping pipeline is being retired. Use
+        :func:`map_structures` with a pysdmx ``StructureMap`` instead.
 
     For each regex pattern in mapping_df, check if the value in series matches
     the pattern. The corresponding TARGET is assigned when a match is found,
@@ -294,11 +295,16 @@ def vectorized_lookup_ordered_v1(
     return pd.Series(result, index=series.index)
 
 
+@deprecated(replacement="map_structures")
 @typechecked
 def vectorized_lookup_ordered_v2(
     series: pd.Series, mapping_df: pd.DataFrame
 ) -> pd.Series:
     """Apply ordered matching (regex or exact) to a Pandas Series.
+
+    .. deprecated::
+        The bespoke JSON-mapping pipeline is being retired. Use
+        :func:`map_structures` with a pysdmx ``StructureMap`` instead.
 
     For each row in mapping_df:
 
@@ -351,9 +357,14 @@ def vectorized_lookup_ordered_v2(
     return pd.Series(result, index=series.index)
 
 
+@deprecated(replacement="map_structures")
 @typechecked
 def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     """Map DataFrame columns to SDMX values using a lookup mapping.
+
+    .. deprecated::
+        The bespoke JSON-mapping pipeline is being retired. Use
+        :func:`map_structures` with a pysdmx ``StructureMap`` instead.
 
     This function transforms the given DataFrame columns to conform to the
     SDMX representation by applying either a fixed mapping or an ordered,
@@ -426,6 +437,7 @@ def map_to_sdmx(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df
 
 
+@deprecated(replacement="standardize_output")
 @typechecked
 def add_sdmx_reference_cols(
     df: pd.DataFrame,
@@ -447,12 +459,6 @@ def add_sdmx_reference_cols(
     Returns:
         The DataFrame with the added SDMX reference columns.
     """
-    warnings.warn(
-        "add_sdmx_reference_cols is deprecated and will be removed "
-        "in a future release. Please use standardize_output instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
     df["STRUCTURE"] = structure
     df["STRUCTURE_ID"] = dsd
     df["ACTION"] = action
@@ -460,9 +466,14 @@ def add_sdmx_reference_cols(
     return df
 
 
+@deprecated()
 @typechecked
 def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
     """Fix the INDICATOR column to be uppercase and prefixed with dataset ID.
+
+    .. deprecated::
+        This helper is part of the retiring standardisation pipeline and will
+        be removed in a future release.
 
     Ensures all values in the ``INDICATOR`` column are upper case, prefixed
     with the dataset identifier, and have dots replaced with underscores.
@@ -518,6 +529,7 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@deprecated(replacement="standardize_output")
 @typechecked
 def standardize_data_for_upload(
     df: pd.DataFrame,
@@ -548,19 +560,17 @@ def standardize_data_for_upload(
         The modified DataFrame with corrected INDICATOR values, added
         reference columns, and reordered columns.
     """
-    warnings.warn(
-        "standardize_data_for_upload is deprecated and will be removed "
-        "in a future release. Please use standardize_output instead.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
+    # Call undecorated (.__wrapped__) implementations of the deprecated helpers
+    # so this function emits only its own FutureWarning, not a misleading
+    # cascade (DEP-02). qa_remove_duplicates is not deprecated.
     if not cat_indicator:
-        df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
+        df = qa_coerce_numeric.__wrapped__(df, numeric_columns=["OBS_VALUE"])
     df = qa_remove_duplicates(df)
 
-    df = standardize_indicator_id(df=df)
-    df = add_sdmx_reference_cols(df=df, dsd=dsd, structure=structure, action=action)
+    df = standardize_indicator_id.__wrapped__(df=df)
+    df = add_sdmx_reference_cols.__wrapped__(
+        df=df, dsd=dsd, structure=structure, action=action
+    )
 
     cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
     new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
@@ -685,7 +695,7 @@ def _add_sdmx_reference_cols(
         >>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         >>> result = _add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
         >>> print(result.columns)
-        Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
+        Index(['OBS_VALUE', 'STRUCTURE', 'STRUCTURE_ID', 'ACTION'], dtype='object')
     """
     df = df.copy()
 
@@ -701,9 +711,15 @@ def _add_sdmx_reference_cols(
 # region Functions to handle mapping files
 
 
+@deprecated()
 @typechecked
 def read_mapping(path: str | Path) -> dict[str, str | pd.DataFrame]:
     """Read a JSON mapping file and parse its content into DataFrames.
+
+    .. deprecated::
+        The bespoke JSON mapping format is being retired in favour of pysdmx
+        ``StructureMap`` artefacts. This reader will be removed in a future
+        release.
 
     The function processes JSON data with four main keys:
 

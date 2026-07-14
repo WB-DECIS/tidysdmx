@@ -445,7 +445,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | **Column validation** | Component `required` flag, `local_codes` | `validate_dataset_local()` — full validation pipeline; `validate_columns()`, `validate_mandatory_columns()`, `validate_codelist_ids()`, `validate_duplicates()`, `validate_no_missing_values()` |
 | **Apply structure maps** | `StructureMap`, `FixedValueMap`, `ImplicitComponentMap`, `ComponentMap`, `MultiComponentMap` | `map_structures()` — applies a StructureMap to a DataFrame; individual `apply_*` functions |
 | **Build structure maps** | Raw pysdmx map constructors | `build_fixed_map()`, `build_implicit_component_map()`, `build_date_pattern_map()`, `build_value_map()`, `build_representation_map()`, `build_multi_representation_map()`, `build_single_component_map()`, `build_structure_map_from_template_wb()` |
-| **Create schema from data** | `Schema`, `Components`, `Component`, `Codelist`, `Code`, `Concept`, `DataType`, `Role` | `create_schema_from_table()` — infers an SDMX Schema from a pandas DataFrame |
+| **Create schema from data** | `Components`, `Component`, `Codelist`, `Code`, `Concept`, `ItemReference`, `DataType`, `Role` | `create_schema_from_table()` — infers the schema components (a `SchemaComponents` namedtuple: `dsd`, `concept_scheme`, `codelists`) from a pandas DataFrame |
 | **Output standardisation** | None | `standardize_output()` — adds SDMX reference columns (`STRUCTURE`/`DATAFLOW`/`PROVISIONAGREEMENT`, `*_ID`, `ACTION`) and reorders columns |
 | **Excel mapping workflow** | None | `write_excel_mapping_template()`, `parse_mapping_template_wb()`, `build_structure_map_from_template_wb()` |
 
@@ -495,19 +495,17 @@ if freq.local_codes is not None:
 ## 9. Building Mapping Objects — Quick Reference
 
 ```python
+import pandas as pd
+from pysdmx.model.map import StructureMap
+
 from tidysdmx import (
     build_fixed_map,
     build_implicit_component_map,
     build_date_pattern_map,
-    build_value_map,
-    build_value_map_list,
-    build_representation_map,
+    build_representation_map_from_df,
     build_single_component_map,
-    build_structure_map,
-    build_structure_map_from_template_wb,
-    map_structures
+    map_structures,
 )
-import pandas as pd
 
 # 1. Fixed value
 fmap = build_fixed_map(target="CONF_STATUS", value="F")
@@ -517,22 +515,28 @@ imap = build_implicit_component_map(source="SourceFreq", target="FREQ")
 
 # 3. Date pattern
 dpm = build_date_pattern_map(source="DATE", target="TIME_PERIOD",
-                              pattern="MMM yy", frequency="M")
+                             pattern="MMM yy", frequency="M")
 
-# 4. Value-level representation map from DataFrame
+# 4. Value-level representation map from a DataFrame.
+#    (The values-based builder is exposed on artefact_builder as
+#    build_representation_map; the DataFrame variant is *_from_df.)
 mapping_df = pd.DataFrame({"source": ["GB", "US"], "target": ["GBR", "USA"]})
-rep_map = build_representation_map(mapping_df, agency="ECB", id="RM_COUNTRY")
+rep_map = build_representation_map_from_df(
+    mapping_df, agency="ECB", id="RM_COUNTRY", name="Country map"
+)
 
-# 5. Single component map (wraps representation map)
+# 5. Single component map (wraps a representation map)
 cm = build_single_component_map(df=mapping_df,
-                                 source_component="COUNTRY_SRC",
-                                 target_component="REF_AREA",
-                                 agency="ECB")
+                                source_component="COUNTRY_SRC",
+                                target_component="REF_AREA",
+                                agency="ECB",
+                                id="CM_COUNTRY",
+                                name="Country component map")
 
 # 6. Apply a StructureMap to a DataFrame
-from pysdmx.model.map import StructureMap
-smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0",
+smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0", name="My map",
                     maps=[fmap, imap, cm])
+df = pd.DataFrame({"COUNTRY_SRC": ["GB", "US"], "SourceFreq": ["A", "A"]})
 result_df = map_structures(df, smap)
 ```
 
@@ -565,7 +569,7 @@ The following capabilities already exist in pysdmx and should be used directly r
 | Mandatory field checking | `component.required` |
 | FixedValueMap, ImplicitComponentMap, etc. construction | pysdmx constructors directly, or the `build_*` helpers in `tidysdmx.structures` |
 | StructureMap application | `map_structures()` in `tidysdmx.mapping` |
-| Schema creation from DataFrame | `create_schema_from_table()` in `tidysdmx.structures` |
+| Schema-components creation from DataFrame | `create_schema_from_table()` in `tidysdmx.structures` (returns a `SchemaComponents` namedtuple, not a `Schema`) |
 
 ---
 

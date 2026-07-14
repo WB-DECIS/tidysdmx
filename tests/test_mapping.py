@@ -148,7 +148,6 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-@pytest.mark.integration
 class TestApplyComponentMap:
     """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
@@ -220,13 +219,24 @@ class TestApplyComponentMap:
         result = apply_component_map(df, component_map)
         assert pd.isna(result["SEX"]).all()
 
+
+class TestApplyComponentMapInMemory:
+    """Unit tests for apply_component_map with in-memory maps (no FMR)."""
+
     @staticmethod
     def _component_map_with_catch_all(value_maps):
         """Build a ComponentMap (AREA -> REGION) from the given value maps."""
         return ComponentMap(
             source="AREA",
             target="REGION",
-            values=RepresentationMap(id="RM", agency="WB", maps=value_maps),
+            values=RepresentationMap(
+                id="RM",
+                agency="WB",
+                name="RM",
+                source="String",
+                target="String",
+                maps=value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -270,8 +280,39 @@ class TestApplyComponentMap:
         assert result["REGION"].iloc[0] == "EU"
         assert result["REGION"].iloc[1:].isna().all()
 
+    def test_invalid_regex_raises_valueerror_even_when_unused(self):
+        """A malformed regex pattern fails fast even if no value needs it."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:[unclosed", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR"]})  # fully literal-mapped
 
-@pytest.mark.integration
+        with pytest.raises(ValueError, match="Invalid regex pattern"):
+            apply_component_map(df, cm)
+
+    def test_non_matching_regex_leaves_value_unmapped(self):
+        """A non-null value matched by no rule (literal or regex) becomes NaN.
+
+        Guards the fall-through that decides an unmapped value is dropped to NaN
+        rather than keeping the stale source value (a silent-corruption hazard).
+        """
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:^X.*", target="XX"),  # narrow, no catch-all
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", "XylophoneLand", "BR"]})
+
+        result = apply_component_map(df, cm)
+        assert result["REGION"].iloc[0] == "EU"  # literal
+        assert result["REGION"].iloc[1] == "XX"  # regex match
+        assert pd.isna(result["REGION"].iloc[2])  # no rule matched -> NaN
+
+
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -305,7 +346,7 @@ class TestApplyMultiComponentMap:
     def test_missing_source_columns_raises(self, multi_component_map):
         """Tests that KeyError is raised when source columns are missing."""
         df = pd.DataFrame({"AREA": ["COL"], "OTHER": ["one"]})
-        with pytest.raises(KeyError) as excinfo:
+        with pytest.raises(KeyError, match="Missing source columns") as excinfo:
             apply_multi_component_map(df, multi_component_map)
         assert "Missing source columns" in str(excinfo.value)
 
@@ -332,13 +373,24 @@ class TestApplyMultiComponentMap:
         else:
             assert not info_messages
 
+
+class TestApplyMultiComponentMapInMemory:
+    """Unit tests for apply_multi_component_map with in-memory maps (no FMR)."""
+
     @staticmethod
     def _multi_map_with_catch_all(multi_value_maps):
         """Build a MultiComponentMap (AREA, NOTE -> URBANISATION) from value maps."""
         return MultiComponentMap(
             source=["AREA", "NOTE"],
             target=["URBANISATION"],
-            values=MultiRepresentationMap(id="MR", agency="WB", maps=multi_value_maps),
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                name="MR",
+                source=["String", "String"],
+                target=["String"],
+                maps=multi_value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -409,6 +461,9 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                name="MR",
+                source=["String"],
+                target=["String"],
                 maps=[MultiValueMap(source=["BE"], target=["BEL"])],
             ),
         )
@@ -431,6 +486,9 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                name="MR",
+                source=["String"],
+                target=["String"],
                 maps=[
                     MultiValueMap(
                         source=[r"regex:2020-01-01 00:00:00"], target=["MATCHED"]
@@ -463,7 +521,6 @@ class TestApplyMultiComponentMap:
         assert list(result["URBANISATION"]) == ["C_", "_L", None]
 
 
-@pytest.mark.integration
 class TestMapStructures:
     """Tests for map_structures function."""
 
@@ -494,6 +551,28 @@ class TestMapStructures:
         # Check FixedValueMap columns
         for col in ["COMP_BREAKDOWN_1", "COMP_BREAKDOWN_2", "COMP_BREAKDOWN_3"]:
             assert all(result[col] == "_Z")
+
+    def test_date_pattern_map_raises_not_implemented(self):
+        """A DatePatternMap raises NotImplementedError, not TypeError (MW-05)."""
+        from pysdmx.model.map import StructureMap
+
+        from tidysdmx.structures import build_date_pattern_map
+
+        dpm = build_date_pattern_map(
+            source="DATE", target="TIME_PERIOD", pattern="MMM yy", frequency="M"
+        )
+        sm = StructureMap(
+            id="SM_DPM",
+            name="dpm",
+            agency="ECB",
+            version="1.0",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[dpm],
+        )
+        df = pd.DataFrame({"DATE": ["Jan 20"]})
+        with pytest.raises(NotImplementedError, match="DatePatternMap"):
+            map_structures(df, sm)
 
     def test_unmapped_indicator_results_in_nan(self, ifpri_asti_sm):
         """Tests that unmapped indicator values result in NaN in SEX column."""
@@ -537,7 +616,7 @@ class TestMapStructures:
             }
         )
 
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="not found in DataFrame"):
             map_structures(df, ifpri_asti_sm)
 
     @pytest.mark.parametrize("verbose", [True, False])

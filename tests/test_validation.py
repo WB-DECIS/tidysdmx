@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -117,7 +118,7 @@ class TestValidateColumns:
     ):
         """Tests that validate_columns raises ValueError for unexpected columns."""
         df = pd.DataFrame(columns=df_columns)
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="Found unexpected columns") as exc_info:
             validate_columns(df, valid_columns=valid_columns, sdmx_cols=sdmx_cols)
         assert "Found unexpected columns" in str(exc_info.value)
         assert invalid_col in str(exc_info.value)
@@ -137,6 +138,17 @@ class TestValidateColumns:
         validate_columns(
             df, valid_columns=[], sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
         )
+
+    def test_defaults_to_structure_reference_columns(self):
+        """Omitting sdmx_cols allows the SDMX-CSV 2.0 STRUCTURE columns."""
+        df = pd.DataFrame(columns=["COMP1", "STRUCTURE", "STRUCTURE_ID", "ACTION"])
+        validate_columns(df, valid_columns=["COMP1"])  # must not raise
+
+    def test_max_errors_truncates_unexpected_columns(self):
+        """Unexpected columns are capped at max_errors with a truncation note."""
+        df = pd.DataFrame(columns=["X1", "X2", "X3", "X4"])
+        with pytest.raises(ValueError, match=r"and 2 more \(max_errors=2\)"):
+            validate_columns(df, valid_columns=[], sdmx_cols=[], max_errors=2)
 
 
 class TestValidateCodelistIds:
@@ -164,7 +176,9 @@ class TestValidateCodelistIds:
         df = pd.DataFrame(
             {"col1": ["INVALID1", "INVALID2"], "col2": ["INVALID3", "B2"]}
         )
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(
+            ValueError, match="Invalid codelist values found"
+        ) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         msg = str(excinfo.value)
         assert "col1" in msg and "col2" in msg
@@ -174,10 +188,48 @@ class TestValidateCodelistIds:
         df = pd.DataFrame({"col1": ["A1", "A2"]})
         validate_codelist_ids(df, sample_codelist_ids)
 
+    def test_max_errors_caps_reported_violations(self, sample_codelist_ids):
+        """Violations are capped at max_errors with a 'capped' suffix."""
+        df = pd.DataFrame({"col1": ["X1", "X2", "X3"], "col2": ["B1", "B2", "B1"]})
+        with pytest.raises(ValueError, match=r"capped \(max_errors=2\)") as exc:
+            validate_codelist_ids(df, sample_codelist_ids, max_errors=2)
+        # Exactly two invalid values are listed (one per reported line).
+        assert str(exc.value).count("'col1':") == 2
+
+    def test_max_errors_not_triggered_below_cap(self, sample_codelist_ids):
+        """Below the cap, no truncation suffix is added."""
+        df = pd.DataFrame({"col1": ["A1", "X1"], "col2": ["B1", "B2"]})
+        with pytest.raises(ValueError) as exc:
+            validate_codelist_ids(df, sample_codelist_ids, max_errors=10)
+        assert "capped" not in str(exc.value)
+
     def test_empty_dataframe_passes(self, sample_codelist_ids):
         """Tests that an empty DataFrame passes without error."""
         df = pd.DataFrame(columns=["col1", "col2"])
         validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_missing_values_are_not_codelist_violations(self, sample_codelist_ids):
+        """Missing cells (NaN or None) are not codelist violations (API-06).
+
+        Missing values are the missing-values check's job; a NaN must not be
+        stringified into a spurious ``'nan'`` code here, nor a None into a
+        spurious ``'None'`` code.
+        """
+        df = pd.DataFrame({"col1": ["A1", np.nan, None], "col2": ["B1", "B2", "B1"]})
+        # No ValueError, and in particular no 'nan'/'None' reported.
+        validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_missing_value_alongside_real_violation(self, sample_codelist_ids):
+        """NaN/None are ignored while a genuine out-of-codelist value still fails."""
+        df = pd.DataFrame(
+            {"col1": ["A1", np.nan, None, "WRONG"], "col2": ["B1", "B2", "B1", "B1"]}
+        )
+        with pytest.raises(ValueError, match="Invalid codelist values found") as exc:
+            validate_codelist_ids(df, sample_codelist_ids)
+        msg = str(exc.value)
+        assert "WRONG" in msg
+        assert "nan" not in msg
+        assert "None" not in msg
 
     @pytest.mark.parametrize(
         "df_values,expected_error",
@@ -191,7 +243,9 @@ class TestValidateCodelistIds:
     ):
         """Tests invalid values in different columns using parametrization."""
         df = pd.DataFrame(df_values)
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(
+            ValueError, match="Invalid codelist values found"
+        ) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         assert expected_error in str(excinfo.value)
 
@@ -366,15 +420,15 @@ class TestValidateDatasetLocal:
     def test_raises_error_if_no_schema_or_valid(self):
         """Tests that ValueError is raised if neither schema nor valid is provided."""
         df = pd.DataFrame({"TIME_PERIOD": ["2020"]})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Either a schema or precomputed"):
             validate_dataset_local(df)
 
-    def test_dataflow_schema_accepts_dataflow_columns(self, sdmx_schema):
-        """Dataflow-context schema infers DATAFLOW/DATAFLOW_ID reference columns.
+    def test_dataflow_schema_accepts_structure_columns(self, sdmx_schema):
+        """Dataflow-context schema accepts SDMX-CSV 2.0 STRUCTURE columns.
 
-        Regression test for issue #218: validation must not flag DATAFLOW /
-        DATAFLOW_ID as unexpected or report STRUCTURE / STRUCTURE_ID as
-        missing when the schema's context is ``dataflow``.
+        Regression test for issue #218 and BUG-11: every context uses the
+        STRUCTURE / STRUCTURE_ID / ACTION reference columns, so a dataflow
+        schema must not flag them as unexpected or report them missing.
         """
         df = pd.DataFrame(
             {
@@ -382,8 +436,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020", "2021"],
                 "SEX": ["F", "M"],
                 "OBS_VALUE": [100, 200],
-                "DATAFLOW": ["dataflow", "dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow", "dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
                 "ACTION": ["I", "I"],
             }
         )
@@ -446,8 +500,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020"],
                 "SEX": ["F"],
                 "OBS_VALUE": [100],
-                "DATAFLOW": ["dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
                 "ACTION": ["I"],
             }
         )

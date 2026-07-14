@@ -6,6 +6,7 @@ from pysdmx.model import (
     Code,
     Codelist,
     Component,
+    ComponentMap,
     Components,
     Concept,
     ConceptScheme,
@@ -140,6 +141,28 @@ class TestCodelist:
     def test_empty_items_flagged(self):
         """An empty codelist triggers C001."""
         assert any(i.rule_id == "C001" for i in validate(_codelist(items=())))
+
+    def test_subclass_reuses_codelist_checker(self):
+        """A Codelist subclass still triggers C001 via MRO dispatch (BUG-14)."""
+
+        class MyCodelist(Codelist):
+            pass
+
+        cl = MyCodelist(id="CL_SUB", agency="AGY", name="Test", items=())
+        assert any(i.rule_id == "C001" for i in validate(cl))
+
+    def test_duplicate_code_ids_flagged(self):
+        """Duplicate code IDs trigger C002 and name the offending ID."""
+        cl = _codelist(items=(Code(id="A"), Code(id="A"), Code(id="B")))
+        issues = validate(cl)
+        c002 = [i for i in issues if i.rule_id == "C002"]
+        assert len(c002) == 1
+        assert "'A'" in c002[0].message
+
+    def test_unique_code_ids_ok(self):
+        """A codelist with unique code IDs does not trigger C002."""
+        cl = _codelist(items=(Code(id="A"), Code(id="B")))
+        assert not any(i.rule_id == "C002" for i in validate(cl))
 
 
 class TestSchemes:
@@ -278,17 +301,6 @@ class TestDataflow:
 
 
 class TestValidate:
-    def test_artefact_without_specific_checker(self):
-        """A StructureMap has no type-specific rules registered."""
-        sm = StructureMap(
-            id="SM",
-            agency="AGY",
-            name="n",
-            source="DataStructure=A:S(1.0)",
-            target="DataStructure=A:T(1.0)",
-        )
-        assert validate(sm) == []
-
     def test_agency_object_in_agency_field(self):
         """short_urn works when agency is an Agency object."""
         cl = Codelist(
@@ -313,6 +325,60 @@ class TestValidateMany:
         assert {i.rule_id for i in issues} == {"C001", "H001"}
 
 
+def _structure_map(**over):
+    kw = {
+        "id": "SM",
+        "agency": "AGY",
+        "name": "SM",
+        "version": "1.0",
+        "source": "urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=A:SRC(1.0)",
+        "target": "urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=A:TGT(1.0)",
+        "maps": (),
+    }
+    kw.update(over)
+    return StructureMap(**kw)
+
+
+class TestStructureMap:
+    def test_empty_source_flagged(self):
+        """A StructureMap with empty source triggers SM001."""
+        issues = validate(_structure_map(source=""))
+        assert any(i.rule_id == "SM001" for i in issues)
+
+    def test_empty_target_flagged(self):
+        """A StructureMap with empty target triggers SM002."""
+        issues = validate(_structure_map(target=""))
+        assert any(i.rule_id == "SM002" for i in issues)
+
+    def test_unresolved_urn_reference_flagged(self):
+        """A ComponentMap whose values is a bare URN string triggers SM003."""
+        cm = ComponentMap(
+            source="COUNTRY",
+            target="GEO",
+            values="urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=A:RM(1.0)",
+        )
+        issues = validate(_structure_map(maps=(cm,)))
+        assert any(i.rule_id == "SM003" for i in issues)
+
+    def test_embedded_rep_map_empty_source_flagged(self):
+        """An embedded RepresentationMap with empty source triggers R001."""
+        rm = RepresentationMap(
+            id="RM",
+            agency="AGY",
+            name="RM",
+            source="",
+            target="urn:t",
+            maps=[ValueMap(source="A", target="B")],
+        )
+        cm = ComponentMap(source="COUNTRY", target="GEO", values=rm)
+        issues = validate(_structure_map(maps=(cm,)))
+        assert any(i.rule_id == "R001" for i in issues)
+
+    def test_valid_structure_map_ok(self):
+        """A StructureMap with non-empty source/target and no maps is valid."""
+        assert validate(_structure_map()) == []
+
+
 class TestRaiseIfInvalid:
     def test_accepts_single_artefact(self):
         """A single valid artefact does not raise."""
@@ -329,5 +395,5 @@ class TestRaiseIfInvalid:
 
     def test_raises_on_bad_sequence(self):
         """Any invalid artefact in a sequence triggers a raise."""
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match=r"\[C001\]"):
             raise_if_invalid([_codelist(), _codelist(items=())])

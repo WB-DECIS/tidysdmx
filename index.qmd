@@ -14,6 +14,7 @@ pip install tidysdmx
 ```
 
 ```python
+import pandas as pd
 import pysdmx as px
 from tidysdmx import (
     create_schema_from_table,
@@ -39,7 +40,8 @@ sm = build_structure_map_from_template_wb(
     source_structure_id="WB.DP:DP_SCHEMA(1.0)",
 )
 
-# 3. Map your tidy data and validate the output
+# 3. Load your tidy data, map it, and validate the output
+tidy_raw_df = pd.read_csv("my_tidy_data.csv")
 mapped = map_structures(df=tidy_raw_df, structure_map=sm)
 out = standardize_output(df=mapped, artefact_id="WB.GGH.HSP:DS_ASPIRE(1.0.0)",
                         schema=dis_schema, action="I")
@@ -75,7 +77,7 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 
 ## What does tidysdmx give me on top of pysdmx?
 
-- **Schema inference from tidy data** — `create_schema_from_table()` builds a pysdmx `Schema` (with DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe and validate your raw input without writing a line of XML.
+- **Schema inference from tidy data** — `create_schema_from_table()` builds the schema components (a `SchemaComponents` bundle of DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe your raw input without writing a line of XML.
 - **Excel-driven structure maps** — `parse_mapping_template_wb()` + `build_structure_map_from_template_wb()` turn the World Bank mapping workbook format into a fully-formed `StructureMap` with all the `FixedValueMap`, `ComponentMap`, and `RepresentationMap` instances pysdmx expects.
 - **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
 - **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
