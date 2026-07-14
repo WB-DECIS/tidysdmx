@@ -687,7 +687,7 @@ def _add_sdmx_reference_cols(
         >>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         >>> result = _add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
         >>> print(result.columns)
-        Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
+        Index(['OBS_VALUE', 'STRUCTURE', 'STRUCTURE_ID', 'ACTION'], dtype='object')
     """
     df = df.copy()
 

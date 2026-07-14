@@ -19,20 +19,21 @@ from ._deprecation import deprecated
 def sdmx_reference_cols_for(
     context: Literal["dataflow", "datastructure", "provisionagreement"],
 ) -> list[str]:
-    """Return the SDMX reference columns for a given schema context.
+    """Return the SDMX-CSV reference columns for a given schema context.
+
+    The SDMX-CSV 2.0 field guide uses a single structure-reference column set
+    for every context: ``STRUCTURE`` (holding the structure *type*, e.g.
+    ``dataflow``), ``STRUCTURE_ID`` (the artefact ID) and ``ACTION``. The
+    context is retained in the signature for call-site clarity and forward
+    compatibility, but it does not change the column names.
 
     Args:
         context: The SDMX schema context.
 
     Returns:
-        The ``[STRUCTURE-like, STRUCTURE_ID-like, "ACTION"]`` column names
-        that an SDMX-CSV dataset is expected to carry for the given context.
+        ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]``.
     """
-    if context == "dataflow":
-        return ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
-    if context == "datastructure":
-        return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-    return ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"]
+    return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
 
 @typechecked
@@ -51,9 +52,9 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
             - codelist_ids: Dictionary with coded components as keys and
               list of codelist IDs as values.
             - dim_comp: List of dimension component names.
-            - sdmx_cols: SDMX reference columns expected in the dataset,
-              inferred from the schema's context (e.g. ``DATAFLOW`` /
-              ``DATAFLOW_ID`` / ``ACTION`` for a dataflow-context schema).
+            - sdmx_cols: SDMX-CSV reference columns expected in the dataset
+              (``STRUCTURE`` / ``STRUCTURE_ID`` / ``ACTION`` for every schema
+              context, per the SDMX-CSV 2.0 field guide).
     """
     comp = schema.components
     valid_comp = [c.id for c in comp]

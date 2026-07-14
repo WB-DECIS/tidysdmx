@@ -187,9 +187,9 @@ class TestExtractValidationInfo:
         assert isinstance(result["codelist_ids"], dict)
 
     def test_sdmx_cols_inferred_from_dataflow_context(self, sdmx_schema):
-        """Dataflow-context schema yields DATAFLOW reference columns."""
+        """Every context yields the SDMX-CSV 2.0 STRUCTURE reference columns."""
         result = extract_validation_info(sdmx_schema)
-        assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+        assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
     def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
         """Datastructure-context schema yields STRUCTURE reference columns."""
@@ -199,19 +199,16 @@ class TestExtractValidationInfo:
 
 class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
-        "context, expected",
-        [
-            ("dataflow", ["DATAFLOW", "DATAFLOW_ID", "ACTION"]),
-            ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            (
-                "provisionagreement",
-                ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
-            ),
-        ],
+        "context",
+        ["dataflow", "datastructure", "provisionagreement"],
     )
-    def test_returns_expected_columns(self, context, expected):
-        """Each SDMX context maps to its canonical reference columns."""
-        assert sdmx_reference_cols_for(context) == expected
+    def test_returns_structure_columns_for_every_context(self, context):
+        """SDMX-CSV 2.0 uses STRUCTURE/STRUCTURE_ID/ACTION for every context."""
+        assert sdmx_reference_cols_for(context) == [
+            "STRUCTURE",
+            "STRUCTURE_ID",
+            "ACTION",
+        ]
 
     def test_raises_on_invalid_context(self):
         """Unknown contexts raise a TypeCheckError (rejected by typeguard)."""

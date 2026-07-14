@@ -666,23 +666,21 @@ class TestAddSdmxReferenceCols:
     """
 
     @pytest.mark.parametrize(
-        "artefact_type,expected_cols",
-        [
-            ("dataflow", ["OBS_VALUE", "DATAFLOW", "DATAFLOW_ID", "ACTION"]),
-            ("datastructure", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            (
-                "provisionagreement",
-                ["OBS_VALUE", "PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
-            ),
-        ],
+        "artefact_type",
+        ["dataflow", "datastructure", "provisionagreement"],
     )
-    def test_add_columns_for_valid_types(self, artefact_type, expected_cols):
-        """Tests that correct columns are added for each valid artefact_type."""
+    def test_add_columns_for_valid_types(self, artefact_type):
+        """SDMX-CSV 2.0 STRUCTURE columns are added for every artefact_type.
+
+        The STRUCTURE column carries the artefact *type* and STRUCTURE_ID the
+        ID, for every context (BUG-11).
+        """
+        expected_cols = ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]
         df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         result = _add_sdmx_reference_cols(df, "TEST_ID", artefact_type, "I")
         assert list(result.columns) == expected_cols
-        assert all(result[expected_cols[1]] == artefact_type)
-        assert all(result[expected_cols[2]] == "TEST_ID")
+        assert all(result["STRUCTURE"] == artefact_type)
+        assert all(result["STRUCTURE_ID"] == "TEST_ID")
         assert all(result["ACTION"] == "I")
 
     @pytest.mark.parametrize("action", ["I", "U", "D"])
