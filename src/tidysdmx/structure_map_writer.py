@@ -96,6 +96,12 @@ def collect_structure_map_artifacts(
     Returns:
         A list containing RepresentationMaps followed by the StructureMap.
 
+    Raises:
+        ValueError: If two embedded representation maps share the same
+            identity (agency/id/version → same URN) but have different
+            content — one of them would silently overwrite the other on
+            upload, so the conflict must be fixed in the StructureMap first.
+
     Example:
         >>> from pysdmx.io import write_sdmx
         >>> from pysdmx.io.format import Format
@@ -112,16 +118,26 @@ def collect_structure_map_artifacts(
     """
     # Collect embedded rep maps, de-duplicating by short URN so a rep map
     # shared by several ComponentMaps is only uploaded once (FMR rejects a
-    # batch that declares the same maintainable artefact twice).
+    # batch that declares the same maintainable artefact twice). Two maps that
+    # share a URN but differ in content are an identity conflict, not a
+    # duplicate — silently keeping one would corrupt the upload, so raise.
     artifacts: list[MaintainableArtefact] = []
-    seen_urns: set[str] = set()
+    seen: dict[str, MaintainableArtefact] = {}
     for m in structure_map.maps:
         rep_map = _get_embedded_rep_map(m)
         if rep_map is None:
             continue
-        if rep_map.short_urn in seen_urns:
+        kept = seen.get(rep_map.short_urn)
+        if kept is not None:
+            if kept != rep_map:
+                raise ValueError(
+                    f"StructureMap embeds two different representation maps "
+                    f"with the same identity '{rep_map.short_urn}'. Give them "
+                    f"distinct ids/versions (or make them identical) before "
+                    f"collecting artefacts for upload."
+                )
             continue
-        seen_urns.add(rep_map.short_urn)
+        seen[rep_map.short_urn] = rep_map
         artifacts.append(rep_map)
 
     # Convert RepresentationMap objects to URN references if requested

@@ -309,17 +309,27 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
     a legitimate code such as ``"NA"`` (Namibia's ISO 3166 alpha-2 code)
     survives round-tripping instead of being silently dropped.
 
+    Only the modern ``.xlsx`` format is supported: the file is read with the
+    openpyxl engine, which cannot parse legacy binary ``.xls`` workbooks.
+
     Raises:
         FileNotFoundError: If the provided file path does not exist.
-        ValueError: If the file is not an Excel file (.xlsx or .xls).
+        ValueError: If the file is not a ``.xlsx`` Excel file. Legacy ``.xls``
+            workbooks are rejected up front — re-save them as ``.xlsx``.
         RuntimeError: If reading the Excel file fails.
     """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix.lower() not in (".xlsx", ".xls"):
+    suffix = path.suffix.lower()
+    if suffix == ".xls":
         raise ValueError(
-            f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx or .xls)."
+            "Legacy .xls workbooks are not supported (the openpyxl engine reads "
+            "only .xlsx). Re-save the template as .xlsx and try again."
+        )
+    if suffix != ".xlsx":
+        raise ValueError(
+            f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx)."
         )
 
     try:

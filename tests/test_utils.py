@@ -478,6 +478,17 @@ class TestParseMappingTemplateWb:
         with pytest.raises(ValueError, match="Invalid file type"):
             parse_mapping_template_wb(invalid_mapping_template_path)
 
+    def test_parse_mapping_template_wb_legacy_xls_rejected(self, tmp_path):
+        """A legacy .xls file is rejected up front with a convert-to-xlsx hint.
+
+        openpyxl cannot parse binary .xls, so accepting the suffix only to fail
+        later with a wrapped RuntimeError was misleading (PR #253 review).
+        """
+        legacy = tmp_path / "template.xls"
+        legacy.write_bytes(b"\xd0\xcf\x11\xe0 fake legacy workbook")
+        with pytest.raises(ValueError, match=r"Re-save the template as \.xlsx"):
+            parse_mapping_template_wb(legacy)
+
     def test_parse_mapping_template_wb_corrupt_file_raises_runtimeerror(self, tmp_path):
         """A non-Excel file with a .xlsx extension raises a wrapped RuntimeError."""
         bogus = tmp_path / "corrupt.xlsx"

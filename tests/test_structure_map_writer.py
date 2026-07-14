@@ -526,6 +526,57 @@ class TestCollectStructureMapArtifacts:
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
         assert len(rep_maps) == 1
 
+    def test_equal_content_distinct_objects_collected_once(self, make_rep_map):
+        """Two distinct-but-equal rep map objects count as one artefact."""
+        twin_a = make_rep_map(id="RM_TWIN", name="Twin")
+        twin_b = make_rep_map(id="RM_TWIN", name="Twin")
+        assert twin_a is not twin_b
+        sm = StructureMap(
+            id="SM_TWINS",
+            name="Twins",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=twin_a),
+                ComponentMap(source="B", target="Y", values=twin_b),
+            ],
+        )
+        artifacts = collect_structure_map_artifacts(sm, convert_to_urns=False)
+        rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
+        assert len(rep_maps) == 1
+
+    def test_same_urn_different_content_raises(self, make_rep_map):
+        """Two different rep maps sharing one identity raise instead of dropping.
+
+        Silently keeping the first would produce an incorrect upload batch
+        (Copilot review on PR #253).
+        """
+        original = make_rep_map(id="RM_CLASH", name="Original")
+        impostor = RepresentationMap(
+            id="RM_CLASH",
+            name="Impostor with different content",
+            agency="ECB",
+            version="1.0",
+            source="String",
+            target="String",
+            maps=[ValueMap(source="FR", target="FRA")],
+        )
+        assert original.short_urn == impostor.short_urn
+        sm = StructureMap(
+            id="SM_CLASH",
+            name="Clash",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=original),
+                ComponentMap(source="B", target="Y", values=impostor),
+            ],
+        )
+        with pytest.raises(ValueError, match="same identity 'RepresentationMap"):
+            collect_structure_map_artifacts(sm)
+
     def test_convert_to_urns_true_replaces_embedded_objects(self, make_structure_map):
         """With convert_to_urns=True the returned StructureMap must use URN strings."""
         sm = make_structure_map()
