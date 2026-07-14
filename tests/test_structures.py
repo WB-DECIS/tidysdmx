@@ -37,8 +37,12 @@ from tidysdmx.structures import (
     build_value_map_list,
     create_schema_from_table,
     gen_urn,
+    sanitize_variable,
 )
-from tidysdmx.structures.map_builders import _resolve_representation_ref
+from tidysdmx.structures.map_builders import (
+    _parse_validity_date,
+    _resolve_representation_ref,
+)
 from tidysdmx.structures.schema_from_table import _infer_sdmx_type
 from tidysdmx.structures.template import (
     _cell_str,
@@ -1910,6 +1914,11 @@ class TestMatchColumnName:
         with pytest.raises(ValueError, match="Ambiguous match"):
             _match_column_name("AGE", ["PERCENTAGE", "AGE_GROUP"])
 
+    def test_match_column_name_ambiguous_normalized_equality_raises(self):
+        """Two columns that normalize identically must raise, not bind arbitrarily."""
+        with pytest.raises(ValueError, match="normalize identically"):
+            _match_column_name("ref area", ["REF_AREA", "REF AREA"])
+
     def test_match_column_name_exact_wins_over_substring(self):
         """An exact match is returned even when a substring container exists."""
         assert _match_column_name("AGE", ["PERCENTAGE", "AGE"]) == "AGE"
@@ -1964,6 +1973,75 @@ class TestGenUrn:
         assert gen_urn("MysteryType", "AG", "X", "2.0") == (
             "urn:sdmx:org.sdmx.infomodel.base.MysteryType=AG:X(2.0)"
         )
+
+    @pytest.mark.parametrize(
+        "artefact_type", ["Codelist", "ConceptScheme", "DataStructure", "StructureMap"]
+    )
+    def test_gen_urn_round_trips_through_pysdmx_parse_urn(self, artefact_type):
+        """Every mapped artefact type produces a URN pysdmx can parse back."""
+        from pysdmx.util import parse_urn
+
+        urn = gen_urn(artefact_type, "ECB", "ART_ID", "1.2")
+        ref = parse_urn(urn)
+        assert ref.agency == "ECB"
+        assert ref.id == "ART_ID"
+        assert ref.version == "1.2"
+
+
+class TestParseValidityDate:
+    """Tests for `_parse_validity_date` cell coercion."""
+
+    def test_none_and_nan_return_none(self):
+        """Null cells yield None."""
+        assert _parse_validity_date(None) is None
+        assert _parse_validity_date(np.nan) is None
+
+    def test_iso_string_parsed(self):
+        """An ISO-8601 string is parsed to a datetime."""
+        assert _parse_validity_date("2020-01-01") == datetime(2020, 1, 1)
+
+    def test_plain_datetime_passthrough(self):
+        """A plain datetime is returned unchanged."""
+        dt = datetime(2021, 6, 30)
+        assert _parse_validity_date(dt) is dt
+
+    def test_pandas_timestamp_converted(self):
+        """A pandas Timestamp is converted to a plain datetime."""
+        result = _parse_validity_date(pd.Timestamp("2022-03-15"))
+        assert isinstance(result, datetime)
+        assert result == datetime(2022, 3, 15)
+
+    def test_invalid_iso_string_raises(self):
+        """A non-ISO string raises ValueError."""
+        with pytest.raises(ValueError, match=r"isoformat"):
+            _parse_validity_date("not-a-date")
+
+    def test_unsupported_type_raises_type_error(self):
+        """A numeric cell cannot be interpreted as a date."""
+        with pytest.raises(TypeError, match="Cannot interpret validity date"):
+            _parse_validity_date(20200101)
+
+
+class TestSanitizeVariable:
+    """Tests for the public `sanitize_variable` helper."""
+
+    def test_uppercases_and_replaces_punctuation(self):
+        """Dots and other punctuation collapse to underscores; result uppercased."""
+        assert sanitize_variable("per_allsp.adq") == "PER_ALLSP_ADQ"
+
+    def test_lowercase_option(self):
+        """uppercase=False keeps the sanitized id lowercase."""
+        assert sanitize_variable("per_allsp.adq", uppercase=False) == "per_allsp_adq"
+
+    def test_idempotent(self):
+        """Sanitizing an already-sanitized value is a no-op."""
+        once = sanitize_variable("U.S.A / 2020")
+        assert sanitize_variable(once) == once
+
+    def test_symbol_only_value_raises(self):
+        """A value with no usable characters raises a code-ID error."""
+        with pytest.raises(ValueError, match="valid SDMX code"):
+            sanitize_variable("!!!")
 
 
 class TestBuildStructureMapFromTemplateWb:

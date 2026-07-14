@@ -293,6 +293,25 @@ class TestApplyComponentMapInMemory:
         with pytest.raises(ValueError, match="Invalid regex pattern"):
             apply_component_map(df, cm)
 
+    def test_non_matching_regex_leaves_value_unmapped(self):
+        """A non-null value matched by no rule (literal or regex) becomes NaN.
+
+        Guards the fall-through that decides an unmapped value is dropped to NaN
+        rather than keeping the stale source value (a silent-corruption hazard).
+        """
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:^X.*", target="XX"),  # narrow, no catch-all
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", "XylophoneLand", "BR"]})
+
+        result = apply_component_map(df, cm)
+        assert result["REGION"].iloc[0] == "EU"  # literal
+        assert result["REGION"].iloc[1] == "XX"  # regex match
+        assert pd.isna(result["REGION"].iloc[2])  # no rule matched -> NaN
+
 
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""

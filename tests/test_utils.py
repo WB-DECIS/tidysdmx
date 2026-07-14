@@ -477,3 +477,25 @@ class TestParseMappingTemplateWb:
         """ValueError is raised for invalid file type."""
         with pytest.raises(ValueError, match="Invalid file type"):
             parse_mapping_template_wb(invalid_mapping_template_path)
+
+    def test_parse_mapping_template_wb_corrupt_file_raises_runtimeerror(self, tmp_path):
+        """A non-Excel file with a .xlsx extension raises a wrapped RuntimeError."""
+        bogus = tmp_path / "corrupt.xlsx"
+        bogus.write_text("this is not a zip-based xlsx file")
+        with pytest.raises(RuntimeError, match="Failed to read Excel file"):
+            parse_mapping_template_wb(bogus)
+
+    def test_parse_mapping_template_wb_preserves_literal_na(self, tmp_path):
+        """A literal 'NA' cell is preserved, not read as a missing value."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "REP_MAPPING"
+        ws.append(["S:country", "T:REF_AREA"])
+        ws.append(["NA", "NAM"])
+        path = tmp_path / "na.xlsx"
+        wb.save(path)
+
+        result = parse_mapping_template_wb(path)
+        assert result["REP_MAPPING"].iloc[0, 0] == "NA"
