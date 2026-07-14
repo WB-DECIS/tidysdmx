@@ -122,8 +122,8 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "unit: fast, isolated unit tests (no network)",
-    "integration: tests that hit FMR or external services",
+    "unit: fast, isolated unit tests (no live network)",
+    "integration: opens a live network connection (e.g. live FMR). Cassette-backed tests are NOT integration; they replay committed fixtures and run in the default lane.",
 ]
 addopts = "--strict-markers"
 

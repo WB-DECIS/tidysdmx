@@ -148,7 +148,6 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-@pytest.mark.integration
 class TestApplyComponentMap:
     """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
@@ -295,7 +294,6 @@ class TestApplyComponentMapInMemory:
             apply_component_map(df, cm)
 
 
-@pytest.mark.integration
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -504,7 +502,6 @@ class TestApplyMultiComponentMapInMemory:
         assert list(result["URBANISATION"]) == ["C_", "_L", None]
 
 
-@pytest.mark.integration
 class TestMapStructures:
     """Tests for map_structures function."""
 

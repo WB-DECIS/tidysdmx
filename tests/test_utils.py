@@ -144,7 +144,6 @@ class TestExtractValidationInfo:
         with pytest.raises(TypeCheckError):
             extract_validation_info(invalid_input)
 
-    @pytest.mark.integration
     def test_extract_validation_has_expected_structure(self, ifpri_asti_schema):
         """Ensure the returned dict has the expected keys and types."""
         result = extract_validation_info(ifpri_asti_schema)
@@ -192,7 +191,6 @@ class TestExtractValidationInfo:
         result = extract_validation_info(sdmx_schema)
         assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
 
-    @pytest.mark.integration
     def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
         """Datastructure-context schema yields STRUCTURE reference columns."""
         result = extract_validation_info(ifpri_asti_schema)
@@ -222,7 +220,6 @@ class TestSdmxReferenceColsFor:
 
 
 class TestGetCodelistIds:
-    @pytest.mark.integration
     def test_get_codelist_ids_has_expected_structure(self, ifpri_asti_schema):
         """Ensure returned dict maps coded components to code ID lists."""
         comp = ifpri_asti_schema.components

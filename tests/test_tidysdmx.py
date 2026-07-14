@@ -710,7 +710,6 @@ class TestAddSdmxReferenceCols:
             _add_sdmx_reference_cols(df, "ID123", "dataflow", "X")
 
 
-@pytest.mark.integration
 class TestStandardizeOutput:
     """Tests for the `standardize_output` function using real schema fixture."""
 
