@@ -110,11 +110,19 @@ def collect_structure_map_artifacts(
         ...     prettyprint=True
         ... )
     """
-    artifacts: list[MaintainableArtefact] = [
-        rep_map
-        for m in structure_map.maps
-        if (rep_map := _get_embedded_rep_map(m)) is not None
-    ]
+    # Collect embedded rep maps, de-duplicating by short URN so a rep map
+    # shared by several ComponentMaps is only uploaded once (FMR rejects a
+    # batch that declares the same maintainable artefact twice).
+    artifacts: list[MaintainableArtefact] = []
+    seen_urns: set[str] = set()
+    for m in structure_map.maps:
+        rep_map = _get_embedded_rep_map(m)
+        if rep_map is None:
+            continue
+        if rep_map.short_urn in seen_urns:
+            continue
+        seen_urns.add(rep_map.short_urn)
+        artifacts.append(rep_map)
 
     # Convert RepresentationMap objects to URN references if requested
     if convert_to_urns and artifacts:

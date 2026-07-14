@@ -533,6 +533,28 @@ class TestMapStructures:
         for col in ["COMP_BREAKDOWN_1", "COMP_BREAKDOWN_2", "COMP_BREAKDOWN_3"]:
             assert all(result[col] == "_Z")
 
+    def test_date_pattern_map_raises_not_implemented(self):
+        """A DatePatternMap raises NotImplementedError, not TypeError (MW-05)."""
+        from pysdmx.model.map import StructureMap
+
+        from tidysdmx.structures import build_date_pattern_map
+
+        dpm = build_date_pattern_map(
+            source="DATE", target="TIME_PERIOD", pattern="MMM yy", frequency="M"
+        )
+        sm = StructureMap(
+            id="SM_DPM",
+            name="dpm",
+            agency="ECB",
+            version="1.0",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[dpm],
+        )
+        df = pd.DataFrame({"DATE": ["Jan 20"]})
+        with pytest.raises(NotImplementedError, match="DatePatternMap"):
+            map_structures(df, sm)
+
     def test_unmapped_indicator_results_in_nan(self, ifpri_asti_sm):
         """Tests that unmapped indicator values result in NaN in SEX column."""
         df = pd.DataFrame(

@@ -149,3 +149,21 @@ def test_public_function_is_marked_deprecated(name):
     assert getattr(func, "__deprecated__", None), (
         f"{name} should be decorated with @deprecated but has no __deprecated__ marker"
     )
+
+
+@pytest.mark.unit
+def test_deprecated_orchestrator_emits_single_warning(tmp_path):
+    """A deprecated function calling deprecated helpers warns exactly once (DEP-02).
+
+    write_excel_mapping_template internally calls build_excel_workbook and
+    create_mapping_rules (both deprecated); routing those through .__wrapped__
+    must suppress the misleading cascade so the user sees only the outer warning.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        tidysdmx.write_excel_mapping_template(
+            ["FREQ", "REF_AREA"], None, tmp_path / "template.xlsx"
+        )
+    future = [w for w in caught if issubclass(w.category, FutureWarning)]
+    assert len(future) == 1
+    assert "write_excel_mapping_template" in str(future[0].message)

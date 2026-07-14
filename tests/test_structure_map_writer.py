@@ -508,6 +508,24 @@ class TestCollectStructureMapArtifacts:
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
         assert len(rep_maps) == 1
 
+    def test_shared_rep_map_is_collected_once(self, make_rep_map):
+        """A rep map reused by several ComponentMaps is collected once (MW-04)."""
+        shared = make_rep_map(id="RM_SHARED", name="Shared")
+        sm = StructureMap(
+            id="SM_SHARED",
+            name="Shared",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=shared),
+                ComponentMap(source="B", target="Y", values=shared),
+            ],
+        )
+        artifacts = collect_structure_map_artifacts(sm, convert_to_urns=False)
+        rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
+        assert len(rep_maps) == 1
+
     def test_convert_to_urns_true_replaces_embedded_objects(self, make_structure_map):
         """With convert_to_urns=True the returned StructureMap must use URN strings."""
         sm = make_structure_map()

@@ -163,7 +163,9 @@ def write_excel_mapping_template(
             f"Directory {output_path.parent} does not exist. Please create it first."
         )
 
-    wb = build_excel_workbook(components, rep_maps)
+    # Undecorated call so this deprecated function emits only its own warning,
+    # not a second one for build_excel_workbook pointing inside tidysdmx (DEP-02).
+    wb = build_excel_workbook.__wrapped__(components, rep_maps)
 
     try:
         wb.save(str(output_path))
@@ -253,7 +255,9 @@ def build_excel_workbook(
     """
     rep_map_set: Set[str] = set(rep_maps) if rep_maps else set()
 
-    mapping_rules = create_mapping_rules(components, rep_map_set)
+    # Undecorated call so this deprecated function emits only its own warning,
+    # not a second one for create_mapping_rules pointing inside tidysdmx (DEP-02).
+    mapping_rules = create_mapping_rules.__wrapped__(components, rep_map_set)
 
     comp_mapping_df = pd.DataFrame(
         {

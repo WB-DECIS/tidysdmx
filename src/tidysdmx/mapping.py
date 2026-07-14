@@ -60,6 +60,13 @@ def map_structures(
 
     Returns:
         Modified DataFrame with all mappings applied.
+
+    Raises:
+        NotImplementedError: If the StructureMap contains a ``DatePatternMap``.
+            Applying date-pattern rules is not yet supported by this engine;
+            build such maps with :func:`~tidysdmx.build_date_pattern_map` for
+            FMR upload, but convert the dates in a separate step for now.
+        TypeError: If the StructureMap contains an unrecognised map type.
     """
     fixed_value_maps = []
     implicit_maps = []
@@ -75,6 +82,13 @@ def map_structures(
             component_maps.append(m)
         elif isinstance(m, px.model.map.MultiComponentMap):
             multi_component_maps.append(m)
+        elif isinstance(m, px.model.map.DatePatternMap):
+            raise NotImplementedError(
+                "DatePatternMap rules are not yet supported by map_structures. "
+                f"Map for target '{m.target}' cannot be applied; convert the "
+                "date column separately, or drop the DatePatternMap from the "
+                "StructureMap before applying it."
+            )
         else:
             raise TypeError(f"Unknown map type: {type(m)}")
 
