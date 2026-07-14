@@ -148,7 +148,6 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-@pytest.mark.integration
 class TestApplyComponentMap:
     """Tests for apply_component_map using the ifpri_asti_sm fixture."""
 
@@ -294,8 +293,26 @@ class TestApplyComponentMapInMemory:
         with pytest.raises(ValueError, match="Invalid regex pattern"):
             apply_component_map(df, cm)
 
+    def test_non_matching_regex_leaves_value_unmapped(self):
+        """A non-null value matched by no rule (literal or regex) becomes NaN.
 
-@pytest.mark.integration
+        Guards the fall-through that decides an unmapped value is dropped to NaN
+        rather than keeping the stale source value (a silent-corruption hazard).
+        """
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:^X.*", target="XX"),  # narrow, no catch-all
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", "XylophoneLand", "BR"]})
+
+        result = apply_component_map(df, cm)
+        assert result["REGION"].iloc[0] == "EU"  # literal
+        assert result["REGION"].iloc[1] == "XX"  # regex match
+        assert pd.isna(result["REGION"].iloc[2])  # no rule matched -> NaN
+
+
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -504,7 +521,6 @@ class TestApplyMultiComponentMapInMemory:
         assert list(result["URBANISATION"]) == ["C_", "_L", None]
 
 
-@pytest.mark.integration
 class TestMapStructures:
     """Tests for map_structures function."""
 
@@ -535,6 +551,28 @@ class TestMapStructures:
         # Check FixedValueMap columns
         for col in ["COMP_BREAKDOWN_1", "COMP_BREAKDOWN_2", "COMP_BREAKDOWN_3"]:
             assert all(result[col] == "_Z")
+
+    def test_date_pattern_map_raises_not_implemented(self):
+        """A DatePatternMap raises NotImplementedError, not TypeError (MW-05)."""
+        from pysdmx.model.map import StructureMap
+
+        from tidysdmx.structures import build_date_pattern_map
+
+        dpm = build_date_pattern_map(
+            source="DATE", target="TIME_PERIOD", pattern="MMM yy", frequency="M"
+        )
+        sm = StructureMap(
+            id="SM_DPM",
+            name="dpm",
+            agency="ECB",
+            version="1.0",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[dpm],
+        )
+        df = pd.DataFrame({"DATE": ["Jan 20"]})
+        with pytest.raises(NotImplementedError, match="DatePatternMap"):
+            map_structures(df, sm)
 
     def test_unmapped_indicator_results_in_nan(self, ifpri_asti_sm):
         """Tests that unmapped indicator values result in NaN in SEX column."""

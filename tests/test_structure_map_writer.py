@@ -304,11 +304,27 @@ class TestReplaceValuesWithUrn:
         assert isinstance(result, MultiComponentMap)
         assert isinstance(result.values, str)
 
+    def test_multi_generated_urn_uses_representation_map_class(
+        self, make_multi_rep_map
+    ):
+        """A generated URN (no .urn set) uses the "RepresentationMap" class (MW-01)."""
+        mrm = make_multi_rep_map(urn=None)
+        mcm = MultiComponentMap(
+            source=["COUNTRY", "CURRENCY"],
+            target=["CURRENCY"],
+            values=mrm,
+        )
+
+        result = _replace_values_with_urn(mcm)
+
+        assert "structuremapping.RepresentationMap=" in result.values
+        assert "MultiRepresentationMap" not in result.values
+
     def test_multi_uses_existing_urn_when_present(self, make_multi_rep_map):
         """If the MultiRepresentationMap has a URN, it should be used as-is."""
         explicit_urn = (
             "urn:sdmx:org.sdmx.infomodel.structuremapping"
-            ".MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+            ".RepresentationMap=ECB:MRM_CTRY(1.0)"
         )
         mrm = make_multi_rep_map(urn=explicit_urn)
         mcm = MultiComponentMap(
@@ -492,6 +508,75 @@ class TestCollectStructureMapArtifacts:
         rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
         assert len(rep_maps) == 1
 
+    def test_shared_rep_map_is_collected_once(self, make_rep_map):
+        """A rep map reused by several ComponentMaps is collected once (MW-04)."""
+        shared = make_rep_map(id="RM_SHARED", name="Shared")
+        sm = StructureMap(
+            id="SM_SHARED",
+            name="Shared",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=shared),
+                ComponentMap(source="B", target="Y", values=shared),
+            ],
+        )
+        artifacts = collect_structure_map_artifacts(sm, convert_to_urns=False)
+        rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
+        assert len(rep_maps) == 1
+
+    def test_equal_content_distinct_objects_collected_once(self, make_rep_map):
+        """Two distinct-but-equal rep map objects count as one artefact."""
+        twin_a = make_rep_map(id="RM_TWIN", name="Twin")
+        twin_b = make_rep_map(id="RM_TWIN", name="Twin")
+        assert twin_a is not twin_b
+        sm = StructureMap(
+            id="SM_TWINS",
+            name="Twins",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=twin_a),
+                ComponentMap(source="B", target="Y", values=twin_b),
+            ],
+        )
+        artifacts = collect_structure_map_artifacts(sm, convert_to_urns=False)
+        rep_maps = [a for a in artifacts if isinstance(a, RepresentationMap)]
+        assert len(rep_maps) == 1
+
+    def test_same_urn_different_content_raises(self, make_rep_map):
+        """Two different rep maps sharing one identity raise instead of dropping.
+
+        Silently keeping the first would produce an incorrect upload batch
+        (Copilot review on PR #253).
+        """
+        original = make_rep_map(id="RM_CLASH", name="Original")
+        impostor = RepresentationMap(
+            id="RM_CLASH",
+            name="Impostor with different content",
+            agency="ECB",
+            version="1.0",
+            source="String",
+            target="String",
+            maps=[ValueMap(source="FR", target="FRA")],
+        )
+        assert original.short_urn == impostor.short_urn
+        sm = StructureMap(
+            id="SM_CLASH",
+            name="Clash",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[
+                ComponentMap(source="A", target="X", values=original),
+                ComponentMap(source="B", target="Y", values=impostor),
+            ],
+        )
+        with pytest.raises(ValueError, match="same identity 'RepresentationMap"):
+            collect_structure_map_artifacts(sm)
+
     def test_convert_to_urns_true_replaces_embedded_objects(self, make_structure_map):
         """With convert_to_urns=True the returned StructureMap must use URN strings."""
         sm = make_structure_map()
@@ -643,6 +728,51 @@ class TestValidateStructureMapReferences:
         )
 
         validate_structure_map_references(sm)  # must not raise
+
+    def test_embedded_rep_map_missing_name_raises_m003(self):
+        """A name-less embedded RepresentationMap is caught before upload (MW-03).
+
+        collect_structure_map_artifacts ships embedded rep maps as standalone
+        artefacts, and FMR requires a Name on every maintainable artefact, so
+        the common checks must run on them too.
+        """
+        rep_map = RepresentationMap(
+            id="RM",
+            name=None,
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ValueMap(source="A", target="B")],
+        )
+        sm = StructureMap(
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
+        )
+
+        with pytest.raises(ValueError, match="M003"):
+            validate_structure_map_references(sm)
+
+    def test_structure_map_missing_name_raises_m003(self):
+        """The StructureMap's own common fields are validated too (MW-02).
+
+        Delegating to raise_if_invalid means id/version/name are now checked in
+        addition to the map-rule checks that master performed.
+        """
+        sm = StructureMap(
+            id="SM",
+            name=None,
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ImplicitComponentMap(source="FREQ", target="FREQUENCY")],
+        )
+
+        with pytest.raises(ValueError, match="M003"):
+            validate_structure_map_references(sm)
 
 
 @pytest.mark.unit

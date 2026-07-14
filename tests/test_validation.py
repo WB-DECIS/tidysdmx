@@ -139,6 +139,17 @@ class TestValidateColumns:
             df, valid_columns=[], sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"]
         )
 
+    def test_defaults_to_structure_reference_columns(self):
+        """Omitting sdmx_cols allows the SDMX-CSV 2.0 STRUCTURE columns."""
+        df = pd.DataFrame(columns=["COMP1", "STRUCTURE", "STRUCTURE_ID", "ACTION"])
+        validate_columns(df, valid_columns=["COMP1"])  # must not raise
+
+    def test_max_errors_truncates_unexpected_columns(self):
+        """Unexpected columns are capped at max_errors with a truncation note."""
+        df = pd.DataFrame(columns=["X1", "X2", "X3", "X4"])
+        with pytest.raises(ValueError, match=r"and 2 more \(max_errors=2\)"):
+            validate_columns(df, valid_columns=[], sdmx_cols=[], max_errors=2)
+
 
 class TestValidateCodelistIds:
     @pytest.fixture()
@@ -176,6 +187,21 @@ class TestValidateCodelistIds:
         """Tests that columns not present in DataFrame are ignored."""
         df = pd.DataFrame({"col1": ["A1", "A2"]})
         validate_codelist_ids(df, sample_codelist_ids)
+
+    def test_max_errors_caps_reported_violations(self, sample_codelist_ids):
+        """Violations are capped at max_errors with a 'capped' suffix."""
+        df = pd.DataFrame({"col1": ["X1", "X2", "X3"], "col2": ["B1", "B2", "B1"]})
+        with pytest.raises(ValueError, match=r"capped \(max_errors=2\)") as exc:
+            validate_codelist_ids(df, sample_codelist_ids, max_errors=2)
+        # Exactly two invalid values are listed (one per reported line).
+        assert str(exc.value).count("'col1':") == 2
+
+    def test_max_errors_not_triggered_below_cap(self, sample_codelist_ids):
+        """Below the cap, no truncation suffix is added."""
+        df = pd.DataFrame({"col1": ["A1", "X1"], "col2": ["B1", "B2"]})
+        with pytest.raises(ValueError) as exc:
+            validate_codelist_ids(df, sample_codelist_ids, max_errors=10)
+        assert "capped" not in str(exc.value)
 
     def test_empty_dataframe_passes(self, sample_codelist_ids):
         """Tests that an empty DataFrame passes without error."""
@@ -397,12 +423,12 @@ class TestValidateDatasetLocal:
         with pytest.raises(ValueError, match="Either a schema or precomputed"):
             validate_dataset_local(df)
 
-    def test_dataflow_schema_accepts_dataflow_columns(self, sdmx_schema):
-        """Dataflow-context schema infers DATAFLOW/DATAFLOW_ID reference columns.
+    def test_dataflow_schema_accepts_structure_columns(self, sdmx_schema):
+        """Dataflow-context schema accepts SDMX-CSV 2.0 STRUCTURE columns.
 
-        Regression test for issue #218: validation must not flag DATAFLOW /
-        DATAFLOW_ID as unexpected or report STRUCTURE / STRUCTURE_ID as
-        missing when the schema's context is ``dataflow``.
+        Regression test for issue #218 and BUG-11: every context uses the
+        STRUCTURE / STRUCTURE_ID / ACTION reference columns, so a dataflow
+        schema must not flag them as unexpected or report them missing.
         """
         df = pd.DataFrame(
             {
@@ -410,8 +436,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020", "2021"],
                 "SEX": ["F", "M"],
                 "OBS_VALUE": [100, 200],
-                "DATAFLOW": ["dataflow", "dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow", "dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
                 "ACTION": ["I", "I"],
             }
         )
@@ -474,8 +500,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020"],
                 "SEX": ["F"],
                 "OBS_VALUE": [100],
-                "DATAFLOW": ["dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
                 "ACTION": ["I"],
             }
         )

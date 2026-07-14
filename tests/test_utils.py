@@ -144,7 +144,6 @@ class TestExtractValidationInfo:
         with pytest.raises(TypeCheckError):
             extract_validation_info(invalid_input)
 
-    @pytest.mark.integration
     def test_extract_validation_has_expected_structure(self, ifpri_asti_schema):
         """Ensure the returned dict has the expected keys and types."""
         result = extract_validation_info(ifpri_asti_schema)
@@ -188,11 +187,10 @@ class TestExtractValidationInfo:
         assert isinstance(result["codelist_ids"], dict)
 
     def test_sdmx_cols_inferred_from_dataflow_context(self, sdmx_schema):
-        """Dataflow-context schema yields DATAFLOW reference columns."""
+        """Every context yields the SDMX-CSV 2.0 STRUCTURE reference columns."""
         result = extract_validation_info(sdmx_schema)
-        assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+        assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
-    @pytest.mark.integration
     def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
         """Datastructure-context schema yields STRUCTURE reference columns."""
         result = extract_validation_info(ifpri_asti_schema)
@@ -201,19 +199,16 @@ class TestExtractValidationInfo:
 
 class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
-        "context, expected",
-        [
-            ("dataflow", ["DATAFLOW", "DATAFLOW_ID", "ACTION"]),
-            ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            (
-                "provisionagreement",
-                ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
-            ),
-        ],
+        "context",
+        ["dataflow", "datastructure", "provisionagreement"],
     )
-    def test_returns_expected_columns(self, context, expected):
-        """Each SDMX context maps to its canonical reference columns."""
-        assert sdmx_reference_cols_for(context) == expected
+    def test_returns_structure_columns_for_every_context(self, context):
+        """SDMX-CSV 2.0 uses STRUCTURE/STRUCTURE_ID/ACTION for every context."""
+        assert sdmx_reference_cols_for(context) == [
+            "STRUCTURE",
+            "STRUCTURE_ID",
+            "ACTION",
+        ]
 
     def test_raises_on_invalid_context(self):
         """Unknown contexts raise a TypeCheckError (rejected by typeguard)."""
@@ -222,7 +217,6 @@ class TestSdmxReferenceColsFor:
 
 
 class TestGetCodelistIds:
-    @pytest.mark.integration
     def test_get_codelist_ids_has_expected_structure(self, ifpri_asti_schema):
         """Ensure returned dict maps coded components to code ID lists."""
         comp = ifpri_asti_schema.components
@@ -483,3 +477,36 @@ class TestParseMappingTemplateWb:
         """ValueError is raised for invalid file type."""
         with pytest.raises(ValueError, match="Invalid file type"):
             parse_mapping_template_wb(invalid_mapping_template_path)
+
+    def test_parse_mapping_template_wb_legacy_xls_rejected(self, tmp_path):
+        """A legacy .xls file is rejected up front with a convert-to-xlsx hint.
+
+        openpyxl cannot parse binary .xls, so accepting the suffix only to fail
+        later with a wrapped RuntimeError was misleading (PR #253 review).
+        """
+        legacy = tmp_path / "template.xls"
+        legacy.write_bytes(b"\xd0\xcf\x11\xe0 fake legacy workbook")
+        with pytest.raises(ValueError, match=r"Re-save the template as \.xlsx"):
+            parse_mapping_template_wb(legacy)
+
+    def test_parse_mapping_template_wb_corrupt_file_raises_runtimeerror(self, tmp_path):
+        """A non-Excel file with a .xlsx extension raises a wrapped RuntimeError."""
+        bogus = tmp_path / "corrupt.xlsx"
+        bogus.write_text("this is not a zip-based xlsx file")
+        with pytest.raises(RuntimeError, match="Failed to read Excel file"):
+            parse_mapping_template_wb(bogus)
+
+    def test_parse_mapping_template_wb_preserves_literal_na(self, tmp_path):
+        """A literal 'NA' cell is preserved, not read as a missing value."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "REP_MAPPING"
+        ws.append(["S:country", "T:REF_AREA"])
+        ws.append(["NA", "NAM"])
+        path = tmp_path / "na.xlsx"
+        wb.save(path)
+
+        result = parse_mapping_template_wb(path)
+        assert result["REP_MAPPING"].iloc[0, 0] == "NA"

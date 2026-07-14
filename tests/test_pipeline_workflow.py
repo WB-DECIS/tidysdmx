@@ -17,13 +17,13 @@ The pipeline steps are:
   7. Collect artifacts for FMR upload
 """
 
-import os
 import pickle as pkl
 import re
 from pathlib import Path
 
 import pandas as pd
 import pytest
+from fixtures.cassette_utils import FMR_TEST_URL, load_pickle_cassette
 from pysdmx.api import fmr
 from pysdmx.model import Schema
 from pysdmx.model.map import (
@@ -50,7 +50,7 @@ RAW_CSV = DATA_DIR / "pipeline_raw_sample.csv"
 MAPPING_XLSX = DATA_DIR / "pipeline_mapping_template.xlsx"
 
 # Dissemination schema FMR parameters (matches the notebook)
-DIS_FMR_URL = "https://fmrqa.worldbank.org/FMR/sdmx/v2"
+DIS_FMR_URL = FMR_TEST_URL
 DIS_AGENCY = "WB.GGH.HSP"
 DIS_STRUCTURE_ID = "DS_ASPIRE"
 DIS_STRUCTURE_VERSION = "1.0.0"
@@ -87,20 +87,11 @@ def _load_dis_schema() -> Schema:
         with open(cache, "wb") as f:
             pkl.dump(schema, f)
     """
-    if DIS_SCHEMA_CACHE.exists():
-        with open(DIS_SCHEMA_CACHE, "rb") as f:
-            schema = pkl.load(f)
-        assert isinstance(schema, Schema)
-        return schema
-
-    # Cache missing. Under CI, fail loudly rather than silently skipping and
-    # live-fetching from FMR (which would mask a missing or renamed cassette).
-    if os.environ.get("CI"):
-        raise RuntimeError(
-            f"Cassette {DIS_SCHEMA_CACHE.name} missing under CI; refusing to "
-            f"live-fetch FMR. Regenerate it locally (see this function's docstring) "
-            f"and commit it."
-        )
+    cached = load_pickle_cassette(
+        DIS_SCHEMA_CACHE, Schema, "see this function's docstring"
+    )
+    if cached is not None:
+        return cached
 
     # Local dev only — attempt real API call, requires FMR network access.
     try:

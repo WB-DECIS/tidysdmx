@@ -105,11 +105,10 @@ def validate_dataset_local(
             :func:`~tidysdmx.utils.extract_validation_info`. This argument
             will be removed in a future release; pass ``schema`` directly
             instead.
-        sdmx_cols: SDMX reference columns expected in the dataset. When
-            omitted, the columns are inferred from the schema's context
-            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
-            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
-            datastructure schema).
+        sdmx_cols: SDMX-CSV reference columns expected in the dataset. When
+            omitted, they default to ``['STRUCTURE', 'STRUCTURE_ID',
+            'ACTION']`` — the SDMX-CSV 2.0 reference columns used for every
+            schema context.
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 

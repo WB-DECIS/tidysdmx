@@ -1,9 +1,9 @@
 # tests/fixtures/fxtr_mapping.py
-import os
 import pickle as pkl
 from pathlib import Path
 
 import pytest
+from fixtures.cassette_utils import FMR_TEST_URL, load_pickle_cassette
 from pysdmx.api import fmr
 from pysdmx.model import StructureMap
 
@@ -16,7 +16,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 def api_params_sm():
     """Fixture0 for API parameters."""
     return {
-        "fmr_url": "https://fmrqa.worldbank.org/FMR/sdmx/v2",
+        "fmr_url": FMR_TEST_URL,
         "raw_structure_agency": "WB",
         "raw_structure_map": "SM_IFPRI_ASTI_TO_DATA360",
     }
@@ -34,20 +34,11 @@ def ifpri_asti_sm(api_params_sm):
     """
     cache_file = CACHE_DIR / "ifpri_asti_sm.pkl"
 
-    if cache_file.exists():
-        with open(cache_file, "rb") as f:
-            sm = pkl.load(f)
-        assert isinstance(sm, StructureMap)
-        return sm
-
-    # Cassette missing. Under CI, fail loudly rather than silently skipping and
-    # live-fetching from FMR (which would mask a missing or renamed cassette).
-    if os.environ.get("CI"):
-        raise RuntimeError(
-            f"Cassette {cache_file.name} missing under CI; refusing to live-fetch "
-            f"FMR. Regenerate it locally with `python -m tests.fixtures.fxtr_mapping` "
-            f"and commit it."
-        )
+    cached = load_pickle_cassette(
+        cache_file, StructureMap, "python -m tests.fixtures.fxtr_mapping"
+    )
+    if cached is not None:
+        return cached
 
     # Local dev only — try live FMR, skip on failure.
     try:
@@ -71,8 +62,7 @@ if __name__ == "__main__":
     Run from repo root:
         python -m tests.fixtures.fxtr_mapping
     """
-    base_url = "https://fmrqa.worldbank.org/FMR/sdmx/v2"
-    client = fmr.RegistryClient(base_url)
+    client = fmr.RegistryClient(FMR_TEST_URL)
 
     cassettes = {
         "ifpri_asti_sm.pkl": {

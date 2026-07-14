@@ -4,8 +4,9 @@ from typeguard import typechecked
 
 SDMX_PACKAGE_MAP: dict[str, str] = {
     "StructureMap": "structuremapping",
+    # Both single and multi representation maps use the "RepresentationMap"
+    # information-model class; "MultiRepresentationMap" is not an SDMX class.
     "RepresentationMap": "structuremapping",
-    "MultiRepresentationMap": "structuremapping",
     "Codelist": "codelist",
     "ConceptScheme": "conceptscheme",
     "DataStructure": "datastructure",

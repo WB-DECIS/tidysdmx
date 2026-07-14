@@ -87,9 +87,13 @@ def _parse_info_sheet(
         if any("DATA CURATION PROCESS" in cell for cell in valid_cells):
             continue
 
-        # We strictly look for Key-Value pairs (but allow the second item to be empty)
-        if len(valid_cells) <= 2:
-            cleaned_rows.append(valid_cells)
+        # Normalise to a (Key, Value) pair: pad a lone key with an empty value
+        # and keep only the first two cells. Previously a row with a third
+        # non-empty cell (e.g. a trailing comment) was dropped entirely, which
+        # silently discarded the agency/version metadata it carried (TPL-02).
+        key = valid_cells[0]
+        value = valid_cells[1] if len(valid_cells) > 1 else ""
+        cleaned_rows.append([key, value])
 
     if not cleaned_rows:
         return pd.DataFrame(columns=["Key", "Value"])
@@ -754,6 +758,30 @@ def _is_missing_token(s: str) -> bool:
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
 
+def _cell_str(row: "pd.Series", key: str) -> str:
+    """Return a stripped string for *key* in *row*, or ``""`` when missing.
+
+    A cell is missing when it is a pandas NA value (``pd.NA``/``np.nan``/
+    ``None``) or when its string form is a missing token (``""``, ``"nan"``,
+    ``"<NA>"``). This prevents an empty Excel cell — read as ``pd.NA`` and
+    otherwise stringified to the truthy literal ``"<NA>"`` — from being baked
+    into a map as a real component ID or value. Legitimate codes such as
+    ``"NA"`` (Namibia) are **not** treated as missing.
+
+    Args:
+        row: The DataFrame row to read from.
+        key: The column label to look up.
+
+    Returns:
+        The stripped cell value, or ``""`` if the cell is missing.
+    """
+    raw = row.get(key)
+    if pd.isna(raw):
+        return ""
+    text = str(raw).strip()
+    return "" if _is_missing_token(text) else text
+
+
 def _unique_map_id(counter: dict[str, int], base: str) -> str:
     """Return a collision-free map ID for *base*, tracking seen bases in *counter*.
 
@@ -825,8 +853,8 @@ def _extract_mapping_rule(row: "pd.Series") -> MappingRule:
             format), if ``SOURCE`` is missing for an implicit/representation
             rule, or for unknown rule strings.
     """
-    source_id = str(row.get("SOURCE", "")).strip()
-    target_id = str(row.get("TARGET", "")).strip()
+    source_id = _cell_str(row, "SOURCE")
+    target_id = _cell_str(row, "TARGET")
     raw_rule = str(row.get("MAPPING_RULES", "")).strip()
 
     # Extract optional codelist URNs (None when absent or empty)
@@ -975,17 +1003,39 @@ def _extract_representation_map(
     actual_source_col = _match_column_name(source_id, source_df.columns.tolist())
     actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
 
-    # 3) Build, sanitize, and deduplicate pairs
-    rep_mapping_df = (
-        pd.DataFrame(
-            {
-                "source": source_df[actual_source_col],
-                "target": target_df[actual_target_col],
-            }
-        )
-        .dropna(subset=["source", "target"], how="any")
-        .drop_duplicates()
+    # 3) Assemble pairs. Strip surrounding whitespace from Excel cells (TPL-04)
+    #    so " FR " and "FR" do not yield distinct codes.
+    pairs = pd.DataFrame(
+        {
+            "source": source_df[actual_source_col].astype("string").str.strip(),
+            "target": target_df[actual_target_col].astype("string").str.strip(),
+        }
     )
+    src_blank = pairs["source"].isna() | (pairs["source"] == "")
+    tgt_blank = pairs["target"].isna() | (pairs["target"] == "")
+
+    # A one-sided row (a source with no target, or vice versa) usually means a
+    # merged or misaligned cell; dropping it silently would lose a real mapping
+    # pair, so raise instead (TPL-03). Rows blank on both sides are legitimate
+    # spacer rows and are dropped.
+    one_sided = src_blank ^ tgt_blank
+    if one_sided.any():
+        offending = [
+            (None if pd.isna(s) else s, None if pd.isna(t) else t)
+            for s, t in zip(
+                pairs.loc[one_sided, "source"],
+                pairs.loc[one_sided, "target"],
+                strict=True,
+            )
+        ]
+        raise ValueError(
+            f"REP_MAPPING has one-sided rows between source column "
+            f"'{actual_source_col}' and target column '{actual_target_col}' "
+            f"(a source with no target or vice versa, often a merged cell): "
+            f"{offending}. Provide both values or remove the row."
+        )
+
+    rep_mapping_df = pairs[~(src_blank & tgt_blank)].drop_duplicates()
 
     # 4) Enforce non-empty result
     if rep_mapping_df.empty:

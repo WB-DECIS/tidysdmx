@@ -7,24 +7,45 @@ from typeguard import typechecked
 _ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
 
 
-@typechecked
-def _to_identifier(raw: str) -> str:
-    """Convert a raw string to a valid SDMX identifier."""
+def _sanitize_identifier(raw: str) -> str | None:
+    """Return an uppercased SDMX-safe identifier, or ``None`` if empty.
+
+    Replaces non-alphanumeric/underscore runs with ``_``, strips leading and
+    trailing underscores, and prefixes a leading digit with ``_``. Returns
+    ``None`` when nothing usable remains (e.g. a symbol-only input), so callers
+    can raise an error tailored to what the string represents.
+    """
     cleaned = _ID_PATTERN.sub("_", raw).strip("_")
     if not cleaned:
-        raise ValueError(
-            f"Column name {raw!r} cannot be converted to a valid SDMX identifier."
-        )
+        return None
     if cleaned[0].isdigit():
         cleaned = f"_{cleaned}"
     return cleaned.upper()
 
 
 @typechecked
+def _to_identifier(raw: str) -> str:
+    """Convert a raw string to a valid SDMX identifier (e.g. a component ID)."""
+    cleaned = _sanitize_identifier(raw)
+    if cleaned is None:
+        raise ValueError(
+            f"Column name {raw!r} cannot be converted to a valid SDMX identifier."
+        )
+    return cleaned
+
+
+@typechecked
 def _code_id(raw: str, uppercase: bool = True) -> str:
-    """Sanitize a raw string into an SDMX code ID."""
-    candidate = _to_identifier(str(raw))
-    return (candidate if uppercase else candidate.lower()) or "UNSPECIFIED"
+    """Sanitize a raw cell value into a valid SDMX code ID.
+
+    Raises:
+        ValueError: If *raw* contains no character usable in an SDMX identifier
+            (e.g. a symbol-only value such as ``"!!!"``).
+    """
+    cleaned = _sanitize_identifier(str(raw))
+    if cleaned is None:
+        raise ValueError(f"Value {raw!r} cannot be converted to a valid SDMX code ID.")
+    return cleaned if uppercase else cleaned.lower()
 
 
 @typechecked

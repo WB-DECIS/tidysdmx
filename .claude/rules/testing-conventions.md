@@ -18,7 +18,9 @@
 ## Coverage
 - Every new public function must have at least one corresponding test.
 - Target overall coverage: 70%+ (enforced in CI via pytest-cov).
-- kedro.py is excluded from coverage (integration-only module).
+- kedro.py is excluded from coverage: it is a thin, deprecated Kedro-node
+  wrapper layer scheduled for removal, so it is not held to the coverage gate
+  even though `tests/test_kedro.py` exercises its core behaviour.
 
 ## Fixtures
 - Session-scoped fixtures for expensive objects (FMR schemas, pickled data).

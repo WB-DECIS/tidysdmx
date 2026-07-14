@@ -135,8 +135,11 @@ reference:
         - build_value_map_list
         - build_multi_value_map_list
         - build_representation_map
+        - build_representation_map_from_df
         - build_multi_representation_map
+        - build_multi_representation_map_from_df
         - build_single_component_map
+        - build_multi_component_map
         - collect_structure_map_artifacts
         - validate_structure_map_references
         - prepare_structure_map_for_upload

@@ -14,7 +14,6 @@ from pysdmx.model.map import (
 from typeguard import typechecked
 
 from .artefact_validation import raise_if_invalid
-from .structures import gen_urn
 
 MapRule = (
     ComponentMap
@@ -50,11 +49,13 @@ def _replace_values_with_urn(map_rule: MapRule) -> MapRule:
     rep_map = _get_embedded_rep_map(map_rule)
     if rep_map is None:
         return map_rule
-    urn = rep_map.urn or gen_urn(
-        artefact_type=type(rep_map).__name__,
-        agency=rep_map.agency,
-        artefact_id=rep_map.id,
-        version=rep_map.version,
+    # Derive the reference from pysdmx's own short_urn so the SDMX class name is
+    # always correct. Both RepresentationMap and MultiRepresentationMap
+    # serialize under the information-model class "RepresentationMap"
+    # (MultiRepresentationMap is a pysdmx typing convenience, not an IM class),
+    # and short_urn reflects that — unlike ``type(rep_map).__name__``.
+    urn = rep_map.urn or (
+        f"urn:sdmx:org.sdmx.infomodel.structuremapping.{rep_map.short_urn}"
     )
     return type(map_rule)(source=map_rule.source, target=map_rule.target, values=urn)
 
@@ -95,6 +96,12 @@ def collect_structure_map_artifacts(
     Returns:
         A list containing RepresentationMaps followed by the StructureMap.
 
+    Raises:
+        ValueError: If two embedded representation maps share the same
+            identity (agency/id/version → same URN) but have different
+            content — one of them would silently overwrite the other on
+            upload, so the conflict must be fixed in the StructureMap first.
+
     Example:
         >>> from pysdmx.io import write_sdmx
         >>> from pysdmx.io.format import Format
@@ -109,11 +116,29 @@ def collect_structure_map_artifacts(
         ...     prettyprint=True
         ... )
     """
-    artifacts: list[MaintainableArtefact] = [
-        rep_map
-        for m in structure_map.maps
-        if (rep_map := _get_embedded_rep_map(m)) is not None
-    ]
+    # Collect embedded rep maps, de-duplicating by short URN so a rep map
+    # shared by several ComponentMaps is only uploaded once (FMR rejects a
+    # batch that declares the same maintainable artefact twice). Two maps that
+    # share a URN but differ in content are an identity conflict, not a
+    # duplicate — silently keeping one would corrupt the upload, so raise.
+    artifacts: list[MaintainableArtefact] = []
+    seen: dict[str, MaintainableArtefact] = {}
+    for m in structure_map.maps:
+        rep_map = _get_embedded_rep_map(m)
+        if rep_map is None:
+            continue
+        kept = seen.get(rep_map.short_urn)
+        if kept is not None:
+            if kept != rep_map:
+                raise ValueError(
+                    f"StructureMap embeds two different representation maps "
+                    f"with the same identity '{rep_map.short_urn}'. Give them "
+                    f"distinct ids/versions (or make them identical) before "
+                    f"collecting artefacts for upload."
+                )
+            continue
+        seen[rep_map.short_urn] = rep_map
+        artifacts.append(rep_map)
 
     # Convert RepresentationMap objects to URN references if requested
     if convert_to_urns and artifacts:

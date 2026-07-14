@@ -1,33 +1,56 @@
 # tests/fixtures/fxtr_structures.py
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 import pytest
 
-# Directory for cached responses
-CACHE_DIR = Path(__file__).parent / "data/structures"
-CACHE_DIR.mkdir(exist_ok=True)
 
-
-@pytest.fixture(scope="session")
+@pytest.fixture
 def value_map_df_mandatory_cols():
-    """Return a session-scoped DataFrame with 'source' and 'target' columns.
+    """Return a DataFrame with 'source' and 'target' columns.
 
-    Caches the data to CSV on first run and reloads it on subsequent runs.
+    Function-scoped and rebuilt from its inline definition on every use so
+    tests never share (or accidentally mutate) a single instance, and so the
+    inputs can never be silently shadowed by a stale on-disk cache.
     """
-    cache_file = CACHE_DIR / "value_map_df_mandatory_cols.csv"
+    return pd.DataFrame(
+        {"source": ["regex:^A", "UY", "FR"], "target": ["ARG", "URY", "FRA"]}
+    )
 
-    if cache_file.exists():
-        # Load cached response
-        df = pd.read_csv(cache_file)
-        assert {"source", "target"}.issubset(df.columns)
 
-    else:
-        df = pd.DataFrame(
-            {"source": ["regex:^A", "UY", "FR"], "target": ["ARG", "URY", "FRA"]}
-        )
+@pytest.fixture
+def template_workbook_factory(tmp_path) -> Callable[..., Path]:
+    """Return a factory that writes an Excel mapping template to ``tmp_path``.
 
-        # Cache as CSV
-        df.to_csv(cache_file, index=False)
+    The factory takes a mapping of sheet name to rows (each row a sequence of
+    cell values; the first row is the header) and returns the path to a real
+    ``.xlsx`` file. Using a real workbook — rather than passing hand-built
+    object-dtype DataFrames straight to the builder — exercises
+    :func:`tidysdmx.utils.parse_mapping_template_wb`, so Excel-specific
+    behaviour (empty cells, ``dtype="string"`` coercion, ``"NA"`` handling,
+    numeric cells) is covered end to end.
 
-    return df
+    Example:
+        >>> path = template_workbook_factory({
+        ...     "INFO": [["Key", "Value"], ["dataflow", "AG:DF(1.0)"]],
+        ...     "COMP_MAPPING": [["SOURCE", "TARGET", "MAPPING_RULES"],
+        ...                      ["S1", "T1", "implicit"]],
+        ... })
+    """
+    counter = {"n": 0}
+
+    def _make(sheets: dict[str, Sequence[Sequence[object]]]) -> Path:
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        for sheet_name, rows in sheets.items():
+            ws = wb.create_sheet(title=sheet_name)
+            for row in rows:
+                ws.append(list(row))
+        counter["n"] += 1
+        path = tmp_path / f"template_{counter['n']}.xlsx"
+        wb.save(path)
+        return path
+
+    return _make

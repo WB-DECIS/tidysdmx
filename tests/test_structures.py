@@ -21,23 +21,9 @@ from pysdmx.model.map import (
 )
 from typeguard import TypeCheckError
 
-# Import tidysdmx functions
+# Public builders come from the package; the private helpers are imported from
+# their defining submodules (the package __all__ no longer re-exports them).
 from tidysdmx.structures import (
-    _collect_mapping_rules_errors,
-    _collect_required_sheet_errors,
-    _extract_all_artefact_ids,
-    _extract_mapping_rule,
-    _extract_metadata_from_info_sheet,
-    _extract_multi_representation_map,
-    _extract_representation_map,
-    _infer_sdmx_type,
-    _is_missing_token,
-    _match_column_name,
-    _parse_comp_mapping_sheet,
-    _parse_info_sheet,
-    _parse_rep_mapping_sheet,
-    _resolve_representation_ref,
-    _validate_mapping_template_wb,
     build_date_pattern_map,
     build_fixed_map,
     build_implicit_component_map,
@@ -51,8 +37,42 @@ from tidysdmx.structures import (
     build_value_map_list,
     create_schema_from_table,
     gen_urn,
+    sanitize_variable,
 )
-from tidysdmx.structures.template import _unique_map_id
+from tidysdmx.structures.map_builders import (
+    _parse_validity_date,
+    _resolve_representation_ref,
+)
+from tidysdmx.structures.schema_from_table import _infer_sdmx_type
+from tidysdmx.structures.template import (
+    _cell_str,
+    _collect_mapping_rules_errors,
+    _collect_required_sheet_errors,
+    _extract_all_artefact_ids,
+    _extract_mapping_rule,
+    _extract_metadata_from_info_sheet,
+    _extract_multi_representation_map,
+    _extract_representation_map,
+    _is_missing_token,
+    _match_column_name,
+    _parse_comp_mapping_sheet,
+    _parse_info_sheet,
+    _parse_rep_mapping_sheet,
+    _unique_map_id,
+    _validate_mapping_template_wb,
+)
+from tidysdmx.utils import parse_mapping_template_wb
+
+
+def test_structures_star_import_exposes_no_private_names():
+    """`from tidysdmx.structures import *` must not leak private helpers."""
+    namespace: dict[str, object] = {}
+    exec("from tidysdmx.structures import *", namespace)
+    leaked = [
+        name for name in namespace if name.startswith("_") and not name.startswith("__")
+    ]
+    assert leaked == []
+
 
 # region fixtures
 
@@ -1172,7 +1192,10 @@ class TestBuildMultiRepresentationMap:
             sample_df, id="MRM1", name="Ctry", agency="WB", generate_urn=True
         )
         assert result.urn is not None
-        assert "MultiRepresentationMap=WB:MRM1(1.0)" in result.urn
+        # A multi representation map serialises under the "RepresentationMap"
+        # information-model class, never "MultiRepresentationMap" (MW-01).
+        assert "RepresentationMap=WB:MRM1(1.0)" in result.urn
+        assert "MultiRepresentationMap" not in result.urn
 
     def test_generate_urn_false_leaves_urn_none(self, sample_df):
         """Tests that no URN is generated when generate_urn is False."""
@@ -1444,6 +1467,28 @@ class TestCreateSchemaFromTable:
         )
         assert sc.dsd.urn == gen_urn("DataStructure", "WB.DP", "DP_SCHEMA", "1.0")
 
+    def test_colliding_sanitized_code_ids_raise(self):
+        """Distinct raw values that sanitize to one code ID raise (SFT-01)."""
+        df = pd.DataFrame(
+            {
+                "REF_AREA": ["usa", "USA", "U.S.A"],
+                "TIME_PERIOD": ["2020", "2021", "2022"],
+                "OBS": [1, 2, 3],
+            }
+        )
+        with pytest.raises(ValueError, match="both sanitize to code ID 'USA'"):
+            create_schema_from_table(
+                df, dimensions=["REF_AREA"], time_dimension="TIME_PERIOD", measure="OBS"
+            )
+
+    def test_symbol_only_value_raises_value_specific_error(self):
+        """A symbol-only cell value raises a code-ID error, not a column error."""
+        df = pd.DataFrame({"REF_AREA": ["!!!"], "TIME_PERIOD": ["2020"], "OBS": [1]})
+        with pytest.raises(ValueError, match="valid SDMX code"):
+            create_schema_from_table(
+                df, dimensions=["REF_AREA"], time_dimension="TIME_PERIOD", measure="OBS"
+            )
+
 
 class TestBuildSchemaFromWbTemplate:
     def test_parse_info_sheet_basic_scenario(self):
@@ -1496,23 +1541,30 @@ class TestBuildSchemaFromWbTemplate:
         assert result.iloc[0]["Key"] == "Valid_Key"
         assert result.iloc[0]["Value"] == "Valid_Value"
 
-    def test_parse_info_sheet_ignore_rows_with_wrong_count(self):
-        """Test that rows with 1 item or more than 2 items are excluded."""
+    def test_parse_info_sheet_normalizes_rows_to_key_value(self):
+        """Rows are normalised to (Key, Value); extra trailing cells are ignored.
+
+        Regression for TPL-02: a row with a third non-empty cell (e.g. a
+        comment) must keep its Key/Value rather than being dropped, which would
+        silently lose agency/version metadata.
+        """
         df = pd.DataFrame(
             [
-                ["OnlyOne"],  # 1 valid cell -> Keep
-                ["Key", "Value", "Extra"],  # 3 valid cells -> Ignore
-                # [None, None, "SingleValid"],  # 1 valid cell post-nan -> Ignore
-                ["Key2", "Value2", None],  # 2 valid cells -> Keep
+                ["OnlyOne"],  # lone key -> padded with empty value
+                ["Key", "Value", "Extra"],  # extra cell -> first two kept
+                ["Key2", "Value2", None],  # 2 valid cells -> kept
             ]
         )
         sheets = {"INFO": df}
         result = _parse_info_sheet(sheets)
 
-        assert len(result) == 2
+        assert len(result) == 3
         assert result.iloc[0]["Key"] == "OnlyOne"
-        assert result.iloc[1]["Key"] == "Key2"
-        assert result.iloc[1]["Value"] == "Value2"
+        assert result.iloc[0]["Value"] == ""
+        assert result.iloc[1]["Key"] == "Key"
+        assert result.iloc[1]["Value"] == "Value"
+        assert result.iloc[2]["Key"] == "Key2"
+        assert result.iloc[2]["Value"] == "Value2"
 
     def test_parse_info_sheet_empty_input(self):
         """Test parsing an empty DataFrame yields empty result with correct columns."""
@@ -1862,6 +1914,11 @@ class TestMatchColumnName:
         with pytest.raises(ValueError, match="Ambiguous match"):
             _match_column_name("AGE", ["PERCENTAGE", "AGE_GROUP"])
 
+    def test_match_column_name_ambiguous_normalized_equality_raises(self):
+        """Two columns that normalize identically must raise, not bind arbitrarily."""
+        with pytest.raises(ValueError, match="normalize identically"):
+            _match_column_name("ref area", ["REF_AREA", "REF AREA"])
+
     def test_match_column_name_exact_wins_over_substring(self):
         """An exact match is returned even when a substring container exists."""
         assert _match_column_name("AGE", ["PERCENTAGE", "AGE"]) == "AGE"
@@ -1916,6 +1973,75 @@ class TestGenUrn:
         assert gen_urn("MysteryType", "AG", "X", "2.0") == (
             "urn:sdmx:org.sdmx.infomodel.base.MysteryType=AG:X(2.0)"
         )
+
+    @pytest.mark.parametrize(
+        "artefact_type", ["Codelist", "ConceptScheme", "DataStructure", "StructureMap"]
+    )
+    def test_gen_urn_round_trips_through_pysdmx_parse_urn(self, artefact_type):
+        """Every mapped artefact type produces a URN pysdmx can parse back."""
+        from pysdmx.util import parse_urn
+
+        urn = gen_urn(artefact_type, "ECB", "ART_ID", "1.2")
+        ref = parse_urn(urn)
+        assert ref.agency == "ECB"
+        assert ref.id == "ART_ID"
+        assert ref.version == "1.2"
+
+
+class TestParseValidityDate:
+    """Tests for `_parse_validity_date` cell coercion."""
+
+    def test_none_and_nan_return_none(self):
+        """Null cells yield None."""
+        assert _parse_validity_date(None) is None
+        assert _parse_validity_date(np.nan) is None
+
+    def test_iso_string_parsed(self):
+        """An ISO-8601 string is parsed to a datetime."""
+        assert _parse_validity_date("2020-01-01") == datetime(2020, 1, 1)
+
+    def test_plain_datetime_passthrough(self):
+        """A plain datetime is returned unchanged."""
+        dt = datetime(2021, 6, 30)
+        assert _parse_validity_date(dt) is dt
+
+    def test_pandas_timestamp_converted(self):
+        """A pandas Timestamp is converted to a plain datetime."""
+        result = _parse_validity_date(pd.Timestamp("2022-03-15"))
+        assert isinstance(result, datetime)
+        assert result == datetime(2022, 3, 15)
+
+    def test_invalid_iso_string_raises(self):
+        """A non-ISO string raises ValueError."""
+        with pytest.raises(ValueError, match=r"isoformat"):
+            _parse_validity_date("not-a-date")
+
+    def test_unsupported_type_raises_type_error(self):
+        """A numeric cell cannot be interpreted as a date."""
+        with pytest.raises(TypeError, match="Cannot interpret validity date"):
+            _parse_validity_date(20200101)
+
+
+class TestSanitizeVariable:
+    """Tests for the public `sanitize_variable` helper."""
+
+    def test_uppercases_and_replaces_punctuation(self):
+        """Dots and other punctuation collapse to underscores; result uppercased."""
+        assert sanitize_variable("per_allsp.adq") == "PER_ALLSP_ADQ"
+
+    def test_lowercase_option(self):
+        """uppercase=False keeps the sanitized id lowercase."""
+        assert sanitize_variable("per_allsp.adq", uppercase=False) == "per_allsp_adq"
+
+    def test_idempotent(self):
+        """Sanitizing an already-sanitized value is a no-op."""
+        once = sanitize_variable("U.S.A / 2020")
+        assert sanitize_variable(once) == once
+
+    def test_symbol_only_value_raises(self):
+        """A value with no usable characters raises a code-ID error."""
+        with pytest.raises(ValueError, match="valid SDMX code"):
+            sanitize_variable("!!!")
 
 
 class TestBuildStructureMapFromTemplateWb:
@@ -2155,6 +2281,88 @@ class TestBuildStructureMapFromTemplateWb:
         assert all(
             list(vm.source) != ["regex:.*", "regex:.*"] for vm in mcm.values.maps
         )
+
+    def test_literal_na_code_survives_excel_roundtrip(self, template_workbook_factory):
+        """A literal 'NA' code (Namibia) is not dropped when read from Excel.
+
+        Regression for the silent data loss where ``pd.read_excel`` interpreted
+        'NA' as a missing value and the whole mapping pair vanished from the
+        built StructureMap. Exercises the real Excel path via
+        parse_mapping_template_wb.
+        """
+        path = template_workbook_factory(
+            {
+                "INFO": [["Key", "Value"], ["dataflow", "WB:DF(1.0)"]],
+                "COMP_MAPPING": [
+                    ["SOURCE", "TARGET", "MAPPING_RULES"],
+                    ["country", "REF_AREA", "representation"],
+                ],
+                "REP_MAPPING": [
+                    ["S:country", "T:REF_AREA"],
+                    ["NA", "NAM"],  # Namibia ISO-2 -> ISO-3
+                    ["FR", "FRA"],
+                ],
+            }
+        )
+        sheets = parse_mapping_template_wb(path)
+        # The parsed cell must be the literal string, not a missing value.
+        assert sheets["REP_MAPPING"].iloc[0, 0] == "NA"
+
+        sm = build_structure_map_from_template_wb(sheets)
+        comp_map = next(m for m in sm.maps if isinstance(m, ComponentMap))
+        pairs = {(vm.source, vm.target) for vm in comp_map.values.maps}
+        assert ("NA", "NAM") in pairs
+        assert ("FR", "FRA") in pairs
+
+    @pytest.mark.parametrize("missing", [pd.NA, np.nan, None, ""])
+    def test_missing_source_for_implicit_rule_raises(self, valid_mappings, missing):
+        """An empty SOURCE cell is treated as missing, not baked in as '<NA>'.
+
+        Regression: cells were stringified before the missing-value check, so a
+        blank SOURCE became the literal 'ImplicitComponentMap(source="<NA>")'.
+        """
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": [missing],
+                    "TARGET": ["FREQ"],
+                    "MAPPING_RULES": ["implicit"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        with pytest.raises(
+            ValueError, match="Implicit map rule requires a non-empty 'SOURCE'"
+        ):
+            build_structure_map_from_template_wb(mappings)
+
+    @pytest.mark.parametrize("missing", [pd.NA, np.nan, None, ""])
+    def test_missing_target_cell_skips_row(self, valid_mappings, missing):
+        """A row with an empty TARGET is skipped rather than emitting a bad map."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["CUR"],
+                    "TARGET": [missing],
+                    "MAPPING_RULES": ["fixed:USD"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        assert sm.maps == []
+
+    def test_cell_str_normalizes_missing_but_keeps_na(self):
+        """_cell_str maps NA-ish cells to '' but preserves the literal 'NA'."""
+        row = pd.Series({"a": pd.NA, "b": "  x  ", "c": "NA", "d": "<NA>", "e": "nan"})
+        assert _cell_str(row, "a") == ""
+        assert _cell_str(row, "b") == "x"
+        assert _cell_str(row, "c") == "NA"
+        assert _cell_str(row, "d") == ""
+        assert _cell_str(row, "e") == ""
+        assert _cell_str(row, "missing") == ""
 
 
 class TestExtractAllArtefactIds:
@@ -2573,7 +2781,7 @@ class TestExtractRepresentationMap:
 
     @pytest.fixture
     def sample_rep_data(self):
-        """Provides valid source and target DataFrames for tests."""
+        """Provides source and target DataFrames with one-sided rows (TPL-03)."""
         source_df = pd.DataFrame(
             {"src_col": ["A", "B", None, "C"], "extra": [1, 2, 3, 4]}
         )
@@ -2582,11 +2790,42 @@ class TestExtractRepresentationMap:
         )
         return {"source": source_df, "target": target_df}
 
-    def test_valid_mapping(self, sample_rep_data):
-        """Tests valid mapping returns correct DataFrame with dups and NA removed."""
-        result_df = _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
-        expected = pd.DataFrame({"source": ["A", "B"], "target": ["X", "Y"]})
-        pd.testing.assert_frame_equal(result_df, expected)
+    def test_valid_mapping(self):
+        """Aligned pairs return a two-column DataFrame with duplicates removed."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A", "B", "A"]}),
+            "target": pd.DataFrame({"tgt_col": ["X", "Y", "X"]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        expected = pd.DataFrame(
+            {"source": ["A", "B"], "target": ["X", "Y"]}, dtype="string"
+        )
+        pd.testing.assert_frame_equal(result_df.reset_index(drop=True), expected)
+
+    def test_one_sided_rows_raise(self, sample_rep_data):
+        """A one-sided row (source XOR target) raises rather than dropping (TPL-03)."""
+        with pytest.raises(ValueError, match="one-sided rows"):
+            _extract_representation_map(sample_rep_data, "src_col", "tgt_col")
+
+    def test_surrounding_whitespace_is_stripped(self):
+        """Leading/trailing whitespace is trimmed so ' FR ' == 'FR' (TPL-04)."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": [" FR ", "FR"]}),
+            "target": pd.DataFrame({"tgt_col": ["FRA", " FRA "]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 1
+        assert result_df.iloc[0]["source"] == "FR"
+        assert result_df.iloc[0]["target"] == "FRA"
+
+    def test_blank_rows_on_both_sides_are_dropped(self):
+        """Rows blank on both sides are spacer rows and are dropped, not raised."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A", None, "B"]}),
+            "target": pd.DataFrame({"tgt_col": ["X", None, "Y"]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert len(result_df) == 2
 
     @pytest.mark.skip(reason="Not sure this is expected behavior")
     def test_raises_value_error_on_missing_rep_data(self):

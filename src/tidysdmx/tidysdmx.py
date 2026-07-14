@@ -179,9 +179,12 @@ def standardize_sdmx(
         The standardized DataFrame with columns transformed according to
         the mapping.
     """
-    df = transform_source_to_target(df, mapping)
-    df = map_to_sdmx(df, mapping)
-    df = standardize_data_for_upload(
+    # Call the undecorated (.__wrapped__) implementations so a single user call
+    # emits only this function's FutureWarning, not a cascade pointing at
+    # tidysdmx's own source for functions the user never called (DEP-02).
+    df = transform_source_to_target.__wrapped__(df, mapping)
+    df = map_to_sdmx.__wrapped__(df, mapping)
+    df = standardize_data_for_upload.__wrapped__(
         df, dsd=mapping["dsd_id"], cat_indicator=cat_indicator
     )
     return df
@@ -557,12 +560,17 @@ def standardize_data_for_upload(
         The modified DataFrame with corrected INDICATOR values, added
         reference columns, and reordered columns.
     """
+    # Call undecorated (.__wrapped__) implementations of the deprecated helpers
+    # so this function emits only its own FutureWarning, not a misleading
+    # cascade (DEP-02). qa_remove_duplicates is not deprecated.
     if not cat_indicator:
-        df = qa_coerce_numeric(df, numeric_columns=["OBS_VALUE"])
+        df = qa_coerce_numeric.__wrapped__(df, numeric_columns=["OBS_VALUE"])
     df = qa_remove_duplicates(df)
 
-    df = standardize_indicator_id(df=df)
-    df = add_sdmx_reference_cols(df=df, dsd=dsd, structure=structure, action=action)
+    df = standardize_indicator_id.__wrapped__(df=df)
+    df = add_sdmx_reference_cols.__wrapped__(
+        df=df, dsd=dsd, structure=structure, action=action
+    )
 
     cols_to_move = ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
     new_order = cols_to_move + [col for col in df.columns if col not in cols_to_move]
@@ -687,7 +695,7 @@ def _add_sdmx_reference_cols(
         >>> df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         >>> result = _add_sdmx_reference_cols(df, "DF_EXAMPLE", "dataflow", "I")
         >>> print(result.columns)
-        Index(['OBS_VALUE', 'DATAFLOW', 'DATAFLOW_ID', 'ACTION'], dtype='object')
+        Index(['OBS_VALUE', 'STRUCTURE', 'STRUCTURE_ID', 'ACTION'], dtype='object')
     """
     df = df.copy()
 

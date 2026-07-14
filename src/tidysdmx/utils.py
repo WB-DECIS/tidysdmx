@@ -19,20 +19,21 @@ from ._deprecation import deprecated
 def sdmx_reference_cols_for(
     context: Literal["dataflow", "datastructure", "provisionagreement"],
 ) -> list[str]:
-    """Return the SDMX reference columns for a given schema context.
+    """Return the SDMX-CSV reference columns for a given schema context.
+
+    The SDMX-CSV 2.0 field guide uses a single structure-reference column set
+    for every context: ``STRUCTURE`` (holding the structure *type*, e.g.
+    ``dataflow``), ``STRUCTURE_ID`` (the artefact ID) and ``ACTION``. The
+    context is retained in the signature for call-site clarity and forward
+    compatibility, but it does not change the column names.
 
     Args:
         context: The SDMX schema context.
 
     Returns:
-        The ``[STRUCTURE-like, STRUCTURE_ID-like, "ACTION"]`` column names
-        that an SDMX-CSV dataset is expected to carry for the given context.
+        ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]``.
     """
-    if context == "dataflow":
-        return ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
-    if context == "datastructure":
-        return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-    return ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"]
+    return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
 
 @typechecked
@@ -51,9 +52,9 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
             - codelist_ids: Dictionary with coded components as keys and
               list of codelist IDs as values.
             - dim_comp: List of dimension component names.
-            - sdmx_cols: SDMX reference columns expected in the dataset,
-              inferred from the schema's context (e.g. ``DATAFLOW`` /
-              ``DATAFLOW_ID`` / ``ACTION`` for a dataflow-context schema).
+            - sdmx_cols: SDMX-CSV reference columns expected in the dataset
+              (``STRUCTURE`` / ``STRUCTURE_ID`` / ``ACTION`` for every schema
+              context, per the SDMX-CSV 2.0 field guide).
     """
     comp = schema.components
     valid_comp = [c.id for c in comp]
@@ -162,7 +163,9 @@ def write_excel_mapping_template(
             f"Directory {output_path.parent} does not exist. Please create it first."
         )
 
-    wb = build_excel_workbook(components, rep_maps)
+    # Undecorated call so this deprecated function emits only its own warning,
+    # not a second one for build_excel_workbook pointing inside tidysdmx (DEP-02).
+    wb = build_excel_workbook.__wrapped__(components, rep_maps)
 
     try:
         wb.save(str(output_path))
@@ -252,7 +255,9 @@ def build_excel_workbook(
     """
     rep_map_set: Set[str] = set(rep_maps) if rep_maps else set()
 
-    mapping_rules = create_mapping_rules(components, rep_map_set)
+    # Undecorated call so this deprecated function emits only its own warning,
+    # not a second one for create_mapping_rules pointing inside tidysdmx (DEP-02).
+    mapping_rules = create_mapping_rules.__wrapped__(components, rep_map_set)
 
     comp_mapping_df = pd.DataFrame(
         {
@@ -299,21 +304,43 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
     Returns:
         A dictionary where keys are sheet names and values are DataFrames.
 
+    Only genuinely empty cells are treated as missing. pandas' default
+    NA strings (``"NA"``, ``"N/A"``, ``"null"``, ...) are **not** applied, so
+    a legitimate code such as ``"NA"`` (Namibia's ISO 3166 alpha-2 code)
+    survives round-tripping instead of being silently dropped.
+
+    Only the modern ``.xlsx`` format is supported: the file is read with the
+    openpyxl engine, which cannot parse legacy binary ``.xls`` workbooks.
+
     Raises:
         FileNotFoundError: If the provided file path does not exist.
-        ValueError: If the file is not an Excel file (.xlsx or .xls).
+        ValueError: If the file is not a ``.xlsx`` Excel file. Legacy ``.xls``
+            workbooks are rejected up front — re-save them as ``.xlsx``.
         RuntimeError: If reading the Excel file fails.
     """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
-    if path.suffix.lower() not in (".xlsx", ".xls"):
+    suffix = path.suffix.lower()
+    if suffix == ".xls":
         raise ValueError(
-            f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx or .xls)."
+            "Legacy .xls workbooks are not supported (the openpyxl engine reads "
+            "only .xlsx). Re-save the template as .xlsx and try again."
+        )
+    if suffix != ".xlsx":
+        raise ValueError(
+            f"Invalid file type: {path.suffix}. Expected an Excel file (.xlsx)."
         )
 
     try:
-        return pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
+        return pd.read_excel(
+            path,
+            sheet_name=None,
+            dtype="string",
+            engine="openpyxl",
+            keep_default_na=False,
+            na_values=[""],
+        )
     except (ValueError, OSError, zipfile.BadZipFile) as e:
         raise RuntimeError(f"Failed to read Excel file: {e}") from e
 

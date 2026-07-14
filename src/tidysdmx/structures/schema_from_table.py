@@ -66,12 +66,26 @@ def _create_codelist_for_component(
     version: str,
     uppercase_code_ids: bool = True,
 ) -> Codelist:
-    """Create a codelist from unique values in a DataFrame column."""
+    """Create a codelist from unique values in a DataFrame column.
+
+    Raises:
+        ValueError: If two distinct raw values sanitize to the same code ID
+            (e.g. ``"usa"`` and ``"USA"`` both become ``"USA"``), which would
+            otherwise produce an SDMX-invalid codelist with duplicate code IDs.
+    """
     values = dataframe[column].dropna().astype(str).unique()
-    codes = [
-        Code(id=_code_id(value, uppercase=uppercase_code_ids), name=value)
-        for value in values
-    ]
+    by_code_id: dict[str, str] = {}
+    for value in values:
+        code_id = _code_id(value, uppercase=uppercase_code_ids)
+        if code_id in by_code_id:
+            raise ValueError(
+                f"Column '{column}': values {by_code_id[code_id]!r} and "
+                f"{value!r} both sanitize to code ID {code_id!r}. Deduplicate "
+                f"or rename them (e.g. with sanitize_variable) before building "
+                f"the schema."
+            )
+        by_code_id[code_id] = value
+    codes = [Code(id=code_id, name=name) for code_id, name in by_code_id.items()]
     cl_id = f"CL_{comp_id}"
 
     return build_codelist(

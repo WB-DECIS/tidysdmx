@@ -41,9 +41,9 @@ The table below captures the philosophical gap at each stage of the workflow:
 │                                                                         │
 │  extract_validation_info()   — Schema → plain dict                      │
 │  extract_component_ids()     — Schema → list[str]                       │
-│  build_value_map_list()      — pd.DataFrame → list[ValueMap]            │
-│  build_representation_map()  — pd.DataFrame → RepresentationMap         │
-│  build_single_component_map()— pd.DataFrame + str → ComponentMap        │
+│  build_value_map_list()          — pd.DataFrame → list[ValueMap]        │
+│  build_representation_map_from_df()— pd.DataFrame → RepresentationMap    │
+│  build_single_component_map()    — pd.DataFrame + str → ComponentMap     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                          pysdmx                                         │
 │                                                                         │
@@ -257,7 +257,7 @@ Analyst input (tabular)          →   pysdmx object
 (source, target, pattern, freq)  →   DatePatternMap
 (source: str, target: str)       →   ValueMap
 pd.DataFrame[source, target, ...]→   list[ValueMap]         (via build_value_map_list)
-pd.DataFrame + agency/id/...     →   RepresentationMap      (via build_representation_map)
+pd.DataFrame + agency/id/...     →   RepresentationMap      (via build_representation_map_from_df)
 pd.DataFrame + source/target_comp→   ComponentMap           (via build_single_component_map)
 Workbook (openpyxl)              →   StructureMap           (via build_structure_map)
 dict[str, pd.DataFrame]          →   StructureMap           (via build_structure_map_from_template_wb)
@@ -395,8 +395,9 @@ tidysdmx/
 │                     Owns the JSON mapping format (read_mapping, map_to_sdmx)
 │                     Wraps fmr.RegistryClient (fetch_schema)
 │
-├── structures.py   ← Translation layer: DataFrames → pysdmx objects
-│                     All build_*() functions live here
+├── structures/     ← Translation layer: DataFrames → pysdmx objects (package)
+│                     All build_*() functions live here (map_builders.py,
+│                     template.py) and are re-exported from tidysdmx.structures
 │                     Also create_schema_from_table() (DataFrame → SchemaComponents)
 │
 ├── mapping.py      ← DataFrame-level application of pysdmx map objects
