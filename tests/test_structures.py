@@ -52,7 +52,8 @@ from tidysdmx.structures import (
     create_schema_from_table,
     gen_urn,
 )
-from tidysdmx.structures.template import _unique_map_id
+from tidysdmx.structures.template import _cell_str, _unique_map_id
+from tidysdmx.utils import parse_mapping_template_wb
 
 # region fixtures
 
@@ -1172,7 +1173,10 @@ class TestBuildMultiRepresentationMap:
             sample_df, id="MRM1", name="Ctry", agency="WB", generate_urn=True
         )
         assert result.urn is not None
-        assert "MultiRepresentationMap=WB:MRM1(1.0)" in result.urn
+        # A multi representation map serialises under the "RepresentationMap"
+        # information-model class, never "MultiRepresentationMap" (MW-01).
+        assert "RepresentationMap=WB:MRM1(1.0)" in result.urn
+        assert "MultiRepresentationMap" not in result.urn
 
     def test_generate_urn_false_leaves_urn_none(self, sample_df):
         """Tests that no URN is generated when generate_urn is False."""
@@ -1443,6 +1447,28 @@ class TestCreateSchemaFromTable:
             schema_id="DP_SCHEMA",
         )
         assert sc.dsd.urn == gen_urn("DataStructure", "WB.DP", "DP_SCHEMA", "1.0")
+
+    def test_colliding_sanitized_code_ids_raise(self):
+        """Distinct raw values that sanitize to one code ID raise (SFT-01)."""
+        df = pd.DataFrame(
+            {
+                "REF_AREA": ["usa", "USA", "U.S.A"],
+                "TIME_PERIOD": ["2020", "2021", "2022"],
+                "OBS": [1, 2, 3],
+            }
+        )
+        with pytest.raises(ValueError, match="both sanitize to code ID 'USA'"):
+            create_schema_from_table(
+                df, dimensions=["REF_AREA"], time_dimension="TIME_PERIOD", measure="OBS"
+            )
+
+    def test_symbol_only_value_raises_value_specific_error(self):
+        """A symbol-only cell value raises a code-ID error, not a column error."""
+        df = pd.DataFrame({"REF_AREA": ["!!!"], "TIME_PERIOD": ["2020"], "OBS": [1]})
+        with pytest.raises(ValueError, match="valid SDMX code"):
+            create_schema_from_table(
+                df, dimensions=["REF_AREA"], time_dimension="TIME_PERIOD", measure="OBS"
+            )
 
 
 class TestBuildSchemaFromWbTemplate:
@@ -2155,6 +2181,88 @@ class TestBuildStructureMapFromTemplateWb:
         assert all(
             list(vm.source) != ["regex:.*", "regex:.*"] for vm in mcm.values.maps
         )
+
+    def test_literal_na_code_survives_excel_roundtrip(self, template_workbook_factory):
+        """A literal 'NA' code (Namibia) is not dropped when read from Excel.
+
+        Regression for the silent data loss where ``pd.read_excel`` interpreted
+        'NA' as a missing value and the whole mapping pair vanished from the
+        built StructureMap. Exercises the real Excel path via
+        parse_mapping_template_wb.
+        """
+        path = template_workbook_factory(
+            {
+                "INFO": [["Key", "Value"], ["dataflow", "WB:DF(1.0)"]],
+                "COMP_MAPPING": [
+                    ["SOURCE", "TARGET", "MAPPING_RULES"],
+                    ["country", "REF_AREA", "representation"],
+                ],
+                "REP_MAPPING": [
+                    ["S:country", "T:REF_AREA"],
+                    ["NA", "NAM"],  # Namibia ISO-2 -> ISO-3
+                    ["FR", "FRA"],
+                ],
+            }
+        )
+        sheets = parse_mapping_template_wb(path)
+        # The parsed cell must be the literal string, not a missing value.
+        assert sheets["REP_MAPPING"].iloc[0, 0] == "NA"
+
+        sm = build_structure_map_from_template_wb(sheets)
+        comp_map = next(m for m in sm.maps if isinstance(m, ComponentMap))
+        pairs = {(vm.source, vm.target) for vm in comp_map.values.maps}
+        assert ("NA", "NAM") in pairs
+        assert ("FR", "FRA") in pairs
+
+    @pytest.mark.parametrize("missing", [pd.NA, np.nan, None, ""])
+    def test_missing_source_for_implicit_rule_raises(self, valid_mappings, missing):
+        """An empty SOURCE cell is treated as missing, not baked in as '<NA>'.
+
+        Regression: cells were stringified before the missing-value check, so a
+        blank SOURCE became the literal 'ImplicitComponentMap(source="<NA>")'.
+        """
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": [missing],
+                    "TARGET": ["FREQ"],
+                    "MAPPING_RULES": ["implicit"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        with pytest.raises(
+            ValueError, match="Implicit map rule requires a non-empty 'SOURCE'"
+        ):
+            build_structure_map_from_template_wb(mappings)
+
+    @pytest.mark.parametrize("missing", [pd.NA, np.nan, None, ""])
+    def test_missing_target_cell_skips_row(self, valid_mappings, missing):
+        """A row with an empty TARGET is skipped rather than emitting a bad map."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["CUR"],
+                    "TARGET": [missing],
+                    "MAPPING_RULES": ["fixed:USD"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        sm = build_structure_map_from_template_wb(mappings)
+        assert sm.maps == []
+
+    def test_cell_str_normalizes_missing_but_keeps_na(self):
+        """_cell_str maps NA-ish cells to '' but preserves the literal 'NA'."""
+        row = pd.Series({"a": pd.NA, "b": "  x  ", "c": "NA", "d": "<NA>", "e": "nan"})
+        assert _cell_str(row, "a") == ""
+        assert _cell_str(row, "b") == "x"
+        assert _cell_str(row, "c") == "NA"
+        assert _cell_str(row, "d") == ""
+        assert _cell_str(row, "e") == ""
+        assert _cell_str(row, "missing") == ""
 
 
 class TestExtractAllArtefactIds:

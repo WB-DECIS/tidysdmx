@@ -754,6 +754,30 @@ def _is_missing_token(s: str) -> bool:
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
 
+def _cell_str(row: "pd.Series", key: str) -> str:
+    """Return a stripped string for *key* in *row*, or ``""`` when missing.
+
+    A cell is missing when it is a pandas NA value (``pd.NA``/``np.nan``/
+    ``None``) or when its string form is a missing token (``""``, ``"nan"``,
+    ``"<NA>"``). This prevents an empty Excel cell — read as ``pd.NA`` and
+    otherwise stringified to the truthy literal ``"<NA>"`` — from being baked
+    into a map as a real component ID or value. Legitimate codes such as
+    ``"NA"`` (Namibia) are **not** treated as missing.
+
+    Args:
+        row: The DataFrame row to read from.
+        key: The column label to look up.
+
+    Returns:
+        The stripped cell value, or ``""`` if the cell is missing.
+    """
+    raw = row.get(key)
+    if pd.isna(raw):
+        return ""
+    text = str(raw).strip()
+    return "" if _is_missing_token(text) else text
+
+
 def _unique_map_id(counter: dict[str, int], base: str) -> str:
     """Return a collision-free map ID for *base*, tracking seen bases in *counter*.
 
@@ -825,8 +849,8 @@ def _extract_mapping_rule(row: "pd.Series") -> MappingRule:
             format), if ``SOURCE`` is missing for an implicit/representation
             rule, or for unknown rule strings.
     """
-    source_id = str(row.get("SOURCE", "")).strip()
-    target_id = str(row.get("TARGET", "")).strip()
+    source_id = _cell_str(row, "SOURCE")
+    target_id = _cell_str(row, "TARGET")
     raw_rule = str(row.get("MAPPING_RULES", "")).strip()
 
     # Extract optional codelist URNs (None when absent or empty)

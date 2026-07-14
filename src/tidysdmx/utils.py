@@ -299,6 +299,11 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
     Returns:
         A dictionary where keys are sheet names and values are DataFrames.
 
+    Only genuinely empty cells are treated as missing. pandas' default
+    NA strings (``"NA"``, ``"N/A"``, ``"null"``, ...) are **not** applied, so
+    a legitimate code such as ``"NA"`` (Namibia's ISO 3166 alpha-2 code)
+    survives round-tripping instead of being silently dropped.
+
     Raises:
         FileNotFoundError: If the provided file path does not exist.
         ValueError: If the file is not an Excel file (.xlsx or .xls).
@@ -313,7 +318,14 @@ def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
         )
 
     try:
-        return pd.read_excel(path, sheet_name=None, dtype="string", engine="openpyxl")
+        return pd.read_excel(
+            path,
+            sheet_name=None,
+            dtype="string",
+            engine="openpyxl",
+            keep_default_na=False,
+            na_values=[""],
+        )
     except (ValueError, OSError, zipfile.BadZipFile) as e:
         raise RuntimeError(f"Failed to read Excel file: {e}") from e
 
