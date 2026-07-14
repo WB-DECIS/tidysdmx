@@ -126,13 +126,21 @@ markers = [
     "integration: opens a live network connection (e.g. live FMR). Cassette-backed tests are NOT integration; they replay committed fixtures and run in the default lane.",
 ]
 addopts = "--strict-markers"
+# Turn every warning into an error so third-party deprecations and any new,
+# un-asserted warning fail loudly. The one exception is tidysdmx's own
+# deprecation notices, which legacy-behaviour tests emit by design; the
+# deprecation *contract* is still asserted explicitly in test_deprecation.py.
+filterwarnings = [
+    "error",
+    "ignore:.* is deprecated and will be removed.*:FutureWarning",
+]
 
 [tool.coverage.run]
 source = ["src/tidysdmx"]
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 88
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
