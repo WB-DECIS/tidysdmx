@@ -78,9 +78,42 @@ Ready to contribute? Here's how to set up `tidysdmx` for local development.
     $ git checkout -b name-of-your-bugfix-or-feature
     ```
 
-5. When you're done making changes, check that your changes conform to any code formatting requirements and pass any tests.
+5. When you're done making changes, run the same checks CI runs:
+
+    ```console
+    $ poetry run ruff check .            # lint
+    $ poetry run ruff format --check .   # formatting
+    $ poetry run pytest -m "not integration" --cov   # unit lane + coverage
+    ```
+
+    The unit lane is hermetic (no network) and is what CI gates on.
 
 6. Commit your changes and open a pull request.
+
+## Running the test lanes
+
+- **Unit lane (default, hermetic):** `poetry run pytest -m "not integration"`.
+  This is what CI runs on every push. Cassette-backed tests (FMR schemas and
+  structure maps replayed from committed pickles) run here — they open no
+  network connection.
+- **Integration lane (opt-in, needs network):** `poetry run pytest -m integration`.
+  These hit a live FMR registry. Point them at a different registry by setting
+  `TIDYSDMX_TEST_FMR_URL` (defaults to the World Bank QA registry).
+
+## Test cassettes
+
+FMR responses are recorded as pickled pysdmx objects under
+`tests/fixtures/cassettes/` so the unit lane runs offline. Regenerate them when
+you bump `pysdmx` or when the upstream artefacts change:
+
+```console
+$ poetry run python -m tests.fixtures.fxtr_schemas   # schema cassettes
+$ poetry run python -m tests.fixtures.fxtr_mapping   # structure-map cassette
+```
+
+Commit the regenerated `.pkl` files. Missing cassettes fail loudly under CI
+(the loader refuses to silently live-fetch), and `tests/test_cassettes.py`
+asserts each one still unpickles to the expected pysdmx type.
 
 ## Pull Request Guidelines
 
