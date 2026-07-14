@@ -7,7 +7,7 @@ publish workflow can be tested without any network access.
 
 import msgspec
 import pytest
-from pysdmx.errors import NotFound
+from pysdmx.errors import InternalError, NotFound
 from pysdmx.model import (
     Code,
     Component,
@@ -33,6 +33,7 @@ from tidysdmx.artefact_builder import (
     build_hierarchy,
     build_representation_map,
 )
+from tidysdmx.fmr.client import FmrClient
 
 AGENCY = "WB.TEST"
 
@@ -339,16 +340,20 @@ def structure_map_rule_added(structure_map_base):
     )
 
 
-class FakeFmrClient:
+class FakeFmrClient(FmrClient):
     """In-memory stand-in for FmrClient used by publish workflow tests.
 
-    Stores registry artefacts keyed by ``(type name, agency, id)`` and
-    records every ``put_artefacts`` call in ``put_calls``.
+    Subclasses :class:`tidysdmx.fmr.FmrClient` (so typechecked APIs
+    accept it) but overrides every network-touching method. Stores
+    registry artefacts keyed by ``(type name, agency, id)`` and records
+    every ``put_artefacts`` call in ``put_calls``.
     """
 
     def __init__(self, artefacts=()):
+        super().__init__("https://fake-fmr.example.org")
         self._store = {}
         self.put_calls = []
+        self.fail_ids = set()
         for artefact in artefacts:
             self.add(artefact)
 
@@ -375,6 +380,11 @@ class FakeFmrClient:
 
     def put_artefacts(self, artefacts, action=None, header=None, validate=True):
         """Record the submission and update the in-memory registry."""
+        if any(a.id in self.fail_ids for a in artefacts):
+            raise InternalError(
+                "Submission failed",
+                "The fake registry was told to fail this artefact.",
+            )
         self.put_calls.append({"artefacts": list(artefacts), "action": action})
         for artefact in artefacts:
             self.add(artefact)
