@@ -750,8 +750,11 @@ def build_multi_representation_map_from_df(
         default_value=default_value,
     )
 
+    # Both single and multi representation maps serialize under the SDMX
+    # information-model class "RepresentationMap"; "MultiRepresentationMap" is a
+    # pysdmx typing convenience, not an IM class, and must not appear in a URN.
     urn = (
-        gen_urn("MultiRepresentationMap", agency, id, version)
+        gen_urn("RepresentationMap", agency, id, version)
         if (generate_urn and id)
         else None
     )

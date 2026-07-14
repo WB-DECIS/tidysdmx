@@ -127,7 +127,25 @@ def _items_rule(rule_id: str, a: ItemScheme, label: str) -> list[ValidationIssue
 
 
 def _check_codelist(a: Codelist) -> list[ValidationIssue]:
-    return _items_rule("C001", a, "Codelist")
+    issues = _items_rule("C001", a, "Codelist")
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in a.items or ():
+        if item.id in seen and item.id not in duplicates:
+            duplicates.append(item.id)
+        seen.add(item.id)
+    if duplicates:
+        issues.append(
+            _issue(
+                "C002",
+                a,
+                "Codelist has duplicate code IDs: "
+                + ", ".join(repr(d) for d in duplicates)
+                + ". Every code ID must be unique.",
+                "items",
+            )
+        )
+    return issues
 
 
 def _check_concept_scheme(a: ConceptScheme) -> list[ValidationIssue]:
@@ -230,7 +248,10 @@ def _check_structure_map(a: StructureMap) -> list[ValidationIssue]:
     """Check that a StructureMap is ready to be published.
 
     Validates that source and target URNs are populated, and that any
-    embedded RepresentationMaps are also valid.
+    embedded RepresentationMaps are fully publish-ready. Embedded maps are run
+    through the same common checks (id/version/name) as top-level artefacts
+    because ``collect_structure_map_artifacts`` extracts them for upload as
+    standalone artefacts, and FMR requires those fields on every one.
 
     Args:
         a: The StructureMap to check.
@@ -258,6 +279,7 @@ def _check_structure_map(a: StructureMap) -> list[ValidationIssue]:
                 )
             )
         elif isinstance(values, (RepresentationMap, MultiRepresentationMap)):
+            issues.extend(_check_common(values))
             issues.extend(_check_rep_map_fields(values))
     return issues
 

@@ -304,11 +304,27 @@ class TestReplaceValuesWithUrn:
         assert isinstance(result, MultiComponentMap)
         assert isinstance(result.values, str)
 
+    def test_multi_generated_urn_uses_representation_map_class(
+        self, make_multi_rep_map
+    ):
+        """A generated URN (no .urn set) uses the "RepresentationMap" class (MW-01)."""
+        mrm = make_multi_rep_map(urn=None)
+        mcm = MultiComponentMap(
+            source=["COUNTRY", "CURRENCY"],
+            target=["CURRENCY"],
+            values=mrm,
+        )
+
+        result = _replace_values_with_urn(mcm)
+
+        assert "structuremapping.RepresentationMap=" in result.values
+        assert "MultiRepresentationMap" not in result.values
+
     def test_multi_uses_existing_urn_when_present(self, make_multi_rep_map):
         """If the MultiRepresentationMap has a URN, it should be used as-is."""
         explicit_urn = (
             "urn:sdmx:org.sdmx.infomodel.structuremapping"
-            ".MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+            ".RepresentationMap=ECB:MRM_CTRY(1.0)"
         )
         mrm = make_multi_rep_map(urn=explicit_urn)
         mcm = MultiComponentMap(
@@ -643,6 +659,51 @@ class TestValidateStructureMapReferences:
         )
 
         validate_structure_map_references(sm)  # must not raise
+
+    def test_embedded_rep_map_missing_name_raises_m003(self):
+        """A name-less embedded RepresentationMap is caught before upload (MW-03).
+
+        collect_structure_map_artifacts ships embedded rep maps as standalone
+        artefacts, and FMR requires a Name on every maintainable artefact, so
+        the common checks must run on them too.
+        """
+        rep_map = RepresentationMap(
+            id="RM",
+            name=None,
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ValueMap(source="A", target="B")],
+        )
+        sm = StructureMap(
+            id="SM",
+            name="SM",
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ComponentMap(source="COUNTRY", target="GEO", values=rep_map)],
+        )
+
+        with pytest.raises(ValueError, match="M003"):
+            validate_structure_map_references(sm)
+
+    def test_structure_map_missing_name_raises_m003(self):
+        """The StructureMap's own common fields are validated too (MW-02).
+
+        Delegating to raise_if_invalid means id/version/name are now checked in
+        addition to the map-rule checks that master performed.
+        """
+        sm = StructureMap(
+            id="SM",
+            name=None,
+            agency="ECB",
+            source="urn:src",
+            target="urn:tgt",
+            maps=[ImplicitComponentMap(source="FREQ", target="FREQUENCY")],
+        )
+
+        with pytest.raises(ValueError, match="M003"):
+            validate_structure_map_references(sm)
 
 
 @pytest.mark.unit

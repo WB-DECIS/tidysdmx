@@ -14,7 +14,6 @@ from pysdmx.model.map import (
 from typeguard import typechecked
 
 from .artefact_validation import raise_if_invalid
-from .structures import gen_urn
 
 MapRule = (
     ComponentMap
@@ -50,11 +49,13 @@ def _replace_values_with_urn(map_rule: MapRule) -> MapRule:
     rep_map = _get_embedded_rep_map(map_rule)
     if rep_map is None:
         return map_rule
-    urn = rep_map.urn or gen_urn(
-        artefact_type=type(rep_map).__name__,
-        agency=rep_map.agency,
-        artefact_id=rep_map.id,
-        version=rep_map.version,
+    # Derive the reference from pysdmx's own short_urn so the SDMX class name is
+    # always correct. Both RepresentationMap and MultiRepresentationMap
+    # serialize under the information-model class "RepresentationMap"
+    # (MultiRepresentationMap is a pysdmx typing convenience, not an IM class),
+    # and short_urn reflects that — unlike ``type(rep_map).__name__``.
+    urn = rep_map.urn or (
+        f"urn:sdmx:org.sdmx.infomodel.structuremapping.{rep_map.short_urn}"
     )
     return type(map_rule)(source=map_rule.source, target=map_rule.target, values=urn)
 

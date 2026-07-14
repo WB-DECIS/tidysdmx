@@ -151,6 +151,19 @@ class TestCodelist:
         cl = MyCodelist(id="CL_SUB", agency="AGY", name="Test", items=())
         assert any(i.rule_id == "C001" for i in validate(cl))
 
+    def test_duplicate_code_ids_flagged(self):
+        """Duplicate code IDs trigger C002 and name the offending ID."""
+        cl = _codelist(items=(Code(id="A"), Code(id="A"), Code(id="B")))
+        issues = validate(cl)
+        c002 = [i for i in issues if i.rule_id == "C002"]
+        assert len(c002) == 1
+        assert "'A'" in c002[0].message
+
+    def test_unique_code_ids_ok(self):
+        """A codelist with unique code IDs does not trigger C002."""
+        cl = _codelist(items=(Code(id="A"), Code(id="B")))
+        assert not any(i.rule_id == "C002" for i in validate(cl))
+
 
 class TestSchemes:
     def test_concept_scheme_empty_flagged(self):
