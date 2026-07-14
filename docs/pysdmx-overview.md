@@ -495,18 +495,17 @@ if freq.local_codes is not None:
 ## 9. Building Mapping Objects — Quick Reference
 
 ```python
+import pandas as pd
+from pysdmx.model.map import StructureMap
+
 from tidysdmx import (
     build_fixed_map,
     build_implicit_component_map,
     build_date_pattern_map,
-    build_value_map,
-    build_value_map_list,
-    build_representation_map,
+    build_representation_map_from_df,
     build_single_component_map,
-    build_structure_map_from_template_wb,
-    map_structures
+    map_structures,
 )
-import pandas as pd
 
 # 1. Fixed value
 fmap = build_fixed_map(target="CONF_STATUS", value="F")
@@ -516,22 +515,28 @@ imap = build_implicit_component_map(source="SourceFreq", target="FREQ")
 
 # 3. Date pattern
 dpm = build_date_pattern_map(source="DATE", target="TIME_PERIOD",
-                              pattern="MMM yy", frequency="M")
+                             pattern="MMM yy", frequency="M")
 
-# 4. Value-level representation map from DataFrame
+# 4. Value-level representation map from a DataFrame.
+#    (The values-based builder is exposed on artefact_builder as
+#    build_representation_map; the DataFrame variant is *_from_df.)
 mapping_df = pd.DataFrame({"source": ["GB", "US"], "target": ["GBR", "USA"]})
-rep_map = build_representation_map(mapping_df, agency="ECB", id="RM_COUNTRY")
+rep_map = build_representation_map_from_df(
+    mapping_df, agency="ECB", id="RM_COUNTRY", name="Country map"
+)
 
-# 5. Single component map (wraps representation map)
+# 5. Single component map (wraps a representation map)
 cm = build_single_component_map(df=mapping_df,
-                                 source_component="COUNTRY_SRC",
-                                 target_component="REF_AREA",
-                                 agency="ECB")
+                                source_component="COUNTRY_SRC",
+                                target_component="REF_AREA",
+                                agency="ECB",
+                                id="CM_COUNTRY",
+                                name="Country component map")
 
 # 6. Apply a StructureMap to a DataFrame
-from pysdmx.model.map import StructureMap
-smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0",
+smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0", name="My map",
                     maps=[fmap, imap, cm])
+df = pd.DataFrame({"COUNTRY_SRC": ["GB", "US"], "SourceFreq": ["A", "A"]})
 result_df = map_structures(df, smap)
 ```
 

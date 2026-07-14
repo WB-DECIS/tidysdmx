@@ -50,7 +50,12 @@ upstream dependency your code wraps:
 ```
 src/tidysdmx/
 ├── tidysdmx.py             — Core: fetch schemas from FMR, standardise/map SDMX data
-├── structures.py           — Build SDMX artefacts (StructureMap, ValueMap, Codelist, etc.)
+├── structures/             — Build SDMX artefacts (package; re-exports the public builders)
+│   ├── map_builders.py     — ValueMap / RepresentationMap / ComponentMap builders
+│   ├── template.py         — Excel mapping template → StructureMap
+│   ├── schema_from_table.py— Build a DSD/codelists/concept scheme from a table
+│   ├── urn.py              — SDMX URN generation (gen_urn)
+│   └── _ids.py             — Identifier/code-ID sanitisation helpers
 ├── mapping.py              — Apply StructureMaps to DataFrames
 ├── structure_map_writer.py — Collect, validate, and prepare StructureMaps for FMR upload
 ├── validation.py           — Validate datasets against schemas and codelists
