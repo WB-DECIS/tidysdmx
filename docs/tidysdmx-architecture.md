@@ -363,6 +363,62 @@ There is no new pysdmx usage in the Kedro layer. It is purely an orchestration a
 
 ---
 
+### 10. FMR Publication Layer (`tidysdmx.fmr`)
+
+pysdmx's FMR clients are CRUD: `RegistryClient` reads, and the (experimental) `RegistryMaintenanceClient` uploads whatever it is given. The `tidysdmx.fmr` subpackage adds the workflow layer real pipelines need — change detection, automated versioning, and a dry-run-able upsert — and supersedes the notebook-only `RegistryMaintenanceClient` upload recipe.
+
+```
+tidysdmx/fmr/
+├── client.py      ← FmrClient: unified read/write facade
+│                    env-var credentials (TIDYSDMX_FMR_URL/_USER/_PASSWORD/_TOKEN),
+│                    registry-agnostic URLs (no hardcoded /FMR/ path — PYSDMX-04),
+│                    lazy write client, generic get_artefact() dispatch
+├── diff.py        ← compare_artefacts(existing, updated) → ArtefactDiff
+│                    typed ArtefactChange records classified by impact
+├── versioning.py  ← SDMX version algebra: parse/compare/bump/suggest_version
+│                    two-part "1.0" and semver "1.0.0"/"1.0.0-draft" schemes
+├── publish.py     ← plan_publication() → PublicationPlan → execute_plan()
+│                    CREATE / UPDATE-at-bumped-version / SKIP-unchanged
+└── report.py      ← pandas DataFrame views (the ONLY fmr module using pandas)
+```
+
+**Change impact taxonomy** — every detected change carries one of three impacts, which drive the version bump:
+
+| Impact | Meaning | Examples | Default bump |
+|---|---|---|---|
+| `BREAKING` | consumers can break | item/component removed, representation narrowed, reference changed | major |
+| `ADDITIVE` | new capability, consumers fine | item added, optional attribute added | minor |
+| `COSMETIC` | presentation only | names, descriptions, annotations, ordering | patch (minor on two-part) |
+
+Unknown fields and unregistered artefact types fall through to a generic field walk that classifies conservatively as breaking — new pysdmx model fields may therefore over-trigger major bumps until a specialized differ handles them (watch the pysdmx changelog).
+
+**Version policy** — `suggest_version(diff, current_version, policy)` auto-detects the version scheme from the registry's current version and never migrates schemes. `VersionPolicy` controls the impact→bump mapping, draft handling (`finalize` drops the `-draft` extension without a numeric bump), and `replace_non_final` (in-place republish of non-final versions; note two-part versions are never final per SDMX 3.0, so this disables bumping entirely on two-part registries).
+
+**Plan → execute flow** —
+
+```
+plan_publication(client, artefacts)          # read-only
+  1. order dependencies first (codelists → rep maps/hierarchies → DSDs
+     → dataflows/structure maps → PAs/categorisations)
+  2. per artefact: get_existing() → compare_artefacts() →
+     CREATE | UPDATE @ suggest_version() | SKIP
+  3. validate publish-readiness; detect version conflicts (registry
+     ahead of local baseline → blocking P002)
+  4. propagate bumps to intra-batch references (a Dataflow pointing at
+     a bumped DSD is rewritten and promoted from SKIP to UPDATE)
+print(plan.summary())                        # or plan_to_dataframe(plan)
+execute_plan(client, plan, dry_run=..., batch=...)
+  - blocking issues raise BEFORE any network call
+  - batch=True: one transactional FMR submission (default)
+  - batch=False: per-artefact, fail-fast, dependents never attempted
+```
+
+**Import boundary (extraction rule)** — `fmr` core modules import only pysdmx, the stdlib, typeguard, and each other; the single tidysdmx-internal import is `artefact_validation` (itself pysdmx-only). pandas is quarantined in `report.py`. This keeps the subpackage extractable into a standalone package if adoption outside tidysdmx warrants it.
+
+**Known limitations (v1)** — references *from* registry artefacts outside the submitted batch are not updated; the plan is trusted at execute time (the P002 pre-flight is the mitigation); `PublicationResult.submission` is reserved but always `None` until pysdmx's maintenance client stops discarding the FMR response (upstream candidate, together with an async maintenance client).
+
+---
+
 ## Key Design Decisions
 
 ### pysdmx objects as opaque handles
@@ -417,6 +473,10 @@ tidysdmx/
 │
 ├── qa_utils.py     ← Data quality operations independent of SDMX
 │                     qa_coerce_numeric(), qa_remove_duplicates()
+│
+├── fmr/            ← FMR publication layer (see Functional Area 10)
+│                     FmrClient facade, artefact diffing, version bumping,
+│                     plan/execute upsert workflow, DataFrame reporting
 │
 └── kedro.py        ← Production/Kedro adapter layer
                       kd_* wrappers for partitioned dataset patterns

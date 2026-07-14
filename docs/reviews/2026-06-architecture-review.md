@@ -132,7 +132,7 @@ branch (quick win); 📋 = backlog (§7).
 | TEST-09/11/15 | 📋 | Remaining skip triage (whitespace validation, fixture-contradicting tests — implement/xfail/delete per table in review notes); 54 `pytest.raises` without `match=`; test_pipeline_integration.py shares state via class attributes (order-dependent). |
 | CONS-23/24 | 📋 | Ruff adoption: `N`, `ERA` are free (0 violations); `T20`/`ANN` near-free after quick wins; add `C90` at max-complexity 14; adopt `PT` for tests (81 hits, mostly auto-fixable + the PT011 burn-down). |
 | PROD-08 | 📋 | README is a stub. Outline drafted: quick-start lifted from `tests/test_pipeline_integration.py:36-45` (the canonical fetch→validate→map→standardize flow); add repo/docs URLs + classifiers to pyproject. |
-| PROD-12, PYSDMX-04 | 📋 | Pre-push hook needs `pre-commit install --hook-type pre-push` documented; `fetch_schema` hardcodes the `/FMR/sdmx/v2/` deployment path (breaks non-/FMR registries). |
+| PROD-12, PYSDMX-04 | 📋 | Pre-push hook needs `pre-commit install --hook-type pre-push` documented; `fetch_schema` hardcodes the `/FMR/sdmx/v2/` deployment path (breaks non-/FMR registries). *Update 2026-07: the new `tidysdmx.fmr.FmrClient` resolves registry URLs without the hardcoded `/FMR/` path; the `fetch_schema` fix itself is still pending.* |
 | mypy note | — | `StructureMap.__replace__` (structure_map_writer.py:93) is provided by pysdmx/msgspec and works on 3.11 — mypy's flag is a false positive; the other 44 errors are real annotation debt (see PROD-03 adoption snippet in review notes). |
 
 ## 4. pysdmx leverage verdicts
