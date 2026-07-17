@@ -1,8 +1,8 @@
 """Integration tests for the data pipeline workflow.
 
 These tests mirror the pipeline documented in
-``notebooks/tidysdmx/DEV-pipeline-iterative-development-wb-template.ipynb``
-(Steps 1 through 6), exercising the end-to-end flow without FMR access.
+``notebooks/tidysdmx/DEV-pipeline-iterative-development-wb-template.ipynb``,
+exercising the end-to-end flow without FMR access.
 
 The pipeline steps are:
   1. Load raw data
@@ -10,11 +10,14 @@ The pipeline steps are:
   3. Describe tidy raw data with an SDMX schema
   4. Filter / apply constraints (optional)
   5. Validate tidy raw data against its schema
-  5b. Create structure map from mapping template
-  5c. Map data using the structure map
-  5d. Standardize output for upload
-  6. Final validation of mapped output against dissemination schema
-  7. Collect artifacts for FMR upload
+  6. Create structure map from mapping template
+  7. Map data using the structure map + standardize output for upload
+  8. Final validation of mapped output against dissemination schema
+  9. Assemble the publication batch and publish it to the FMR
+
+Step 9 is only covered here up to the point where FMR access is required:
+the batch is assembled and checked for publish-readiness, which is what
+``plan_publication`` does before it touches the network.
 """
 
 import pickle as pkl
@@ -42,6 +45,7 @@ from tidysdmx import (
     sanitize_variable,
     standardize_output,
     validate_dataset_local,
+    validate_many,
 )
 
 DATA_DIR = Path(__file__).parent / "fixtures" / "data"
@@ -196,7 +200,7 @@ class TestPipelineWorkflow:
 
     @pytest.fixture
     def structure_map(self):
-        """Step 5b: the StructureMap built from the Excel mapping template."""
+        """Step 6: the StructureMap built from the Excel mapping template."""
         mappings = parse_mapping_template_wb(MAPPING_XLSX)
         return build_structure_map_from_template_wb(
             mappings,
@@ -206,7 +210,7 @@ class TestPipelineWorkflow:
 
     @pytest.fixture
     def mapped_df(self, constrained_df, structure_map):
-        """Step 5c: constrained frame mapped through the structure map."""
+        """Step 7: constrained frame mapped through the structure map."""
         return map_structures(df=constrained_df, structure_map=structure_map)
 
     @pytest.fixture
@@ -216,7 +220,7 @@ class TestPipelineWorkflow:
 
     @pytest.fixture
     def standardized_df(self, mapped_df, dis_schema):
-        """Step 5d: mapped frame with SDMX reference columns added."""
+        """Step 7: mapped frame with SDMX reference columns added."""
         return standardize_output(
             df=mapped_df,
             artefact_id=DIS_ARTEFACT_ID,
@@ -288,10 +292,10 @@ class TestPipelineWorkflow:
         )
         assert errors.empty, f"Unexpected validation errors:\n{errors.to_string()}"
 
-    # -- Step 5b: Create structure map from mapping template -----------------
+    # -- Step 6: Create structure map from mapping template -----------------
 
-    def test_step5b_create_structure_map(self, structure_map):
-        """Step 5b: Parse the Excel mapping template and build a StructureMap."""
+    def test_step6_create_structure_map(self, structure_map):
+        """Step 6: Parse the Excel mapping template and build a StructureMap."""
         assert isinstance(structure_map, StructureMap)
         assert len(structure_map.maps) > 0
 
@@ -300,10 +304,10 @@ class TestPipelineWorkflow:
         assert ImplicitComponentMap in map_types
         assert ComponentMap in map_types
 
-    # -- Step 5c: Map data using the structure map ---------------------------
+    # -- Step 7: Map data using the structure map ---------------------------
 
-    def test_step5c_map_data(self, mapped_df, constrained_df):
-        """Step 5c: Apply the structure map to transform source to target."""
+    def test_step7_map_data(self, mapped_df, constrained_df):
+        """Step 7: Apply the structure map to transform source to target."""
         # Target columns present
         assert "INDICATOR" in mapped_df.columns
         assert "REF_AREA" in mapped_df.columns
@@ -324,10 +328,10 @@ class TestPipelineWorkflow:
         # No rows lost during mapping
         assert len(mapped_df) == len(constrained_df)
 
-    # -- Step 5d: Standardize output for upload ------------------------------
+    # -- Step 7: Standardize output for upload ------------------------------
 
-    def test_step5d_standardize_output(self, standardized_df):
-        """Step 5d: Add SDMX reference columns and reorder for upload.
+    def test_step7_standardize_output(self, standardized_df):
+        """Step 7: Add SDMX reference columns and reorder for upload.
 
         The dissemination schema is loaded from a cached FMR response
         (see ``_load_dis_schema``). This is the same schema the notebook
@@ -342,10 +346,10 @@ class TestPipelineWorkflow:
         assert (standardized_df["ACTION"] == "I").all()
         assert (standardized_df["STRUCTURE_ID"] == DIS_ARTEFACT_ID).all()
 
-    # -- Step 6: Final validation --------------------------------------------
+    # -- Step 8: Final validation --------------------------------------------
 
-    def test_step6_final_validation(self, standardized_df, dis_schema):
-        """Step 6: Standardized output passes dissemination schema validation.
+    def test_step8_final_validation(self, standardized_df, dis_schema):
+        """Step 8: Standardized output passes dissemination schema validation.
 
         This validates against the pre-existing dissemination schema
         (from FMR), not a schema derived from the output. This catches
@@ -358,15 +362,44 @@ class TestPipelineWorkflow:
         )
         assert errors.empty, f"Final validation errors:\n{errors.to_string()}"
 
-    # -- Step 7: Collect artifacts for FMR upload ----------------------------
+    # -- Step 9: Assemble the publication batch ------------------------------
 
-    def test_step7_collect_artifacts(self, structure_map):
-        """Step 7: Collect the StructureMap and its RepresentationMaps."""
+    def test_step9_collect_artifacts(self, structure_map):
+        """Step 9: Collect the StructureMap and its RepresentationMaps."""
         artifacts = collect_structure_map_artifacts(structure_map)
 
         # At least RepresentationMap(s) + the StructureMap itself
         assert len(artifacts) >= 2
         assert isinstance(artifacts[-1], StructureMap)
+
+    def test_step9_publish_batch_is_publish_ready(self, tidy_raw_schema, structure_map):
+        """Step 9: The assembled batch passes publish-readiness validation.
+
+        This guards the notebook's STEP 9. ``plan_publication`` validates every
+        non-SKIP artefact and refuses to submit a blocked plan, so a batch that
+        fails here can never be published.
+        """
+        publish_batch = [
+            tidy_raw_schema.concept_scheme,
+            *tidy_raw_schema.codelists,
+            tidy_raw_schema.dsd,
+            *collect_structure_map_artifacts(structure_map, convert_to_urns=False),
+        ]
+
+        assert validate_many(publish_batch) == []
+
+    def test_step9_urn_conversion_is_not_publish_ready(self, structure_map):
+        """Step 9: ``convert_to_urns=True`` output cannot be published.
+
+        The default turns embedded RepresentationMaps into URN strings, which
+        rule SM003 rejects. That output is for the SDMX-ML file writer, not for
+        the publication path -- hence ``convert_to_urns=False`` in the notebook.
+        """
+        artifacts = collect_structure_map_artifacts(structure_map)
+
+        issues = validate_many(artifacts)
+        assert [i.rule_id for i in issues] == ["SM003"]
+        assert issues[0].severity == "error"
 
     # -- End-to-end invariants -----------------------------------------------
 
