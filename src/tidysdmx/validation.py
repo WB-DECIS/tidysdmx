@@ -81,7 +81,7 @@ def validate_dataset_local(
     df: pd.DataFrame,
     schema: Schema | None = None,
     valid: dict[str, object] | None = None,
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
     max_errors: int = 1000,
 ) -> pd.DataFrame:
     """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
@@ -98,11 +98,10 @@ def validate_dataset_local(
             :func:`~tidysdmx.utils.extract_validation_info`. This argument
             will be removed in a future release; pass ``schema`` directly
             instead.
-        sdmx_cols: SDMX reference columns expected in the dataset. When
-            omitted, the columns are inferred from the schema's context
-            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
-            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
-            datastructure schema).
+        sdmx_cols: SDMX reference columns expected in the dataset, as a
+            list or tuple. When omitted, they resolve to the standard
+            SDMX-CSV columns ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``
+            for every schema context.
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -135,6 +134,8 @@ def validate_dataset_local(
                 sdmx_cols = sdmx_reference_cols_for(schema.context)
             else:
                 sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    else:
+        sdmx_cols = list(sdmx_cols)
 
     error_records: list[dict[str, str]] = []
 
@@ -188,7 +189,7 @@ def validate_dataset_local(
 def validate_columns(
     df: pd.DataFrame,
     valid_columns: list[str],
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
     max_errors: int = 1000,
 ) -> None:
     """Validate that all DataFrame columns are valid components or SDMX references.
@@ -196,8 +197,8 @@ def validate_columns(
     Args:
         df: The DataFrame to validate.
         valid_columns: List of valid component names.
-        sdmx_cols: List of additional allowed column names. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        sdmx_cols: Additional allowed column names, as a list or tuple.
+            Defaults to ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
         max_errors: Maximum number of unexpected columns to include in the
             error message. Defaults to ``1000``.
 
@@ -205,8 +206,7 @@ def validate_columns(
         ValueError: If any columns in the DataFrame are not in ``valid_columns``
             or ``sdmx_cols``, listing all offending names up to ``max_errors``.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    sdmx_cols = list(_DEFAULT_SDMX_COLS) if sdmx_cols is None else list(sdmx_cols)
     unexpected = _get_unexpected_columns(df, valid_columns, sdmx_cols)
     if unexpected:
         capped = unexpected[:max_errors]
@@ -219,21 +219,20 @@ def validate_columns(
 def validate_mandatory_columns(
     df: pd.DataFrame,
     mandatory_columns: list[str],
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
 ) -> None:
     """Validate that all mandatory columns are present in the DataFrame.
 
     Args:
         df: The DataFrame to validate.
         mandatory_columns: List of mandatory component names.
-        sdmx_cols: List of additional mandatory column names. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        sdmx_cols: Additional mandatory column names, as a list or tuple.
+            Defaults to ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
 
     Raises:
         ValueError: If any mandatory column is absent from the DataFrame.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    sdmx_cols = list(_DEFAULT_SDMX_COLS) if sdmx_cols is None else list(sdmx_cols)
     required_columns = set(mandatory_columns + sdmx_cols)
     missing_columns = sorted(required_columns - set(df.columns))
 

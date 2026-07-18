@@ -186,9 +186,9 @@ class TestExtractValidationInfo:
         assert isinstance(result["codelist_ids"], dict)
 
     def test_sdmx_cols_inferred_from_dataflow_context(self, sdmx_schema):
-        """Dataflow-context schema yields DATAFLOW reference columns."""
+        """Dataflow-context schema yields the standard reference columns."""
         result = extract_validation_info(sdmx_schema)
-        assert result["sdmx_cols"] == ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
+        assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
     @pytest.mark.integration
     def test_sdmx_cols_inferred_from_datastructure_context(self, ifpri_asti_schema):
@@ -201,16 +201,16 @@ class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
         "context, expected",
         [
-            ("dataflow", ["DATAFLOW", "DATAFLOW_ID", "ACTION"]),
+            ("dataflow", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             (
                 "provisionagreement",
-                ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
+                ["STRUCTURE", "STRUCTURE_ID", "ACTION"],
             ),
         ],
     )
     def test_returns_expected_columns(self, context, expected):
-        """Each SDMX context maps to its canonical reference columns."""
+        """Every SDMX context maps to the standard SDMX-CSV reference columns."""
         assert sdmx_reference_cols_for(context) == expected
 
     def test_raises_on_invalid_context(self):

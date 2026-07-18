@@ -631,11 +631,11 @@ class TestAddSdmxReferenceCols:
     @pytest.mark.parametrize(
         "artefact_type,expected_cols",
         [
-            ("dataflow", ["OBS_VALUE", "DATAFLOW", "DATAFLOW_ID", "ACTION"]),
+            ("dataflow", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             ("datastructure", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             (
                 "provisionagreement",
-                ["OBS_VALUE", "PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
+                ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"],
             ),
         ],
     )
