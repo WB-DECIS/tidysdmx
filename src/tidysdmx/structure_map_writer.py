@@ -211,8 +211,9 @@ def prepare_structure_map_for_upload(
         >>> artifacts = prepare_structure_map_for_upload(my_structure_map)
         >>>
         >>> # Publish to FMR (credentials from TIDYSDMX_FMR_* env vars);
-        >>> # use plan_publication/execute_plan to inspect first.
-        >>> client = FmrClient("https://your-fmr")
+        >>> # use plan_publication/execute_plan to inspect first. The
+        >>> # base URL includes the registry's context path (/FMR here).
+        >>> client = FmrClient("https://your-fmr/FMR")
         >>> report = publish(client, artifacts)
     """
     if validate:

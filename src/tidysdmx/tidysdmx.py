@@ -56,7 +56,7 @@ def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
 
 
 def _fmr_read_url(base_url: str) -> str:
-    """Build the FMR SDMX 3.0 read endpoint from a base URL.
+    """Build the FMR SDMX-REST v2 read endpoint from a base URL.
 
     Any path already present in ``base_url`` is preserved (e.g. a
     registry deployed under a custom context path); URLs already ending
