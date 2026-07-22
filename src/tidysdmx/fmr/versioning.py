@@ -13,6 +13,15 @@ total ordering, and computes the next version for an artefact from the
 impact of a change (see :mod:`tidysdmx.fmr.diff`) via
 :func:`suggest_version`. Version suggestions never migrate an artefact
 from one scheme to the other: a two-part version stays two-part.
+
+Both schemes always *parse*, but what may be *published* depends on the
+target registry. The current FMR release does not accept prerelease
+(``-draft``) or wildcard versions, so :class:`VersionPolicy` defaults to
+:attr:`VersioningMode.SEMVER_ONLY`: cosmetic changes bump the patch, and
+no ``-draft`` version is ever emitted. Full SDMX 3.0 versioning (drafts,
+wildcards, in-place replacement of non-final versions) lives behind
+:attr:`VersioningMode.SDMX_3`, ready to become the default once FMR
+supports it.
 """
 
 import re
@@ -63,6 +72,29 @@ class VersionScheme(StrEnum):
 
     TWO_PART = "two_part"
     SEMVER = "semver"
+
+
+class VersioningMode(StrEnum):
+    """How much of SDMX 3.0 versioning the target registry supports.
+
+    The mode gates what :func:`suggest_version` may emit and what
+    :func:`tidysdmx.fmr.publish.plan_publication` will let through to the
+    FMR. It is the single switch to flip once the FMR gains full SDMX 3.0
+    versioning support.
+
+    Attributes:
+        SEMVER_ONLY: FMR-compatible default. Only plain semver (and
+            two-part) versions are published: cosmetic changes bump the
+            patch, prerelease (``-draft``) extensions are stripped before
+            bumping, and ``replace_non_final`` / ``draft_strategy`` are
+            inert. Publishing a ``-draft`` version is blocked.
+        SDMX_3: Full SDMX 3.0 versioning — prerelease extensions,
+            wildcards, and in-place replacement of non-final versions.
+            Requires an FMR release that accepts ``-draft`` versions.
+    """
+
+    SEMVER_ONLY = "semver_only"
+    SDMX_3 = "sdmx_3"
 
 
 @total_ordering
@@ -258,6 +290,40 @@ def bump_version(version: str, level: BumpLevel) -> str:
     return str(parse_version(version).bump(level))
 
 
+@typechecked
+def is_fmr_publishable(version: str) -> bool:
+    """Whether the current FMR release accepts ``version`` for publishing.
+
+    The current FMR rejects prerelease (``-draft``) and wildcard versions
+    with a 500. A version is publishable if it parses as an SDMX version
+    and carries no hyphen extension; two-part (``"1.0"``) and ``0.x.y``
+    versions are accepted. Callers of the direct-write path
+    (:meth:`tidysdmx.fmr.client.FmrClient.put_artefacts`) can use this to
+    screen versions the plan-based workflow guards automatically.
+
+    Args:
+        version: The version string to check.
+
+    Returns:
+        ``True`` if ``version`` is a plain (extension-free) SDMX version,
+        ``False`` if it carries an extension or does not parse.
+
+    Examples:
+        >>> is_fmr_publishable("1.0.0")
+        True
+        >>> is_fmr_publishable("1.0")
+        True
+        >>> is_fmr_publishable("1.0.0-draft")
+        False
+        >>> is_fmr_publishable("~")
+        False
+    """
+    try:
+        return parse_version(version).extension is None
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class VersionPolicy:
     """Policy mapping change impact to version bumps.
@@ -272,11 +338,21 @@ class VersionPolicy:
             ``"finalize"`` drops the extension without a numeric bump
             (the draft *was* the staged next version), while ``"bump"``
             bumps the numerics per impact and drops the extension.
+            **Honored only under** :attr:`VersioningMode.SDMX_3`; inert
+            under :attr:`VersioningMode.SEMVER_ONLY`.
         replace_non_final: If ``True``, artefacts whose current version
             is not final are republished at the *same* version
             (in-place replace) instead of being bumped. Note that
             two-part versions are never final per SDMX 3.0 semantics,
             so this disables bumping entirely for two-part registries.
+            **Honored only under** :attr:`VersioningMode.SDMX_3`; inert
+            under :attr:`VersioningMode.SEMVER_ONLY`.
+        mode: Which versioning conventions the target FMR supports (see
+            :class:`VersioningMode`). Defaults to
+            :attr:`VersioningMode.SEMVER_ONLY` — plain semver only, with
+            cosmetic changes bumping the patch. Set to
+            :attr:`VersioningMode.SDMX_3` to re-enable drafts, wildcards,
+            and in-place replacement once the FMR supports them.
     """
 
     breaking: Literal["major"] = "major"
@@ -284,9 +360,23 @@ class VersionPolicy:
     cosmetic: Literal["major", "minor", "patch"] = "patch"
     draft_strategy: Literal["finalize", "bump"] = "finalize"
     replace_non_final: bool = False
+    mode: VersioningMode = VersioningMode.SEMVER_ONLY
 
 
 DEFAULT_VERSION_POLICY = VersionPolicy()
+
+#: Preset policy for a future FMR with full SDMX 3.0 versioning support:
+#: enables drafts/wildcards and in-place replacement of non-final versions.
+SDMX3_VERSION_POLICY = VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
+
+
+def _level_for(impact: ChangeImpact | None, policy: VersionPolicy) -> BumpLevel:
+    """Map a change impact onto the policy's bump level."""
+    if impact == ChangeImpact.BREAKING:
+        return policy.breaking
+    if impact == ChangeImpact.ADDITIVE:
+        return policy.additive
+    return policy.cosmetic
 
 
 @typechecked
@@ -301,12 +391,19 @@ def suggest_version(
     ``diff`` via ``policy``. The suggestion never migrates versioning
     schemes: a two-part current version yields a two-part suggestion.
 
+    Under the default :attr:`VersioningMode.SEMVER_ONLY`, any prerelease
+    extension is stripped and the version is always bumped per impact, so
+    cosmetic changes bump the patch and no ``-draft`` version is emitted.
+    Under :attr:`VersioningMode.SDMX_3`, ``replace_non_final`` and
+    ``draft_strategy`` take effect (in-place replace of non-final
+    versions; finalize a draft without a numeric bump).
+
     Args:
         diff: The changes between the registry artefact and the update
             (see :func:`tidysdmx.fmr.diff.compare_artefacts`).
         current_version: The version currently in the registry.
         policy: The bump policy. Defaults to breaking→major,
-            additive→minor, cosmetic→patch, finalize drafts.
+            additive→minor, cosmetic→patch, SEMVER_ONLY mode.
 
     Returns:
         The suggested next version string. If the diff is empty, the
@@ -330,20 +427,24 @@ def suggest_version(
         >>> suggest_version(breaking, "1.0.0")
         '2.0.0'
         >>> suggest_version(breaking, "1.0.1-draft")
+        '2.0.0'
+        >>> suggest_version(
+        ...     breaking, "1.0.1-draft",
+        ...     VersionPolicy(mode=VersioningMode.SDMX_3),
+        ... )
         '1.0.1'
     """
     current = parse_version(current_version)
     if diff.is_unchanged:
         return current_version
-    if policy.replace_non_final and not current.is_final:
-        return current_version
-    if current.extension is not None and policy.draft_strategy == "finalize":
-        return str(SdmxVersion(current.major, current.minor, current.patch))
-    impact = diff.impact
-    if impact == ChangeImpact.BREAKING:
-        level: BumpLevel = policy.breaking
-    elif impact == ChangeImpact.ADDITIVE:
-        level = policy.additive
-    else:
-        level = policy.cosmetic
-    return str(current.bump(level))
+    if policy.mode == VersioningMode.SDMX_3:
+        if policy.replace_non_final and not current.is_final:
+            return current_version
+        if current.extension is not None and policy.draft_strategy == "finalize":
+            return str(SdmxVersion(current.major, current.minor, current.patch))
+        return str(current.bump(_level_for(diff.impact, policy)))
+    # SEMVER_ONLY: strip any prerelease extension, then always bump.
+    base = current
+    if base.extension is not None:
+        base = SdmxVersion(base.major, base.minor, base.patch)
+    return str(base.bump(_level_for(diff.impact, policy)))

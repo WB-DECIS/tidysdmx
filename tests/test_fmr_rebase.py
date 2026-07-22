@@ -19,9 +19,9 @@ from tidysdmx.fmr.publish import (
     plan_publication,
     rebase_to_registry,
 )
-from tidysdmx.fmr.versioning import VersionPolicy
+from tidysdmx.fmr.versioning import VersioningMode, VersionPolicy
 
-DEV_POLICY = VersionPolicy(replace_non_final=True)
+DEV_POLICY = VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
 
 
 def _dsd_src(version="2.0"):

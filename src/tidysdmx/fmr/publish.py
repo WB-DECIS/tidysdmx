@@ -32,7 +32,10 @@ workflow-specific issues use these codes:
 - ``P006`` — StructureAction.Append combined with an update (warning:
   the FMR rejects overwrites under Append);
 - ``P007`` — StructureAction.Merge combined with item removals
-  (warning: Merge unions item schemes, so removals will not apply).
+  (warning: Merge unions item schemes, so removals will not apply);
+- ``P008`` — the proposed version carries a prerelease (``-draft``)
+  extension while the policy is in :attr:`VersioningMode.SEMVER_ONLY`
+  (blocking: the current FMR rejects such versions).
 
 Known limitations (v1): references *from* registry artefacts outside
 the submitted batch are not updated, and the plan is trusted at execute
@@ -86,6 +89,7 @@ from .client import FmrClient
 from .diff import ArtefactDiff, ChangeImpact, ChangeKind, compare_artefacts
 from .versioning import (
     DEFAULT_VERSION_POLICY,
+    VersioningMode,
     VersionPolicy,
     compare_versions,
     parse_version,
@@ -766,6 +770,41 @@ def _action_warnings(draft: _Draft, structure_action: StructureAction) -> None:
         )
 
 
+def _semver_mode_guard(draft: _Draft, policy: VersionPolicy) -> None:
+    """Block a prerelease proposed version under ``SEMVER_ONLY`` (P008).
+
+    The current FMR rejects prerelease (``-draft``) versions with a 500,
+    so under :attr:`VersioningMode.SEMVER_ONLY` any parseable proposed
+    version carrying a hyphen extension is a blocking issue. Wildcard and
+    otherwise-unparseable versions surface as ``P003`` elsewhere, so this
+    guard only needs the parseable-prerelease case. SKIP actions are not
+    published and are left untouched.
+    """
+    if policy.mode != VersioningMode.SEMVER_ONLY:
+        return
+    if draft.kind == PlannedActionKind.SKIP:
+        return
+    try:
+        parsed = parse_version(draft.proposed_version)
+    except ValueError:
+        return
+    if parsed.extension is None:
+        return
+    draft.issues.append(
+        _issue(
+            "P008",
+            draft.artefact,
+            f"Version '{draft.proposed_version}' carries a prerelease "
+            "extension, which the target FMR does not accept yet (SDMX "
+            "3.0 draft/prerelease versioning ships in a later FMR "
+            "release). Publish a plain semver (X.Y.Z), or set "
+            "VersionPolicy(mode=VersioningMode.SDMX_3) once the registry "
+            "supports it.",
+            "version",
+        )
+    )
+
+
 @typechecked
 def rebase_to_registry(
     client: FmrClient,
@@ -791,8 +830,11 @@ def rebase_to_registry(
 
     Non-final artefacts (e.g. a ``"1.0.0-draft"`` scratch schema under a
     :class:`~tidysdmx.fmr.versioning.VersionPolicy` with
-    ``replace_non_final=True``) therefore resolve to an in-place replace at
-    the same version rather than a spurious bump.
+    ``replace_non_final=True`` **and**
+    ``mode=VersioningMode.SDMX_3``) therefore resolve to an in-place
+    replace at the same version rather than a spurious bump. Under the
+    default ``SEMVER_ONLY`` mode such drafts are instead bumped to a plain
+    semver, and publishing a ``-draft`` version is blocked (``P008``).
 
     Args:
         client: The FMR client (read access is sufficient).
@@ -863,6 +905,7 @@ def plan_publication(
         _retarget_references(drafts, policy, allow_breaking)
     for draft in drafts:
         _action_warnings(draft, action)
+        _semver_mode_guard(draft, policy)
     return PublicationPlan(
         actions=tuple(d.freeze() for d in drafts),
         structure_action=action,

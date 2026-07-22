@@ -10,10 +10,12 @@ from tidysdmx.fmr.diff import (
 from tidysdmx.fmr.versioning import (
     DEFAULT_VERSION_POLICY,
     SdmxVersion,
+    VersioningMode,
     VersionPolicy,
     VersionScheme,
     bump_version,
     compare_versions,
+    is_fmr_publishable,
     parse_version,
     suggest_version,
 )
@@ -161,20 +163,24 @@ class TestSuggestVersion:
         assert suggest_version(_diff(), "1.2.3-draft") == "1.2.3-draft"
 
     def test_suggest_version_draft_finalize_strategy(self):
-        """The default policy finalizes drafts without a numeric bump."""
-        assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0.1-draft") == "1.0.1"
+        """Under SDMX_3, the finalize strategy drops the draft with no bump."""
+        policy = VersionPolicy(mode=VersioningMode.SDMX_3)
+        assert (
+            suggest_version(_diff(ChangeImpact.BREAKING), "1.0.1-draft", policy)
+            == "1.0.1"
+        )
 
     def test_suggest_version_draft_bump_strategy(self):
-        """The bump strategy bumps numerics and drops the extension."""
-        policy = VersionPolicy(draft_strategy="bump")
+        """Under SDMX_3, the bump strategy bumps numerics and drops the ext."""
+        policy = VersionPolicy(mode=VersioningMode.SDMX_3, draft_strategy="bump")
         assert (
             suggest_version(_diff(ChangeImpact.BREAKING), "1.0.1-draft", policy)
             == "2.0.0"
         )
 
     def test_suggest_version_replace_non_final_keeps_version(self):
-        """replace_non_final republishes non-final versions in place."""
-        policy = VersionPolicy(replace_non_final=True)
+        """Under SDMX_3, replace_non_final republishes non-final in place."""
+        policy = VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
         assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0", policy) == "1.0"
         assert (
             suggest_version(_diff(ChangeImpact.BREAKING), "1.0.0-draft", policy)
@@ -183,8 +189,27 @@ class TestSuggestVersion:
 
     def test_suggest_version_replace_non_final_still_bumps_final(self):
         """replace_non_final does not affect final versions."""
-        policy = VersionPolicy(replace_non_final=True)
+        policy = VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
         assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0.0", policy) == "2.0.0"
+
+    def test_suggest_version_semver_only_strips_draft_and_bumps(self):
+        """SEMVER_ONLY (default) finalizes a draft, then bumps per impact."""
+        assert suggest_version(_diff(ChangeImpact.COSMETIC), "1.0.0-draft") == "1.0.1"
+        assert suggest_version(_diff(ChangeImpact.ADDITIVE), "1.0.0-draft") == "1.1.0"
+        assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0.0-draft") == "2.0.0"
+
+    def test_suggest_version_semver_only_ignores_replace_non_final(self):
+        """SEMVER_ONLY bumps even when replace_non_final is set (inert)."""
+        policy = VersionPolicy(replace_non_final=True)
+        assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0", policy) == "2.0"
+        assert (
+            suggest_version(_diff(ChangeImpact.BREAKING), "1.0.0-draft", policy)
+            == "2.0.0"
+        )
+
+    def test_suggest_version_semver_only_ignores_finalize(self):
+        """SEMVER_ONLY bumps a draft rather than finalizing it in place."""
+        assert suggest_version(_diff(ChangeImpact.BREAKING), "1.0.1-draft") == "2.0.0"
 
     def test_suggest_version_invalid_version_raises(self):
         """An unparseable current version propagates ValueError."""
@@ -197,7 +222,7 @@ class TestSuggestVersion:
         assert suggest_version(_diff(ChangeImpact.ADDITIVE), "1.2.3", policy) == "2.0.0"
 
     def test_default_version_policy_values(self):
-        """The default policy is breaking/additive/cosmetic + finalize."""
+        """The default policy is breaking/additive/cosmetic + semver-only."""
         assert (
             VersionPolicy(
                 breaking="major",
@@ -205,6 +230,33 @@ class TestSuggestVersion:
                 cosmetic="patch",
                 draft_strategy="finalize",
                 replace_non_final=False,
+                mode=VersioningMode.SEMVER_ONLY,
             )
             == DEFAULT_VERSION_POLICY
         )
+
+    def test_default_version_policy_mode_is_semver_only(self):
+        """The default policy defaults to SEMVER_ONLY."""
+        assert VersionPolicy().mode == VersioningMode.SEMVER_ONLY
+
+
+class TestIsFmrPublishable:
+    def test_plain_semver_is_publishable(self):
+        """Plain three-part semver is publishable."""
+        assert is_fmr_publishable("1.0.0")
+
+    def test_two_part_is_publishable(self):
+        """Two-part (SDMX 2.1) versions are publishable."""
+        assert is_fmr_publishable("1.0")
+
+    def test_zero_major_is_publishable(self):
+        """A 0.x.y version has no extension, so it is publishable."""
+        assert is_fmr_publishable("0.1.0")
+
+    def test_draft_is_not_publishable(self):
+        """A prerelease/draft version is not publishable."""
+        assert not is_fmr_publishable("1.0.0-draft")
+
+    def test_wildcard_is_not_publishable(self):
+        """An unparseable wildcard token is not publishable."""
+        assert not is_fmr_publishable("~")

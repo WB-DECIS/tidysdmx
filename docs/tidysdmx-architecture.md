@@ -376,7 +376,8 @@ tidysdmx/fmr/
 ├── diff.py        ← compare_artefacts(existing, updated) → ArtefactDiff
 │                    typed ArtefactChange records classified by impact
 ├── versioning.py  ← SDMX version algebra: parse/compare/bump/suggest_version
-│                    two-part "1.0" and semver "1.0.0"/"1.0.0-draft" schemes
+│                    two-part "1.0" and semver "1.0.0"/"1.0.0-draft" schemes;
+│                    VersioningMode gates draft/wildcard publishing (SEMVER_ONLY default)
 ├── publish.py     ← plan_publication() → PublicationPlan → execute_plan()
 │                    CREATE / UPDATE-at-bumped-version / SKIP-unchanged
 └── report.py      ← pandas DataFrame views (the ONLY fmr module using pandas)
@@ -394,6 +395,13 @@ Unknown fields and unregistered artefact types fall through to a generic field w
 
 **Version policy** — `suggest_version(diff, current_version, policy)` auto-detects the version scheme from the registry's current version and never migrates schemes. `VersionPolicy` controls the impact→bump mapping, draft handling (`finalize` drops the `-draft` extension without a numeric bump), and `replace_non_final` (in-place republish of non-final versions; note two-part versions are never final per SDMX 3.0, so this disables bumping entirely on two-part registries).
 
+**Versioning mode (FMR compatibility)** — `VersionPolicy.mode` (a `VersioningMode`) selects how much of SDMX 3.0 versioning the target FMR supports, and is the single switch to flip once support lands:
+
+- `SEMVER_ONLY` (**default**) — the current FMR rejects prerelease (`-draft`) and wildcard versions with a 500, so this mode publishes plain semver only: cosmetic changes bump the patch, any `-draft` extension on the current version is stripped before bumping, and `draft_strategy`/`replace_non_final` are **inert**. Publishing a `-draft` version is blocked in-plan (**P008**). Two-part (`1.0`) and `0.x.y` versions are still accepted — the guard keys on the presence of a prerelease extension, not on `is_final`.
+- `SDMX_3` — full SDMX 3.0 versioning: prerelease extensions, wildcards, and in-place replacement of non-final versions (`draft_strategy` and `replace_non_final` take effect). Use the `SDMX3_VERSION_POLICY` preset, or flip the `mode` default here once the FMR release that accepts `-draft` versions ships.
+
+`is_fmr_publishable(version)` exposes the same predicate for callers of the direct-write path (`FmrClient.put_artefacts`), which is an unguarded pass-through.
+
 **Plan → execute flow** —
 
 ```
@@ -406,6 +414,8 @@ plan_publication(client, artefacts)          # read-only
      ahead of local baseline → blocking P002)
   4. propagate bumps to intra-batch references (a Dataflow pointing at
      a bumped DSD is rewritten and promoted from SKIP to UPDATE)
+  5. guard the proposed version against the versioning mode (a -draft
+     version under SEMVER_ONLY → blocking P008)
 print(plan.summary())                        # or plan_to_dataframe(plan)
 execute_plan(client, plan, dry_run=..., batch=...)
   - blocking issues raise BEFORE any network call

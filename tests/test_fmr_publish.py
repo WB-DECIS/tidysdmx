@@ -12,7 +12,7 @@ from tidysdmx.fmr.publish import (
     plan_publication,
     publish,
 )
-from tidysdmx.fmr.versioning import VersionPolicy
+from tidysdmx.fmr.versioning import VersioningMode, VersionPolicy
 
 
 def _action_for(plan, artefact_id):
@@ -103,6 +103,40 @@ class TestPlanPublication:
         plan = plan_publication(fake_fmr_client, [bad])
         assert any(i.rule_id == "P003" for i in plan.actions[0].issues)
         assert plan.has_blocking_issues
+
+    def test_plan_publication_draft_create_blocks_p008(
+        self, fake_fmr_client, codelist_base
+    ):
+        """SEMVER_ONLY (default) blocks publishing a -draft version."""
+        draft = msgspec.structs.replace(codelist_base, version="1.0.0-draft")
+        plan = plan_publication(fake_fmr_client, [draft])
+        action = plan.actions[0]
+        assert any(i.rule_id == "P008" and i.severity == "error" for i in action.issues)
+        assert plan.has_blocking_issues
+        with pytest.raises(ValidationError):
+            execute_plan(fake_fmr_client, plan)
+
+    def test_plan_publication_draft_create_allowed_under_sdmx3(
+        self, fake_fmr_client, codelist_base
+    ):
+        """Under SDMX_3, a -draft CREATE is not flagged with P008."""
+        draft = msgspec.structs.replace(codelist_base, version="1.0.0-draft")
+        plan = plan_publication(
+            fake_fmr_client,
+            [draft],
+            policy=VersionPolicy(mode=VersioningMode.SDMX_3),
+        )
+        action = plan.actions[0]
+        assert not any(i.rule_id == "P008" for i in action.issues)
+
+    @pytest.mark.parametrize("version", ["1.0", "0.1.0", "1.0.0"])
+    def test_plan_publication_semver_only_allows_plain_versions(
+        self, fake_fmr_client, codelist_base, version
+    ):
+        """Two-part, 0.x.y, and plain semver CREATEs are not P008-flagged."""
+        artefact = msgspec.structs.replace(codelist_base, version=version)
+        plan = plan_publication(fake_fmr_client, [artefact])
+        assert not any(i.rule_id == "P008" for i in plan.actions[0].issues)
 
     def test_plan_publication_disallow_breaking_blocks_update(
         self, codelist_base, codelist_item_removed
