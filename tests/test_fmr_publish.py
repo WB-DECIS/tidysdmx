@@ -161,6 +161,29 @@ class TestPlanPublication:
         freq = next(c for c in dsd_action.artefact.components if c.id == "FREQ")
         assert "CL_FREQ(2.0)" in freq.local_enum_ref
 
+    def test_plan_publication_propagates_bumps_between_item_schemes(
+        self, concept_scheme_base, codelist_base, codelist_item_removed
+    ):
+        """A ConceptScheme referencing a batch Codelist sees its bump.
+
+        Regression test: ConceptScheme orders after the item schemes it
+        can reference (enum_ref), even when passed first in the batch.
+        """
+        ref = "Codelist=WB.TEST:CL_COLOUR(1.0)"
+        items = tuple(
+            msgspec.structs.replace(c, enum_ref=ref) if c.id == "FREQ" else c
+            for c in concept_scheme_base.items
+        )
+        cs = msgspec.structs.replace(concept_scheme_base, items=items)
+        client = FakeFmrClient([cs, codelist_base])
+        plan = plan_publication(client, [cs, codelist_item_removed])
+
+        cs_action = _action_for(plan, "CS_MAIN")
+        assert cs_action.kind == PlannedActionKind.UPDATE
+        assert any(i.rule_id == "P004" for i in cs_action.issues)
+        freq = next(c for c in cs_action.artefact.items if c.id == "FREQ")
+        assert "CL_COLOUR(2.0)" in freq.enum_ref
+
     def test_plan_publication_propagation_can_be_disabled(
         self, dsd_base, codelist_base
     ):

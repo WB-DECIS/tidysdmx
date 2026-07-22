@@ -105,6 +105,18 @@ class TestCompareVersions:
         """'1.0' sorts before '1.0.0'."""
         assert compare_versions("1.0", "1.0.0") == -1
 
+    def test_compare_versions_prerelease_numeric_identifiers(self):
+        """Numeric extension identifiers compare numerically (semver §11)."""
+        assert compare_versions("1.0.0-rc.2", "1.0.0-rc.10") == -1
+
+    def test_compare_versions_prerelease_numeric_before_alpha(self):
+        """Numeric identifiers precede alphanumeric ones."""
+        assert compare_versions("1.0.0-1", "1.0.0-alpha") == -1
+
+    def test_compare_versions_prerelease_shorter_set_first(self):
+        """A shorter identifier list precedes a longer one on a tie."""
+        assert compare_versions("1.0.0-alpha", "1.0.0-alpha.1") == -1
+
 
 class TestBumpVersion:
     def test_bump_version_two_part_major(self):

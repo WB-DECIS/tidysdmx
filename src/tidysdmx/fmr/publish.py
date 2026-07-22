@@ -53,7 +53,6 @@ import msgspec
 from pysdmx.api.fmr.maintenance import StructureAction
 from pysdmx.errors import Invalid, PysdmxError
 from pysdmx.model import (
-    Agency,
     AgencyScheme,
     Categorisation,
     CategoryScheme,
@@ -72,7 +71,6 @@ from pysdmx.model import (
     RepresentationMap,
     StructureMap,
 )
-from pysdmx.model.__base import MaintainableArtefact
 from pysdmx.model.submission import SubmissionResult
 from typeguard import typechecked
 
@@ -82,6 +80,8 @@ from tidysdmx.artefact_validation import (
     validate,
 )
 
+from ._compat import MaintainableArtefact
+from ._compat import agency_id as _agency_id
 from .client import FmrClient
 from .diff import ArtefactDiff, ChangeImpact, ChangeKind, compare_artefacts
 from .versioning import (
@@ -287,32 +287,32 @@ class PublicationReport:
 # ---------------------------------------------------------------------------
 
 #: Dependency layer per artefact type; lower layers are published first.
+#: ConceptScheme sits above the other item schemes because concepts can
+#: reference codelists (``enum_ref``/``codes``) — reference propagation
+#: processes drafts in this order, so referrers must come after their
+#: possible dependencies.
 _LAYERS: dict[type[MaintainableArtefact], int] = {
     Codelist: 0,
-    ConceptScheme: 0,
     AgencyScheme: 0,
     CategoryScheme: 0,
-    Hierarchy: 1,
-    RepresentationMap: 1,
-    MultiRepresentationMap: 1,
-    DataStructureDefinition: 2,
-    Dataflow: 3,
-    StructureMap: 3,
-    ProvisionAgreement: 4,
-    Categorisation: 4,
+    ConceptScheme: 1,
+    Hierarchy: 2,
+    RepresentationMap: 2,
+    MultiRepresentationMap: 2,
+    DataStructureDefinition: 3,
+    Dataflow: 4,
+    StructureMap: 4,
+    ProvisionAgreement: 5,
+    Categorisation: 5,
 }
 
 #: Layer used for artefact types without an explicit entry.
-_DEFAULT_LAYER = 3
+_DEFAULT_LAYER = 4
 
 _REF_TOKEN_RE = re.compile(
     r"(?P<agency>[A-Za-z0-9_.\-]+):(?P<id>[A-Za-z0-9_.\-@$]+)"
     r"\((?P<version>[^)]+)\)"
 )
-
-
-def _agency_id(agency: str | Agency) -> str:
-    return agency.id if isinstance(agency, Agency) else agency
 
 
 def _identity(artefact: MaintainableArtefact) -> tuple[str, str, str]:

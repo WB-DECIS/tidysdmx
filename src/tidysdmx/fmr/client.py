@@ -31,15 +31,16 @@ from pysdmx.api.fmr.maintenance import (
 )
 from pysdmx.errors import Invalid, NotFound, Unauthorized
 from pysdmx.io.format import StructureFormat
-from pysdmx.model import Agency, AgencyScheme, Reference
-from pysdmx.model.__base import MaintainableArtefact
+from pysdmx.model import AgencyScheme, Reference
 from pysdmx.model.message import Header
 from pysdmx.util import parse_urn
 from typeguard import typechecked
 
 from tidysdmx.artefact_validation import raise_if_invalid
 
-from .versioning import parse_version
+from ._compat import MaintainableArtefact
+from ._compat import agency_id as _agency_id
+from .versioning import _version_sort_key
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +110,6 @@ def _registry_root(base_url: str) -> str:
     """Strip a trailing ``/sdmx/v2`` to get the registry root URL."""
     url = base_url.rstrip("/")
     return url.removesuffix(_SDMX_V2_SUFFIX)
-
-
-def _agency_id(agency: str | Agency) -> str:
-    return agency.id if isinstance(agency, Agency) else agency
 
 
 def _normalize_type(sdmx_type: str) -> str:
@@ -339,7 +336,9 @@ class FmrClient:
         matches = [
             a for a in result if a.id == ref.id and _agency_id(a.agency) == ref.agency
         ]
-        if ref.version not in ("~", "*", "latest"):
+        # SDMX-REST 2.x version tokens: "~" (latest stable), "+" (latest),
+        # "*" (all). "latest" (SDMX-REST 1.x) is kept for leniency.
+        if ref.version not in ("~", "+", "*", "latest"):
             matches = [a for a in matches if a.version == ref.version]
         if not matches:
             raise NotFound(
@@ -432,12 +431,3 @@ class FmrClient:
             self._root_url,
             action.value,
         )
-
-
-def _version_sort_key(version: str) -> tuple[int, Any]:
-    """Best-effort sortable key for possibly non-semver version strings."""
-    try:
-        parsed = parse_version(version)
-    except ValueError:
-        return (0, version)
-    return (1, parsed._sort_key())

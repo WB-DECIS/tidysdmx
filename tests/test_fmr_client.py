@@ -167,6 +167,16 @@ class TestGetArtefact:
         result = client.get_artefact("Dataflow=WB:DF_X(~)")
         assert result.version == "2.0"
 
+    def test_get_artefact_sequence_plus_token_is_wildcard(self, client):
+        """The SDMX-REST '+' (latest) token is not treated as a literal."""
+        client._reader.get_dataflows.return_value = [
+            _dataflow("DF_X", version="1.0"),
+            _dataflow("DF_X", version="2.0"),
+        ]
+        ref = Reference(sdmx_type="Dataflow", agency="WB", id="DF_X", version="+")
+        result = client.get_artefact(ref)
+        assert result.version == "2.0"
+
     def test_get_artefact_sequence_no_match_raises_not_found(self, client):
         """An empty narrowing result raises NotFound."""
         client._reader.get_dataflows.return_value = []
@@ -233,6 +243,19 @@ class TestPutArtefacts:
         client._writer = MagicMock()
         client.put_artefacts([invalid], validate=False)
         client._writer.put_structures.assert_called_once()
+
+
+class TestGettersContract:
+    @pytest.mark.parametrize("method", sorted({m for m, _ in _GETTERS.values()}))
+    def test_getter_exists_on_installed_registry_client(self, method):
+        """Every dispatch-table method exists on pysdmx's RegistryClient.
+
+        Guards against silent drift when pysdmx is upgraded and a getter
+        is renamed or removed.
+        """
+        from pysdmx.api.fmr import RegistryClient
+
+        assert callable(getattr(RegistryClient, method))
 
 
 class TestAttributeDelegation:
