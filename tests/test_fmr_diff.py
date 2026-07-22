@@ -180,11 +180,11 @@ class TestHierarchy:
     def test_compare_artefacts_hierarchy_code_moved(
         self, hierarchy_base, hierarchy_moved_code
     ):
-        """Moving a hierarchical code is cosmetic (presentation only)."""
+        """Moving a hierarchical code is breaking (aggregation paths change)."""
         diff = compare_artefacts(hierarchy_base, hierarchy_moved_code)
         moved = [c for c in diff.changes if c.kind == ChangeKind.MOVED]
         assert len(moved) == 1
-        assert moved[0].impact == ChangeImpact.COSMETIC
+        assert moved[0].impact == ChangeImpact.BREAKING
         assert moved[0].old == "A"
         assert moved[0].new == "B"
 
