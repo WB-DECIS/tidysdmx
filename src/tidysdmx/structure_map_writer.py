@@ -204,21 +204,16 @@ def prepare_structure_map_for_upload(
             fields.
 
     Example:
-        >>> from pysdmx.api.fmr.maintenance import (
-        ...     RegistryMaintenanceClient, StructureAction,
-        ... )
+        >>> from tidysdmx.fmr import FmrClient, publish
         >>> from tidysdmx.structure_map_writer import prepare_structure_map_for_upload
         >>>
         >>> # Prepare artifacts
         >>> artifacts = prepare_structure_map_for_upload(my_structure_map)
         >>>
-        >>> # Upload to FMR
-        >>> client = RegistryMaintenanceClient(
-        ...     api_endpoint="https://your-fmr/sdmx/v2/",
-        ...     user="username",
-        ...     password="password"
-        ... )
-        >>> client.put_structures(artifacts, action=StructureAction.Replace)
+        >>> # Publish to FMR (credentials from TIDYSDMX_FMR_* env vars);
+        >>> # use plan_publication/execute_plan to inspect first.
+        >>> client = FmrClient("https://your-fmr")
+        >>> report = publish(client, artifacts)
     """
     if validate:
         validate_structure_map_references(structure_map)
