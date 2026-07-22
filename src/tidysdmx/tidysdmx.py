@@ -5,7 +5,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -55,6 +55,25 @@ def _create_keys_dict(input_dict: dict[str, object]) -> dict[str, str]:
     return {_remove_extension(key): key for key in input_dict}
 
 
+def _fmr_read_url(base_url: str) -> str:
+    """Build the FMR SDMX 3.0 read endpoint from a base URL.
+
+    Any path already present in ``base_url`` is preserved (e.g. a
+    registry deployed under a custom context path); URLs already ending
+    in ``/sdmx/v2`` are used verbatim. Bare hosts keep the historical
+    ``/FMR/`` context-path default for backward compatibility.
+    """
+    parsed = urlparse(base_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/sdmx/v2"):
+        new_path = path + "/"
+    elif path:
+        new_path = path + "/sdmx/v2/"
+    else:
+        new_path = "/FMR/sdmx/v2/"
+    return parsed._replace(path=new_path).geturl()
+
+
 @deprecated(replacement="fetch_schema")
 def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
@@ -76,7 +95,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """
     structure_format = StructureFormat.FUSION_JSON
     fmr_url = fmr_params[env]["url"]
-    base_url = urljoin(fmr_url, "/FMR/sdmx/v2/")
+    base_url = _fmr_read_url(fmr_url)
 
     client = fmr.RegistryClient(base_url, format=structure_format)
 
@@ -92,8 +111,15 @@ def fetch_schema(
 ) -> Schema:
     """Fetch the schema of a specified artefact from an SDMX registry.
 
+    For richer registry access (env-var credentials, generic artefact
+    fetching, publication workflows) prefer
+    :class:`tidysdmx.fmr.FmrClient`, whose ``get_schema`` delegates to
+    the same pysdmx client.
+
     Args:
-        base_url: The base URL of the FMR.
+        base_url: The base URL of the FMR. Any path already present is
+            preserved; bare hosts default to the legacy ``/FMR/``
+            context path.
         artefact_id: The identifier of the artefact, typically in the format
             ``"agency:id(version)"``.
         context: The context of the artefact to fetch.
@@ -102,7 +128,7 @@ def fetch_schema(
         The fetched schema object.
     """
     structure_format = StructureFormat.FUSION_JSON
-    base_url = urljoin(base_url, "/FMR/sdmx/v2/")
+    base_url = _fmr_read_url(base_url)
     client = fmr.RegistryClient(base_url, format=structure_format)
 
     agency, id_part, version = parse_artefact_id(artefact_id)
