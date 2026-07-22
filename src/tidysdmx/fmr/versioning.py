@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import total_ordering
-from typing import Literal
+from typing import Any, Literal
 
 from pysdmx.util import is_final as _pysdmx_is_final
 from typeguard import typechecked
@@ -32,6 +32,25 @@ _VERSION_RE = re.compile(
 )
 
 BumpLevel = Literal["major", "minor", "patch"]
+
+
+def _extension_key(extension: str | None) -> tuple[Any, ...]:
+    """Semver 2.0 (§11) precedence key for a hyphen extension.
+
+    A version with an extension precedes the same numerics without one.
+    Extension identifiers are compared dot-by-dot: numeric identifiers
+    compare numerically and precede alphanumeric ones; a shorter
+    identifier list precedes a longer one when the shared prefix ties.
+    """
+    if extension is None:
+        return (1,)
+    return (
+        0,
+        tuple(
+            (0, int(part), "") if part.isdigit() else (1, 0, part)
+            for part in extension.split(".")
+        ),
+    )
 
 
 class VersionScheme(StrEnum):
@@ -53,8 +72,10 @@ class SdmxVersion:
 
     Instances are totally ordered: numeric segments compare first, a
     missing patch segment sorts before patch ``0`` (``1.0 < 1.0.0``),
-    and — per semver — a version with an extension sorts before the
-    same numerics without one (``1.0.0-draft < 1.0.0``).
+    and — per semver 2.0 precedence — a version with an extension sorts
+    before the same numerics without one (``1.0.0-draft < 1.0.0``),
+    with extension identifiers compared dot-by-dot
+    (``1.0.0-rc.2 < 1.0.0-rc.10``).
 
     Attributes:
         major: Major segment.
@@ -120,13 +141,12 @@ class SdmxVersion:
         patch = self.patch if self.patch is not None else 0
         return SdmxVersion(self.major, self.minor, patch + 1)
 
-    def _sort_key(self) -> tuple[int, int, int, bool, str]:
+    def _sort_key(self) -> tuple[int, int, int, tuple[Any, ...]]:
         return (
             self.major,
             self.minor,
             self.patch if self.patch is not None else -1,
-            self.extension is None,
-            self.extension or "",
+            _extension_key(self.extension),
         )
 
     def __lt__(self, other: "SdmxVersion") -> bool:
@@ -201,6 +221,15 @@ def compare_versions(a: str, b: str) -> int:
     if va._sort_key() == vb._sort_key():
         return 0
     return -1 if va < vb else 1
+
+
+def _version_sort_key(version: str) -> tuple[int, Any]:
+    """Best-effort sortable key for possibly non-semver version strings."""
+    try:
+        parsed = parse_version(version)
+    except ValueError:
+        return (0, version)
+    return (1, parsed._sort_key())
 
 
 @typechecked

@@ -12,6 +12,7 @@ from tidysdmx.tidysdmx import (
     _add_sdmx_reference_cols,
     _create_keys_dict,
     _extract_artefact_type,
+    _fmr_read_url,
     fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
@@ -137,6 +138,24 @@ class TestFetchSchema:
         assert result is schema
         assert captured["args"] == ("datastructure", "WB", "WDI", "1.0")
         assert captured["base_url"].endswith("/FMR/sdmx/v2/")
+
+
+class TestFmrReadUrl:
+    def test_fmr_read_url_bare_host_uses_legacy_fmr_path(self):
+        """Bare hosts keep the historical /FMR/ context-path default."""
+        assert _fmr_read_url("https://h.org") == "https://h.org/FMR/sdmx/v2/"
+
+    def test_fmr_read_url_preserves_context_path(self):
+        """An existing base path is preserved, not replaced."""
+        assert _fmr_read_url("https://h.org/registry") == (
+            "https://h.org/registry/sdmx/v2/"
+        )
+
+    def test_fmr_read_url_existing_sdmx_v2_used_verbatim(self):
+        """A URL already pointing at /sdmx/v2 is not extended."""
+        assert _fmr_read_url("https://h.org/FMR/sdmx/v2/") == (
+            "https://h.org/FMR/sdmx/v2/"
+        )
 
 
 class TestStandardizeIndicatorId:

@@ -33,7 +33,6 @@ from typing import Any
 
 from pysdmx.errors import Invalid
 from pysdmx.model import (
-    Agency,
     AgencyScheme,
     CategoryScheme,
     Codelist,
@@ -52,9 +51,11 @@ from pysdmx.model import (
     RepresentationMap,
     StructureMap,
 )
-from pysdmx.model.__base import ItemScheme, MaintainableArtefact
 from pysdmx.util import parse_urn
 from typeguard import typechecked
+
+from ._compat import ItemScheme, MaintainableArtefact
+from ._compat import agency_id as _agency_id
 
 logger = logging.getLogger(__name__)
 
@@ -218,10 +219,6 @@ def _eq(a: Any, b: Any) -> bool:
     ):
         return len(a) == len(b) and all(_eq(x, y) for x, y in zip(a, b, strict=True))
     return bool(a == b)
-
-
-def _agency_id(agency: str | Agency) -> str:
-    return agency.id if isinstance(agency, Agency) else agency
 
 
 def _change(
@@ -617,10 +614,12 @@ def _diff_hierarchy(old: Hierarchy, new: Hierarchy) -> list[ArtefactChange]:
             new_path, new_parent, _, new_code = new_entries[0]
             if old_parent != new_parent:
                 moved_ids.add(code_id)
+                # Re-parenting changes the aggregation paths consumers
+                # roll up along — breaking, like item-scheme moves.
                 changes.append(
                     _change(
                         ChangeKind.MOVED,
-                        ChangeImpact.COSMETIC,
+                        ChangeImpact.BREAKING,
                         f"codes.{new_path}",
                         f"Hierarchical code '{code_id}' moved.",
                         old=old_parent,
