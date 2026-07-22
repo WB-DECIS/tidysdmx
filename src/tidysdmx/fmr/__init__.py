@@ -55,8 +55,10 @@ from .publish import (
     PublicationReport,
     PublicationResult,
     execute_plan,
+    inplace_breaking_actions,
     plan_publication,
     publish,
+    rebase_to_registry,
 )
 from .report import (
     diff_to_dataframe,
@@ -100,10 +102,12 @@ __all__ = [
     "compare_versions",
     "diff_to_dataframe",
     "execute_plan",
+    "inplace_breaking_actions",
     "parse_version",
     "plan_publication",
     "plan_to_dataframe",
     "publish",
+    "rebase_to_registry",
     "report_to_dataframe",
     "suggest_version",
 ]

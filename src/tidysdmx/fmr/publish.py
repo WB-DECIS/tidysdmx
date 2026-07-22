@@ -767,6 +767,56 @@ def _action_warnings(draft: _Draft, structure_action: StructureAction) -> None:
 
 
 @typechecked
+def rebase_to_registry(
+    client: FmrClient,
+    artefacts: Sequence[MaintainableArtefact],
+) -> list[MaintainableArtefact]:
+    """Seed each artefact's version from the registry before planning.
+
+    In a build-fresh pipeline the local artefacts are rebuilt at a fixed
+    baseline every run, so once the registry has advanced past that
+    baseline :func:`plan_publication` raises a blocking ``P002`` and the
+    version bump is computed off a stale baseline. Rebasing removes that
+    friction by making the registry's current version the baseline.
+
+    Pass 1 sets each artefact's version to the registry's latest
+    counterpart (same type, agency, and id); artefacts absent from the
+    registry keep their build-time initial version. Pass 2 retargets every
+    intra-batch reference — a StructureMap's ``source``/``target`` and its
+    embedded RepresentationMaps, a DSD's embedded codelists and concept
+    references, and so on — to the seeded version of the artefact it points
+    at, so the batch is internally consistent with the baselines it is
+    about to be diffed against. References to artefacts outside the batch
+    are left untouched.
+
+    Non-final artefacts (e.g. a ``"1.0.0-draft"`` scratch schema under a
+    :class:`~tidysdmx.fmr.versioning.VersionPolicy` with
+    ``replace_non_final=True``) therefore resolve to an in-place replace at
+    the same version rather than a spurious bump.
+
+    Args:
+        client: The FMR client (read access is sufficient).
+        artefacts: The freshly-built local artefacts to rebase.
+
+    Returns:
+        The artefacts in input order, re-versioned and with intra-batch
+        references normalised to the seeded versions.
+    """
+    targets: dict[tuple[str, str], str] = {}
+    seeded: list[MaintainableArtefact] = []
+    for artefact in artefacts:
+        existing = client.get_existing(artefact)
+        target = existing.version if existing is not None else artefact.version
+        targets[(_agency_id(artefact.agency), artefact.id)] = target
+        seeded.append(_apply_version(artefact, target))
+
+    def mapper(agency: str, aid: str, version: str) -> str | None:
+        return targets.get((agency, aid))
+
+    return [_map_references(artefact, mapper)[0] for artefact in seeded]
+
+
+@typechecked
 def plan_publication(
     client: FmrClient,
     artefacts: Sequence[MaintainableArtefact],
@@ -816,6 +866,33 @@ def plan_publication(
     return PublicationPlan(
         actions=tuple(d.freeze() for d in drafts),
         structure_action=action,
+    )
+
+
+@typechecked
+def inplace_breaking_actions(plan: PublicationPlan) -> tuple[PlannedAction, ...]:
+    """Return plan actions that overwrite an artefact in place with a breaking diff.
+
+    These are updates whose proposed version equals the version already in
+    the registry — a breaking change applied under ``replace_non_final``
+    without a new version, so the prior artefact is silently overwritten.
+    A pipeline can hard-stop on a non-empty result rather than clobber a
+    non-final (e.g. draft) artefact with an incompatible structure.
+
+    Args:
+        plan: The publication plan to inspect.
+
+    Returns:
+        The in-place breaking :class:`PlannedAction` records, in plan order.
+    """
+    return tuple(
+        action
+        for action in plan.actions
+        if action.kind == PlannedActionKind.UPDATE
+        and action.diff is not None
+        and action.diff.impact == ChangeImpact.BREAKING
+        and action.registry_version is not None
+        and action.proposed_version == action.registry_version
     )
 
 
