@@ -448,6 +448,75 @@ class TestValidateDatasetLocal:
         )
         assert result.empty, f"Expected no errors, got:\n{result}"
 
+    def test_stale_valid_dict_with_context_cols_normalized(self):
+        """`valid` dicts cached under <=0.9.0 with DATAFLOW columns are normalized.
+
+        Regression test for the PR #257 review: a stale cached dict must not
+        resurrect the context-specific reference columns fixed in #255.
+        """
+        stale_valid = {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {},
+            "dim_comp": ["TIME_PERIOD", "AREA"],
+            "sdmx_cols": ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+        }
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, valid=stale_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_valid_dict_with_custom_sdmx_cols_respected(self):
+        """Non-legacy custom sdmx_cols in a `valid` dict are still honored."""
+        custom_valid = {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {},
+            "dim_comp": ["TIME_PERIOD", "AREA"],
+            "sdmx_cols": ["REF_COL"],
+        }
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "REF_COL": ["x"],
+            }
+        )
+        result = validate_dataset_local(df, valid=custom_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_schema_overrides_stale_valid_sdmx_cols(self, sdmx_schema):
+        """When both schema and valid are passed, schema.context wins."""
+        stale_valid = {
+            "valid_comp": ["INDICATOR", "TIME_PERIOD", "SEX", "OBS_VALUE"],
+            "mandatory_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+            "codelist_ids": {},
+            "dim_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+            "sdmx_cols": ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+        }
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1"],
+                "TIME_PERIOD": ["2020"],
+                "SEX": ["F"],
+                "OBS_VALUE": [100],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, schema=sdmx_schema, valid=stale_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
     def test_legacy_valid_dict_without_sdmx_cols_uses_default(self):
         """Legacy `valid` dicts missing `sdmx_cols` fall back to STRUCTURE."""
         legacy_valid = {

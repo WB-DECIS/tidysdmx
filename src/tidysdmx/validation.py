@@ -10,6 +10,13 @@ from .utils import extract_validation_info, sdmx_reference_cols_for
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
+# Context-specific reference columns produced by tidysdmx <= 0.9.0; `valid`
+# dicts cached under those versions may still carry them.
+_LEGACY_CONTEXT_SDMX_COLS: tuple[list[str], ...] = (
+    ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+    ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
+)
+
 
 def _truncation_note(shown: int, total: int, max_errors: int) -> str:
     """Return a canonical suffix describing truncated error output.
@@ -101,7 +108,10 @@ def validate_dataset_local(
         sdmx_cols: SDMX reference columns expected in the dataset, as a
             list or tuple. When omitted, they resolve to the standard
             SDMX-CSV columns ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``
-            for every schema context.
+            for every schema context; if only a ``valid`` dict is given,
+            context-specific column sets cached under tidysdmx <= 0.9.0
+            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']``) are likewise
+            normalized to the standard columns.
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -122,20 +132,20 @@ def validate_dataset_local(
             raise ValueError("Either a schema or precomputed 'valid' must be provided.")
         valid = extract_validation_info(schema)
 
-    if sdmx_cols is None:
-        inferred = valid.get("sdmx_cols")
-        if inferred is not None:
-            sdmx_cols = list(inferred)
-        else:
-            # TODO(deprecated): legacy fallback for `valid` dicts built under
-            # the pre-#218 shape (missing the "sdmx_cols" key). Remove once
-            # the deprecated `valid` parameter itself is dropped.
-            if schema is not None:
-                sdmx_cols = sdmx_reference_cols_for(schema.context)
-            else:
-                sdmx_cols = list(_DEFAULT_SDMX_COLS)
-    else:
+    if sdmx_cols is not None:
         sdmx_cols = list(sdmx_cols)
+    elif schema is not None:
+        # The schema is authoritative: ignore `valid["sdmx_cols"]`, which may
+        # carry stale context-specific names cached under tidysdmx <= 0.9.0.
+        sdmx_cols = sdmx_reference_cols_for(schema.context)
+    else:
+        # TODO(deprecated): fallbacks for callers passing only a cached
+        # `valid` dict. Remove once the deprecated `valid` parameter itself
+        # is dropped.
+        inferred = valid.get("sdmx_cols")
+        sdmx_cols = list(inferred) if inferred is not None else list(_DEFAULT_SDMX_COLS)
+        if sdmx_cols in _LEGACY_CONTEXT_SDMX_COLS:
+            sdmx_cols = list(_DEFAULT_SDMX_COLS)
 
     error_records: list[dict[str, str]] = []
 
