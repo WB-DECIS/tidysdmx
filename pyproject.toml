@@ -11,7 +11,7 @@ Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/master/CHANGELOG.md"
 Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
 
 [tool.poetry]
-version = "0.9.0"
+version = "0.10.0"
 description = "A toolbox to work with SDMX data"
 authors = ["Tony Fujs", "Daniel Gil-Sanchez"]
 license = "MIT"
