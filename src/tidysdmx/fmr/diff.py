@@ -56,6 +56,7 @@ from typeguard import typechecked
 
 from ._compat import ItemScheme, MaintainableArtefact
 from ._compat import agency_id as _agency_id
+from ._refs import normalize_reference_versions
 
 logger = logging.getLogger(__name__)
 
@@ -266,12 +267,16 @@ def _ref_key(value: Any) -> str | None:
 # Common maintainable-level fields
 # ---------------------------------------------------------------------------
 
-#: Identity fields and registry-managed noise, never diffed.
-_SKIP_ALWAYS = frozenset({"id", "agency", "version", "uri", "urn"})
+#: Identity fields and registry-managed noise, never diffed. ``is_final`` is
+#: excluded because it is not stored but derived from the version string
+#: (pysdmx computes ``is_final(version)`` on read), while locally-built
+#: artefacts keep the default ``is_final=False``; comparing it would re-surface
+#: the already-excluded ``version`` as a phantom cosmetic change.
+_SKIP_ALWAYS = frozenset({"id", "agency", "version", "uri", "urn", "is_final"})
 
 #: Maintainable-level fields handled by ``_diff_common``.
 _COMMON_FIELDS = frozenset(
-    {"name", "description", "annotations", "valid_from", "valid_to", "is_final"}
+    {"name", "description", "annotations", "valid_from", "valid_to"}
 )
 
 #: Fields classified as cosmetic by the generic field walk.
@@ -304,7 +309,7 @@ def _diff_common(
                 new.description,
             )
         )
-    for fld in ("annotations", "valid_from", "valid_to", "is_final"):
+    for fld in ("annotations", "valid_from", "valid_to"):
         ov, nv = getattr(old, fld), getattr(new, fld)
         if not _eq(ov, nv):
             changes.append(
@@ -1216,6 +1221,7 @@ _HANDLED: dict[type[MaintainableArtefact], frozenset[str]] = {
 def compare_artefacts(
     existing: MaintainableArtefact,
     updated: MaintainableArtefact,
+    ignore_reference_versions: bool = False,
 ) -> ArtefactDiff:
     """Detect the changes between two versions of the same artefact.
 
@@ -1229,6 +1235,16 @@ def compare_artefacts(
     Args:
         existing: The current artefact (e.g. fetched from FMR).
         updated: The updated artefact of the same type, agency, and id.
+        ignore_reference_versions: When ``True``, outbound reference
+            *versions* (e.g. a DSD's enumeration/concept references, a
+            StructureMap's ``source``/``target``) are collapsed to a
+            sentinel on both sides before diffing, so a reference
+            re-pointed only to a different *version* of the same artefact
+            is not reported as a change. Reference *identity* (agency:id)
+            and all non-reference content are still compared. The publish
+            workflow uses this so a co-bumped dependency does not
+            manufacture a spurious change in its dependents; the version
+            follow is classified by the publish layer instead.
 
     Returns:
         An :class:`ArtefactDiff` with one record per detected change
@@ -1271,6 +1287,9 @@ def compare_artefacts(
             "compare_artefacts expects two versions of the same "
             "artefact (same type, agency, and id).",
         )
+    if ignore_reference_versions:
+        existing = normalize_reference_versions(existing)
+        updated = normalize_reference_versions(updated)
     changes = _diff_common(existing, updated)
     differ = _DIFFERS.get(type(existing))
     handled = _HANDLED.get(type(existing), frozenset())

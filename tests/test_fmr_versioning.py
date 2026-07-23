@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from pysdmx.util import is_final
 
@@ -14,6 +16,7 @@ from tidysdmx.fmr.versioning import (
     VersionPolicy,
     VersionScheme,
     bump_version,
+    bump_version_for_impact,
     compare_versions,
     is_fmr_publishable,
     parse_version,
@@ -260,3 +263,48 @@ class TestIsFmrPublishable:
     def test_wildcard_is_not_publishable(self):
         """An unparseable wildcard token is not publishable."""
         assert not is_fmr_publishable("~")
+
+
+class TestBumpVersionForImpact:
+    def test_breaking_major(self):
+        assert bump_version_for_impact("1.0.0", ChangeImpact.BREAKING) == "2.0.0"
+
+    def test_additive_minor(self):
+        assert bump_version_for_impact("1.2.0", ChangeImpact.ADDITIVE) == "1.3.0"
+
+    def test_cosmetic_patch(self):
+        assert bump_version_for_impact("1.2.3", ChangeImpact.COSMETIC) == "1.2.4"
+
+    def test_two_part_cosmetic_collapses_to_minor(self):
+        assert bump_version_for_impact("1.0", ChangeImpact.COSMETIC) == "1.1"
+
+    def test_strips_draft_extension_under_semver_only(self):
+        assert bump_version_for_impact("1.0.1-draft", ChangeImpact.BREAKING) == "2.0.0"
+
+    def test_sdmx3_replace_non_final_keeps_version(self):
+        policy = VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
+        assert (
+            bump_version_for_impact("1.0.0-draft", ChangeImpact.BREAKING, policy)
+            == "1.0.0-draft"
+        )
+
+    def test_invalid_version_raises(self):
+        with pytest.raises(ValueError):
+            bump_version_for_impact("nope", ChangeImpact.ADDITIVE)
+
+
+class TestVersionPolicyInertFlagWarning:
+    def test_replace_non_final_under_semver_only_warns(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.fmr.versioning"):
+            VersionPolicy(replace_non_final=True)
+        assert any("inert" in r.message for r in caplog.records)
+
+    def test_sdmx3_replace_non_final_does_not_warn(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.fmr.versioning"):
+            VersionPolicy(mode=VersioningMode.SDMX_3, replace_non_final=True)
+        assert not caplog.records
+
+    def test_default_policy_does_not_warn(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.fmr.versioning"):
+            VersionPolicy()
+        assert not caplog.records

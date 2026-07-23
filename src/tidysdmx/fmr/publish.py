@@ -45,14 +45,12 @@ untouched; the FMR derives canonical URNs on ingestion.
 """
 
 import logging
-import re
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Literal
 
-import msgspec
 from pysdmx.api.fmr.maintenance import StructureAction
 from pysdmx.errors import Invalid, PysdmxError
 from pysdmx.model import (
@@ -60,15 +58,10 @@ from pysdmx.model import (
     Categorisation,
     CategoryScheme,
     Codelist,
-    ComponentMap,
-    Components,
     ConceptScheme,
     Dataflow,
     DataStructureDefinition,
-    HierarchicalCode,
     Hierarchy,
-    ItemReference,
-    MultiComponentMap,
     MultiRepresentationMap,
     ProvisionAgreement,
     RepresentationMap,
@@ -85,12 +78,21 @@ from tidysdmx.artefact_validation import (
 
 from ._compat import MaintainableArtefact
 from ._compat import agency_id as _agency_id
+from ._refs import apply_version as _apply_version
+from ._refs import map_references as _map_references
 from .client import FmrClient
-from .diff import ArtefactDiff, ChangeImpact, ChangeKind, compare_artefacts
+from .diff import (
+    ArtefactChange,
+    ArtefactDiff,
+    ChangeImpact,
+    ChangeKind,
+    compare_artefacts,
+)
 from .versioning import (
     DEFAULT_VERSION_POLICY,
     VersioningMode,
     VersionPolicy,
+    bump_version_for_impact,
     compare_versions,
     parse_version,
     suggest_version,
@@ -313,11 +315,6 @@ _LAYERS: dict[type[MaintainableArtefact], int] = {
 #: Layer used for artefact types without an explicit entry.
 _DEFAULT_LAYER = 4
 
-_REF_TOKEN_RE = re.compile(
-    r"(?P<agency>[A-Za-z0-9_.\-]+):(?P<id>[A-Za-z0-9_.\-@$]+)"
-    r"\((?P<version>[^)]+)\)"
-)
-
 
 def _identity(artefact: MaintainableArtefact) -> tuple[str, str, str]:
     return (
@@ -343,23 +340,6 @@ def _issue(
     )
 
 
-def _apply_version(
-    artefact: MaintainableArtefact, version: str
-) -> MaintainableArtefact:
-    """Return the artefact at the given version, fixing its own URN."""
-    if artefact.version == version:
-        return artefact
-    updated = msgspec.structs.replace(artefact, version=version)
-    if artefact.urn:
-        suffix = f"({artefact.version})"
-        if artefact.urn.endswith(suffix):
-            new_urn = artefact.urn[: -len(suffix)] + f"({version})"
-        else:
-            new_urn = None
-        updated = msgspec.structs.replace(updated, urn=new_urn)
-    return updated
-
-
 def _dependency_order(
     artefacts: Sequence[MaintainableArtefact],
 ) -> list[MaintainableArtefact]:
@@ -379,163 +359,6 @@ def _dependency_order(
         artefacts,
         key=lambda a: _LAYERS.get(type(a), _DEFAULT_LAYER),
     )
-
-
-# A mapper receives (agency, id, version) of a reference and returns the
-# replacement version, or None to leave the reference untouched.
-_RefMapper = Callable[[str, str, str], str | None]
-
-
-def _map_references(
-    artefact: MaintainableArtefact, mapper: _RefMapper
-) -> tuple[MaintainableArtefact, list[str]]:
-    """Apply ``mapper`` to every known reference-bearing field.
-
-    Covers URN strings (full, short, or ``agency:id(version)`` tokens),
-    embedded maintainable artefacts, and item references. Returns the
-    (possibly rebuilt) artefact and the list of changed field paths.
-    """
-    changed: list[str] = []
-
-    def map_text(text: str | None, path: str) -> str | None:
-        if not text:
-            return text
-
-        def sub(m: re.Match) -> str:
-            new_version = mapper(m.group("agency"), m.group("id"), m.group("version"))
-            if new_version is None or new_version == m.group("version"):
-                return m.group(0)
-            changed.append(path)
-            return f"{m.group('agency')}:{m.group('id')}({new_version})"
-
-        return _REF_TOKEN_RE.sub(sub, text)
-
-    def map_embedded(obj: Any, path: str) -> Any:
-        if obj is None:
-            return None
-        new_version = mapper(_agency_id(obj.agency), obj.id, obj.version)
-        if new_version is not None and new_version != obj.version:
-            changed.append(path)
-            return _apply_version(obj, new_version)
-        return obj
-
-    def map_item_ref(ref: ItemReference, path: str) -> ItemReference:
-        new_version = mapper(ref.agency, ref.id, ref.version)
-        if new_version is not None and new_version != ref.version:
-            changed.append(path)
-            return msgspec.structs.replace(ref, version=new_version)
-        return ref
-
-    a: Any = artefact
-    if isinstance(a, Dataflow):
-        if isinstance(a.structure, str):
-            new = map_text(a.structure, "structure")
-            if new != a.structure:
-                a = msgspec.structs.replace(a, structure=new)
-        elif a.structure is not None:
-            emb = map_embedded(a.structure, "structure")
-            if emb is not a.structure:
-                a = msgspec.structs.replace(a, structure=emb)
-    elif isinstance(a, StructureMap):
-        new_source = map_text(a.source, "source")
-        new_target = map_text(a.target, "target")
-        rules = list(a.maps)
-        dirty = False
-        for i, rule in enumerate(rules):
-            if isinstance(rule, ComponentMap | MultiComponentMap):
-                values = rule.values
-                path = f"maps[{i}].values"
-                if isinstance(values, str):
-                    new_values = map_text(values, path)
-                    if new_values != values:
-                        rules[i] = msgspec.structs.replace(rule, values=new_values)
-                        dirty = True
-                else:
-                    emb = map_embedded(values, path)
-                    if emb is not values:
-                        rules[i] = msgspec.structs.replace(rule, values=emb)
-                        dirty = True
-        if new_source != a.source or new_target != a.target or dirty:
-            a = msgspec.structs.replace(
-                a, source=new_source, target=new_target, maps=tuple(rules)
-            )
-    elif isinstance(a, DataStructureDefinition):
-        comps = []
-        dirty = False
-        for c in a.components:
-            c2 = c
-            new_ref = map_text(c.local_enum_ref, f"components.{c.id}.local_enum_ref")
-            if new_ref != c.local_enum_ref:
-                c2 = msgspec.structs.replace(c2, local_enum_ref=new_ref)
-            emb = map_embedded(c.local_codes, f"components.{c.id}.local_codes")
-            if emb is not c.local_codes:
-                c2 = msgspec.structs.replace(c2, local_codes=emb)
-            if isinstance(c.concept, ItemReference):
-                new_concept = map_item_ref(c.concept, f"components.{c.id}.concept")
-                if new_concept is not c.concept:
-                    c2 = msgspec.structs.replace(c2, concept=new_concept)
-            if c2 is not c:
-                dirty = True
-            comps.append(c2)
-        if dirty:
-            a = msgspec.structs.replace(a, components=Components(comps))
-    elif isinstance(a, ConceptScheme):
-        items = list(a.items)
-        dirty = False
-        for i, concept in enumerate(items):
-            c2 = concept
-            new_ref = map_text(concept.enum_ref, f"items.{concept.id}.enum_ref")
-            if new_ref != concept.enum_ref:
-                c2 = msgspec.structs.replace(c2, enum_ref=new_ref)
-            emb = map_embedded(concept.codes, f"items.{concept.id}.codes")
-            if emb is not concept.codes:
-                c2 = msgspec.structs.replace(c2, codes=emb)
-            if c2 is not concept:
-                items[i] = c2
-                dirty = True
-        if dirty:
-            a = msgspec.structs.replace(a, items=tuple(items))
-    elif isinstance(a, ProvisionAgreement):
-        new_flow = map_text(a.dataflow, "dataflow")
-        new_provider = map_text(a.provider, "provider")
-        if new_flow != a.dataflow or new_provider != a.provider:
-            a = msgspec.structs.replace(a, dataflow=new_flow, provider=new_provider)
-    elif isinstance(a, Categorisation):
-        new_source = map_text(a.source, "source")
-        new_target = map_text(a.target, "target")
-        if new_source != a.source or new_target != a.target:
-            a = msgspec.structs.replace(a, source=new_source, target=new_target)
-    elif isinstance(a, RepresentationMap | MultiRepresentationMap):
-        for fld in ("source", "target"):
-            value = getattr(a, fld)
-            if isinstance(value, str) or value is None:
-                new = map_text(value, fld)
-                if new != value:
-                    a = msgspec.structs.replace(a, **{fld: new})
-            else:
-                new_seq = tuple(map_text(v, f"{fld}[{i}]") for i, v in enumerate(value))
-                if tuple(value) != new_seq:
-                    a = msgspec.structs.replace(a, **{fld: new_seq})
-    elif isinstance(a, Hierarchy):
-
-        def rewrite_codes(
-            codes: Sequence[HierarchicalCode], prefix: str
-        ) -> tuple[tuple[HierarchicalCode, ...], bool]:
-            out = []
-            dirty = False
-            for hc in codes:
-                new_urn = map_text(hc.urn, f"codes.{prefix}{hc.id}.urn")
-                kids, kids_dirty = rewrite_codes(hc.codes, f"{prefix}{hc.id}/")
-                if new_urn != hc.urn or kids_dirty:
-                    hc = msgspec.structs.replace(hc, urn=new_urn, codes=kids)
-                    dirty = True
-                out.append(hc)
-            return tuple(out), dirty
-
-        new_codes, dirty = rewrite_codes(a.codes, "")
-        if dirty:
-            a = msgspec.structs.replace(a, codes=new_codes)
-    return a, changed
 
 
 def _collect_reference_keys(
@@ -610,7 +433,11 @@ def _plan_one(
         except ValueError as err:
             issues.append(_issue("P003", artefact, str(err), "version"))
     else:
-        diff = compare_artefacts(existing, artefact)
+        # Ignore reference *versions*: an artefact whose only difference from
+        # the registry copy is that a reference points at a co-bumped (or
+        # registry-normalised) version of the same dependency has not really
+        # changed. The version follow is classified in _retarget_references.
+        diff = compare_artefacts(existing, artefact, ignore_reference_versions=True)
         if diff.is_unchanged:
             kind = PlannedActionKind.SKIP
             proposed = existing.version
@@ -661,25 +488,56 @@ def _plan_one(
     return _Draft(artefact, kind, diff, existing, proposed, issues)
 
 
+_IMPACT_ORDER: dict[ChangeImpact, int] = {
+    ChangeImpact.COSMETIC: 0,
+    ChangeImpact.ADDITIVE: 1,
+    ChangeImpact.BREAKING: 2,
+}
+
+
+def _max_impact(*impacts: ChangeImpact | None) -> ChangeImpact | None:
+    """Return the most severe non-``None`` impact, or ``None`` if all are."""
+    present = [i for i in impacts if i is not None]
+    if not present:
+        return None
+    return max(present, key=lambda i: _IMPACT_ORDER[i])
+
+
 def _retarget_references(
     drafts: list[_Draft], policy: VersionPolicy, allow_breaking: bool
 ) -> None:
     """Rewrite intra-batch references to bumped versions (in order).
 
-    Processes drafts in dependency order, so a dependent always sees
-    its dependencies' final proposed versions. A SKIP draft whose
-    references were rewritten is re-diffed and promoted to UPDATE.
+    Processes drafts in dependency order, so a dependent always sees its
+    dependencies' final proposed versions. A reference re-pointed to a
+    co-bumped dependency is a mechanical follow, not a content change: the
+    dependent's genuine diff is recomputed ignoring reference versions,
+    and the version bump it *inherits* is the most severe impact among the
+    dependencies it followed (breaking dependency → major, additive →
+    minor, and so on). A SKIP whose references were rewritten is promoted
+    to UPDATE so its reference stays current in the registry.
     """
-    rewrites: dict[tuple[str, str], tuple[set[str], str]] = {}
+    # (agency, id) -> (versions to replace, replacement, impact bumped for)
+    rewrites: dict[tuple[str, str], tuple[set[str], str, ChangeImpact | None]] = {}
+    followed: set[tuple[str, str]] = set()
 
     def mapper(agency: str, aid: str, version: str) -> str | None:
         entry = rewrites.get((agency, aid))
         if entry is None:
             return None
-        old_versions, new_version = entry
-        return new_version if version in old_versions else None
+        old_versions, new_version, _impact = entry
+        if version in old_versions:
+            followed.add((agency, aid))
+            return new_version
+        return None
 
     for draft in drafts:
+        followed.clear()
+        bump_impact = (
+            draft.diff.impact
+            if draft.kind == PlannedActionKind.UPDATE and draft.diff is not None
+            else None
+        )
         if rewrites:
             new_artefact, paths = _map_references(draft.artefact, mapper)
             if paths:
@@ -693,51 +551,66 @@ def _retarget_references(
                         severity="warning",
                     )
                 )
-                if draft.existing is not None:
-                    draft.diff = compare_artefacts(draft.existing, draft.artefact)
-                    if (
-                        draft.kind == PlannedActionKind.SKIP
-                        and not draft.diff.is_unchanged
-                    ):
+            # A CREATE keeps the retargeted references but is not bumped.
+            if paths and draft.existing is not None:
+                # Genuine content diff ignores the reference version follow;
+                # the dependent inherits the impact of the dependencies it
+                # followed instead of a fabricated breaking change.
+                draft.diff = compare_artefacts(
+                    draft.existing, draft.artefact, ignore_reference_versions=True
+                )
+                followed_impact = _max_impact(
+                    *(rewrites[k][2] for k in followed if k in rewrites)
+                )
+                if followed_impact is not None:
+                    # Record the follow as a change carrying the inherited
+                    # impact, so the plan summary and reports explain why the
+                    # dependent bumps even with no content change of its own.
+                    follow = ArtefactChange(
+                        kind=ChangeKind.MODIFIED,
+                        impact=followed_impact,
+                        path=", ".join(sorted(set(paths))),
+                        message="References retargeted to co-bumped dependencies.",
+                    )
+                    draft.diff = ArtefactDiff(
+                        short_urn=draft.diff.short_urn,
+                        artefact_type=draft.diff.artefact_type,
+                        changes=(*draft.diff.changes, follow),
+                    )
+                combined = draft.diff.impact
+                if combined is not None:
+                    bump_impact = combined
+                    if draft.kind == PlannedActionKind.SKIP:
                         draft.kind = PlannedActionKind.UPDATE
                         draft.issues.extend(validate(draft.artefact))
-                    if draft.kind == PlannedActionKind.UPDATE:
-                        try:
-                            draft.proposed_version = suggest_version(
-                                draft.diff,
-                                draft.existing.version,
-                                policy,
+                    try:
+                        draft.proposed_version = bump_version_for_impact(
+                            draft.existing.version, combined, policy
+                        )
+                    except ValueError as err:
+                        draft.issues.append(
+                            _issue("P003", draft.artefact, str(err), "version")
+                        )
+                    if (
+                        not allow_breaking
+                        and combined == ChangeImpact.BREAKING
+                        and not any(i.rule_id == "P005" for i in draft.issues)
+                    ):
+                        draft.issues.append(
+                            _issue(
+                                "P005",
+                                draft.artefact,
+                                "Breaking changes are not allowed by this "
+                                "plan (allow_breaking=False).",
                             )
-                        except ValueError as err:
-                            draft.issues.append(
-                                _issue(
-                                    "P003",
-                                    draft.artefact,
-                                    str(err),
-                                    "version",
-                                )
-                            )
-                        if (
-                            not allow_breaking
-                            and draft.diff.impact == ChangeImpact.BREAKING
-                            and not any(i.rule_id == "P005" for i in draft.issues)
-                        ):
-                            draft.issues.append(
-                                _issue(
-                                    "P005",
-                                    draft.artefact,
-                                    "Breaking changes are not allowed "
-                                    "by this plan "
-                                    "(allow_breaking=False).",
-                                )
-                            )
+                        )
         old_versions = {draft.artefact.version}
         if draft.registry_version:
             old_versions.add(draft.registry_version)
         old_versions.discard(draft.proposed_version)
         if old_versions:
             key = (_agency_id(draft.artefact.agency), draft.artefact.id)
-            rewrites[key] = (old_versions, draft.proposed_version)
+            rewrites[key] = (old_versions, draft.proposed_version, bump_impact)
 
 
 def _action_warnings(draft: _Draft, structure_action: StructureAction) -> None:

@@ -8,6 +8,7 @@ from pysdmx.model import (
     Codelist,
     ComponentMap,
     Components,
+    Concept,
     ProvisionAgreement,
 )
 
@@ -36,6 +37,24 @@ class TestCompareArtefactsGuards:
         bumped = msgspec.structs.replace(codelist_base, version="2.0")
         diff = compare_artefacts(codelist_base, bumped)
         assert diff.is_unchanged
+
+    def test_compare_artefacts_is_final_only_change_is_unchanged(self, codelist_base):
+        """is_final is version-derived noise and is excluded from the diff.
+
+        A locally-built artefact is is_final=False while a registry copy at a
+        final semver reads back is_final=True; that difference must not be a
+        (phantom cosmetic) change.
+        """
+        finalized = msgspec.structs.replace(codelist_base, is_final=True)
+        diff = compare_artefacts(finalized, codelist_base)
+        assert diff.is_unchanged
+
+    def test_compare_artefacts_real_cosmetic_change_still_detected(self, codelist_base):
+        """Excluding is_final does not suppress genuine cosmetic changes."""
+        renamed = msgspec.structs.replace(codelist_base, name="Renamed")
+        diff = compare_artefacts(codelist_base, renamed)
+        assert not diff.is_unchanged
+        assert diff.impact == ChangeImpact.COSMETIC
 
     def test_compare_artefacts_different_type_raises_invalid(
         self, codelist_base, dsd_base
@@ -459,3 +478,115 @@ class TestArtefactDiffApi:
         new = Codelist(id="CL_S", agency="WB.TEST", name="S", items=(Code(id="A"),))
         diff = compare_artefacts(old, new)
         assert diff.is_unchanged
+
+
+def _enum_urn(codelist_id: str, version: str) -> str:
+    return (
+        "urn:sdmx:org.sdmx.infomodel.codelist."
+        f"Codelist=WB.TEST:{codelist_id}({version})"
+    )
+
+
+class TestIgnoreReferenceVersions:
+    """ignore_reference_versions neutralises version-only reference repoints.
+
+    A reference re-pointed only to a different *version* of the same artefact
+    is not a change, while reference *identity* and content changes are still
+    detected.
+    """
+
+    def _repoint_freq_enum(self, dsd, enum_ref):
+        comps = Components(
+            [
+                msgspec.structs.replace(c, local_enum_ref=enum_ref)
+                if c.id == "FREQ"
+                else c
+                for c in dsd.components
+            ]
+        )
+        return msgspec.structs.replace(dsd, components=comps)
+
+    def test_enum_ref_version_only_change_is_unchanged(self, dsd_base):
+        """A version-only enumeration repoint is ignored when requested."""
+        repointed = self._repoint_freq_enum(dsd_base, _enum_urn("CL_FREQ", "2.0"))
+        # Default behaviour still flags it (see TestDsd).
+        assert compare_artefacts(dsd_base, repointed).impact == ChangeImpact.BREAKING
+        diff = compare_artefacts(dsd_base, repointed, ignore_reference_versions=True)
+        assert diff.is_unchanged
+
+    def test_enum_ref_identity_change_still_breaking(self, dsd_base):
+        """Re-pointing to a *different* codelist (id) is still breaking."""
+        repointed = self._repoint_freq_enum(dsd_base, _enum_urn("CL_OTHER", "1.0"))
+        diff = compare_artefacts(dsd_base, repointed, ignore_reference_versions=True)
+        assert diff.impact == ChangeImpact.BREAKING
+        assert diff.changes[0].path == "components.FREQ.enumeration"
+
+    def test_content_change_still_detected(self, codelist_base, codelist_item_added):
+        """A genuine content change is unaffected by the flag."""
+        diff = compare_artefacts(
+            codelist_base, codelist_item_added, ignore_reference_versions=True
+        )
+        assert not diff.is_unchanged
+        assert diff.impact == ChangeImpact.ADDITIVE
+
+    def test_structure_map_values_version_only_is_unchanged(self, structure_map_base):
+        """A version-only representation-map repoint is ignored when requested."""
+        rules = tuple(
+            msgspec.structs.replace(r, values="RepresentationMap=WB.TEST:RM_TEST(2.0)")
+            if isinstance(r, ComponentMap)
+            else r
+            for r in structure_map_base.maps
+        )
+        updated = msgspec.structs.replace(structure_map_base, maps=rules)
+        assert (
+            compare_artefacts(structure_map_base, updated).impact
+            == ChangeImpact.BREAKING
+        )
+        diff = compare_artefacts(
+            structure_map_base, updated, ignore_reference_versions=True
+        )
+        assert diff.is_unchanged
+
+    def test_concept_itemref_vs_embedded_concept_form_is_unchanged(self, dsd_base):
+        """An embedded Concept(urn) vs a versionless ItemReference compares equal.
+
+        FMR returns a component's concept as an embedded Concept whose urn
+        carries the version; the local build uses an ItemReference. Under
+        ignore_reference_versions the two forms compare equal.
+        """
+        concept_urn = (
+            "urn:sdmx:org.sdmx.infomodel.conceptscheme."
+            "Concept=WB.TEST:CS_MAIN(1.0.0).FREQ"
+        )
+        comps = Components(
+            [
+                msgspec.structs.replace(c, concept=Concept(id="FREQ", urn=concept_urn))
+                if c.id == "FREQ"
+                else c
+                for c in dsd_base.components
+            ]
+        )
+        fmr_form = msgspec.structs.replace(dsd_base, components=comps)
+        # Default mode still flags the form/version difference (1.0 vs 1.0.0).
+        assert not compare_artefacts(dsd_base, fmr_form).is_unchanged
+        diff = compare_artefacts(dsd_base, fmr_form, ignore_reference_versions=True)
+        assert diff.is_unchanged
+
+    def test_concept_identity_change_still_breaking(self, dsd_base):
+        """Re-pointing a concept at a different scheme (id) is still breaking."""
+        concept_urn = (
+            "urn:sdmx:org.sdmx.infomodel.conceptscheme."
+            "Concept=WB.TEST:CS_OTHER(1.0.0).FREQ"
+        )
+        comps = Components(
+            [
+                msgspec.structs.replace(c, concept=Concept(id="FREQ", urn=concept_urn))
+                if c.id == "FREQ"
+                else c
+                for c in dsd_base.components
+            ]
+        )
+        repointed = msgspec.structs.replace(dsd_base, components=comps)
+        diff = compare_artefacts(dsd_base, repointed, ignore_reference_versions=True)
+        assert diff.impact == ChangeImpact.BREAKING
+        assert diff.changes[0].path == "components.FREQ.concept"

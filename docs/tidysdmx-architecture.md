@@ -380,7 +380,8 @@ tidysdmx/fmr/
 │                    VersioningMode gates draft/wildcard publishing (SEMVER_ONLY default)
 ├── publish.py     ← plan_publication() → PublicationPlan → execute_plan()
 │                    CREATE / UPDATE-at-bumped-version / SKIP-unchanged
-└── report.py      ← pandas DataFrame views (the ONLY fmr module using pandas)
+└── report.py      ← pandas DataFrame views incl. changes_for(plan, artefact)
+                     (the ONLY fmr module using pandas)
 ```
 
 **Change impact taxonomy** — every detected change carries one of three impacts, which drive the version bump:
@@ -392,6 +393,8 @@ tidysdmx/fmr/
 | `COSMETIC` | presentation only | names, descriptions, annotations, ordering | patch (minor on two-part) |
 
 Unknown fields and unregistered artefact types fall through to a generic field walk that classifies conservatively as breaking — new pysdmx model fields may therefore over-trigger major bumps until a specialized differ handles them (watch the pysdmx changelog).
+
+`version` and `is_final` are excluded from the diff: `version` is the workflow's *output*, and `is_final` is not stored but derived from the version string (pysdmx computes `is_final(version)` on read) while local builds default to `is_final=False` — so comparing it would re-surface the excluded version as a phantom cosmetic change (a spurious patch bump on every rebuild of a final-semver artefact). To see *why* a given artefact was planned (which field changed, old→new), use `changes_for(plan, artefact)` (report.py), a per-artefact view over `diff_to_dataframe`.
 
 **Version policy** — `suggest_version(diff, current_version, policy)` auto-detects the version scheme from the registry's current version and never migrates schemes. `VersionPolicy` controls the impact→bump mapping, draft handling (`finalize` drops the `-draft` extension without a numeric bump), and `replace_non_final` (in-place republish of non-final versions; note two-part versions are never final per SDMX 3.0, so this disables bumping entirely on two-part registries).
 

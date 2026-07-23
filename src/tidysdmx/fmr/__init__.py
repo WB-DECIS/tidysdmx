@@ -61,6 +61,7 @@ from .publish import (
     rebase_to_registry,
 )
 from .report import (
+    changes_for,
     diff_to_dataframe,
     plan_to_dataframe,
     report_to_dataframe,
@@ -73,6 +74,7 @@ from .versioning import (
     VersionPolicy,
     VersionScheme,
     bump_version,
+    bump_version_for_impact,
     compare_versions,
     is_fmr_publishable,
     parse_version,
@@ -103,6 +105,8 @@ __all__ = [
     "VersionScheme",
     "VersioningMode",
     "bump_version",
+    "bump_version_for_impact",
+    "changes_for",
     "compare_artefacts",
     "compare_versions",
     "diff_to_dataframe",

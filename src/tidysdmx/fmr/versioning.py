@@ -24,6 +24,7 @@ wildcards, in-place replacement of non-final versions) lives behind
 supports it.
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -34,6 +35,8 @@ from pysdmx.util import is_final as _pysdmx_is_final
 from typeguard import typechecked
 
 from .diff import ArtefactDiff, ChangeImpact
+
+logger = logging.getLogger(__name__)
 
 _VERSION_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -362,6 +365,15 @@ class VersionPolicy:
     replace_non_final: bool = False
     mode: VersioningMode = VersioningMode.SEMVER_ONLY
 
+    def __post_init__(self) -> None:
+        if self.mode == VersioningMode.SEMVER_ONLY and self.replace_non_final:
+            logger.warning(
+                "VersionPolicy(replace_non_final=True) is inert under "
+                "VersioningMode.SEMVER_ONLY: a non-final version is bumped, "
+                "not replaced in place. Set mode=VersioningMode.SDMX_3 to "
+                "honor replace_non_final."
+            )
+
 
 DEFAULT_VERSION_POLICY = VersionPolicy()
 
@@ -434,17 +446,48 @@ def suggest_version(
         ... )
         '1.0.1'
     """
-    current = parse_version(current_version)
+    parse_version(current_version)  # validate early; raises ValueError if invalid
     if diff.is_unchanged:
         return current_version
+    return bump_version_for_impact(current_version, diff.impact, policy)
+
+
+@typechecked
+def bump_version_for_impact(
+    current_version: str,
+    impact: ChangeImpact,
+    policy: VersionPolicy = DEFAULT_VERSION_POLICY,
+) -> str:
+    """Suggest the next version for an explicit change impact.
+
+    Like :func:`suggest_version`, but driven by an impact rather than a
+    diff. Used when a dependent artefact must follow a co-published
+    dependency to its bumped version: the dependent has no content change
+    of its own, yet must be republished with a version bump that
+    *inherits* the dependency's impact (breaking dependency → major,
+    additive → minor, and so on).
+
+    Args:
+        current_version: The version currently in the registry.
+        impact: The change impact to bump for.
+        policy: The bump policy. Defaults to breaking→major,
+            additive→minor, cosmetic→patch, SEMVER_ONLY mode.
+
+    Returns:
+        The suggested next version string.
+
+    Raises:
+        ValueError: If ``current_version`` is not a valid SDMX version.
+    """
+    current = parse_version(current_version)
     if policy.mode == VersioningMode.SDMX_3:
         if policy.replace_non_final and not current.is_final:
             return current_version
         if current.extension is not None and policy.draft_strategy == "finalize":
             return str(SdmxVersion(current.major, current.minor, current.patch))
-        return str(current.bump(_level_for(diff.impact, policy)))
+        return str(current.bump(_level_for(impact, policy)))
     # SEMVER_ONLY: strip any prerelease extension, then always bump.
     base = current
     if base.extension is not None:
         base = SdmxVersion(base.major, base.minor, base.patch)
-    return str(base.bump(_level_for(diff.impact, policy)))
+    return str(base.bump(_level_for(impact, policy)))

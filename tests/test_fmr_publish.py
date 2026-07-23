@@ -3,6 +3,7 @@ import pytest
 from fixtures.fxtr_fmr import FakeFmrClient
 from pysdmx.api.fmr.maintenance import StructureAction
 from pysdmx.errors import Invalid
+from pysdmx.model import Components, Concept
 
 from tidysdmx.artefact_validation import ValidationError
 from tidysdmx.fmr.diff import ChangeImpact
@@ -11,6 +12,7 @@ from tidysdmx.fmr.publish import (
     execute_plan,
     plan_publication,
     publish,
+    rebase_to_registry,
 )
 from tidysdmx.fmr.versioning import VersioningMode, VersionPolicy
 
@@ -433,3 +435,104 @@ class TestPublish:
         report = publish(fake_fmr_client, [codelist_base], dry_run=True)
         assert fake_fmr_client.put_calls == []
         assert report.results[0].status == "skipped"
+
+
+class TestInheritedImpactPropagation:
+    """A dependent following a co-bumped dependency inherits its impact.
+
+    Rather than a fabricated breaking change, the dependent inherits the
+    dependency's impact and is republished so its reference stays current;
+    a clean re-plan of an already-published batch is idempotent.
+    """
+
+    @staticmethod
+    def _cl_freq(codelist_base, items=None):
+        cl = msgspec.structs.replace(codelist_base, id="CL_FREQ", name="Frequency")
+        if items is not None:
+            cl = msgspec.structs.replace(cl, items=items)
+        return cl
+
+    def test_dependent_inherits_additive_dependency(self, dsd_base, codelist_base):
+        """An additive dependency bump makes the dependent a MINOR bump.
+
+        Regression: the old re-diff fabricated a breaking change from the
+        reference-version repoint, forcing a major (2.0) bump.
+        """
+        cl_small = self._cl_freq(codelist_base, items=codelist_base.items[:2])
+        cl_full = self._cl_freq(codelist_base)  # +1 code vs cl_small -> additive
+        client = FakeFmrClient([cl_small, dsd_base])
+        plan = plan_publication(client, [dsd_base, cl_full])
+
+        cl_action = _action_for(plan, "CL_FREQ")
+        assert cl_action.kind == PlannedActionKind.UPDATE
+        assert cl_action.proposed_version == "1.1"
+
+        dsd_action = _action_for(plan, "DSD_TEST")
+        assert dsd_action.kind == PlannedActionKind.UPDATE
+        assert dsd_action.proposed_version == "1.1"  # inherited additive, not 2.0
+        assert dsd_action.diff.impact == ChangeImpact.ADDITIVE  # not breaking
+        assert any(i.rule_id == "P004" for i in dsd_action.issues)
+        freq = next(c for c in dsd_action.artefact.components if c.id == "FREQ")
+        assert "CL_FREQ(1.1)" in freq.local_enum_ref
+
+    def test_dependent_inherits_breaking_dependency(self, dsd_base, codelist_base):
+        """A breaking dependency bump still makes the dependent a MAJOR bump."""
+        cl_freq = self._cl_freq(codelist_base)
+        cl_removed = msgspec.structs.replace(cl_freq, items=cl_freq.items[:2])
+        client = FakeFmrClient([cl_freq, dsd_base])
+        plan = plan_publication(client, [dsd_base, cl_removed])
+
+        dsd_action = _action_for(plan, "DSD_TEST")
+        assert dsd_action.kind == PlannedActionKind.UPDATE
+        assert dsd_action.proposed_version == "2.0"  # inherited breaking
+
+    def test_replan_after_publish_is_idempotent(self, dsd_base, codelist_base):
+        """Re-planning an already-published batch is all SKIP (hand-off).
+
+        This is the production hand-off: after publishing, rebasing and
+        re-planning the same inputs must not bump anything again.
+        """
+        cl_small = self._cl_freq(codelist_base, items=codelist_base.items[:2])
+        cl_full = self._cl_freq(codelist_base)
+        client = FakeFmrClient([cl_small, dsd_base])
+
+        plan = plan_publication(client, [dsd_base, cl_full])
+        report = execute_plan(client, plan, dry_run=False)
+        assert report.ok
+
+        handoff_batch = rebase_to_registry(client, [dsd_base, cl_full])
+        handoff = plan_publication(client, handoff_batch)
+        assert all(a.kind == PlannedActionKind.SKIP for a in handoff.actions)
+        assert not any(a.issues for a in handoff.actions)
+
+    def test_unchanged_batch_never_bumps(self, dsd_base, codelist_base):
+        """A batch already in the registry, rebased, plans as all SKIP."""
+        cl_freq = self._cl_freq(codelist_base)
+        client = FakeFmrClient([cl_freq, dsd_base])
+        batch = rebase_to_registry(client, [dsd_base, cl_freq])
+        plan = plan_publication(client, batch)
+        assert all(a.kind == PlannedActionKind.SKIP for a in plan.actions)
+
+    def test_dsd_concept_form_round_trip_is_skip(self, dsd_base):
+        """A DSD round-tripped into embedded-Concept form still plans as SKIP.
+
+        FMR returns component concepts as embedded Concept(urn=..(ver)) while the
+        local build uses versionless ItemReferences; that reference-form
+        round-trip must not produce a spurious bump.
+        """
+        concept_urn = (
+            "urn:sdmx:org.sdmx.infomodel.conceptscheme."
+            "Concept=WB.TEST:CS_MAIN(1.0.0).FREQ"
+        )
+        comps = Components(
+            [
+                msgspec.structs.replace(c, concept=Concept(id="FREQ", urn=concept_urn))
+                if c.id == "FREQ"
+                else c
+                for c in dsd_base.components
+            ]
+        )
+        registry_copy = msgspec.structs.replace(dsd_base, components=comps)
+        client = FakeFmrClient([registry_copy])
+        plan = plan_publication(client, [dsd_base])
+        assert _action_for(plan, "DSD_TEST").kind == PlannedActionKind.SKIP

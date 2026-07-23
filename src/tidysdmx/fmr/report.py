@@ -13,8 +13,10 @@ from collections.abc import Sequence
 import pandas as pd
 from typeguard import typechecked
 
+from ._compat import MaintainableArtefact
+from ._compat import agency_id as _agency_id
 from .diff import ArtefactDiff, ChangeImpact
-from .publish import PublicationPlan, PublicationReport
+from .publish import PlannedAction, PublicationPlan, PublicationReport
 
 _DIFF_COLUMNS = [
     "SHORT_URN",
@@ -118,6 +120,61 @@ def plan_to_dataframe(plan: PublicationPlan) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows, columns=_PLAN_COLUMNS)
+
+
+@typechecked
+def changes_for(
+    plan: PublicationPlan,
+    artefact: str | MaintainableArtefact,
+) -> pd.DataFrame:
+    """Render the detected changes for one artefact in a plan.
+
+    A focused view over ``plan_to_dataframe`` (which reports only per-impact
+    counts): it returns the field-level changes — including the ``OLD`` and
+    ``NEW`` values — for a single artefact, so it is easy to see *why* an
+    action was planned (e.g. which cosmetic field triggered a patch bump).
+    The plan's stored diff is used, so the result reflects any intra-batch
+    reference retargeting the planner applied.
+
+    Args:
+        plan: The plan built by
+            :func:`~tidysdmx.fmr.publish.plan_publication`.
+        artefact: The artefact to inspect, given either as a pysdmx
+            maintainable artefact (matched by type, agency, and id) or as a
+            string matched against the action's artefact id or short URN
+            (e.g. ``"CL_FREQ"`` or ``"Codelist=WB:CL_FREQ(1.0)"``).
+
+    Returns:
+        One row per detected change with the same columns as
+        :func:`diff_to_dataframe`. A CREATE or an unchanged (SKIP) artefact
+        contributes no rows — an empty frame means "no changes".
+
+    Raises:
+        ValueError: If no action in the plan matches ``artefact``.
+    """
+    if isinstance(artefact, str):
+
+        def matches(action: PlannedAction) -> bool:
+            return action.artefact.id == artefact or artefact in action.short_urn
+    else:
+        key = (
+            type(artefact).__name__,
+            _agency_id(artefact.agency),
+            artefact.id,
+        )
+
+        def matches(action: PlannedAction) -> bool:
+            a = action.artefact
+            return (type(a).__name__, _agency_id(a.agency), a.id) == key
+
+    matched = [action for action in plan.actions if matches(action)]
+    if not matched:
+        available = ", ".join(a.short_urn for a in plan.actions)
+        raise ValueError(
+            f"No artefact matching {artefact!r} in the plan. "
+            f"Planned artefacts: {available or '(none)'}."
+        )
+    return diff_to_dataframe([a.diff for a in matched if a.diff is not None])
 
 
 @typechecked

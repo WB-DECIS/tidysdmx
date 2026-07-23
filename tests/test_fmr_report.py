@@ -1,8 +1,10 @@
+import pytest
 from fixtures.fxtr_fmr import FakeFmrClient
 
 from tidysdmx.fmr.diff import compare_artefacts
 from tidysdmx.fmr.publish import execute_plan, plan_publication
 from tidysdmx.fmr.report import (
+    changes_for,
     diff_to_dataframe,
     plan_to_dataframe,
     report_to_dataframe,
@@ -71,6 +73,51 @@ class TestPlanToDataframe:
         df = plan_to_dataframe(plan)
         assert "P005" in df.loc[0, "ISSUES"]
         assert df.loc[0, "BLOCKED"]
+
+
+class TestChangesFor:
+    def test_changes_for_returns_change_rows_by_id(
+        self, codelist_base, codelist_item_removed
+    ):
+        """changes_for returns the field-level rows for one artefact by id."""
+        client = FakeFmrClient([codelist_base])
+        plan = plan_publication(client, [codelist_item_removed])
+        df = changes_for(plan, codelist_item_removed.id)
+        assert list(df.columns) == DIFF_COLUMNS
+        assert len(df) == 1
+        assert df.loc[0, "KIND"] == "removed"
+        assert df.loc[0, "IMPACT"] == "breaking"
+
+    def test_changes_for_matches_by_artefact_object(
+        self, codelist_base, codelist_item_removed
+    ):
+        """A pysdmx artefact selector matches the same action as its id."""
+        client = FakeFmrClient([codelist_base])
+        plan = plan_publication(client, [codelist_item_removed])
+        by_obj = changes_for(plan, codelist_item_removed)
+        by_id = changes_for(plan, codelist_item_removed.id)
+        assert by_obj.equals(by_id)
+
+    def test_changes_for_unchanged_is_empty(self, codelist_base):
+        """A SKIP (identical) artefact yields an empty frame with columns."""
+        client = FakeFmrClient([codelist_base])
+        plan = plan_publication(client, [codelist_base])
+        df = changes_for(plan, codelist_base.id)
+        assert df.empty
+        assert list(df.columns) == DIFF_COLUMNS
+
+    def test_changes_for_create_is_empty(self, fake_fmr_client, codelist_base):
+        """A CREATE (no registry copy, diff is None) yields an empty frame."""
+        plan = plan_publication(fake_fmr_client, [codelist_base])
+        df = changes_for(plan, codelist_base.id)
+        assert df.empty
+        assert list(df.columns) == DIFF_COLUMNS
+
+    def test_changes_for_unknown_selector_raises(self, fake_fmr_client, codelist_base):
+        """An artefact absent from the plan raises a clear ValueError."""
+        plan = plan_publication(fake_fmr_client, [codelist_base])
+        with pytest.raises(ValueError, match="No artefact matching"):
+            changes_for(plan, "CL_DOES_NOT_EXIST")
 
 
 class TestReportToDataframe:
