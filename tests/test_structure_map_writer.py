@@ -66,7 +66,7 @@ def make_multi_rep_map():
             name=name,
             agency=agency,
             version=version,
-            source=["String"],
+            source=["String", "String"],
             target=["String"],
             maps=[MultiValueMap(source=["BE", "A"], target=["BEL"])],
         )
@@ -377,12 +377,14 @@ class TestValidateRepMapFields:
         assert issues == []
 
     def test_missing_source_reported(self):
-        """A RepresentationMap with no source should report it."""
+        """A RepresentationMap with an empty source should report it."""
+        # pysdmx >=1.14 rejects source=None when maps are set; an empty string
+        # still exercises tidysdmx's own "source is None or empty" check.
         rep_map = RepresentationMap(
             id="RM",
             name="RM",
             agency="ECB",
-            source=None,
+            source="",
             target="urn:target",
             maps=[ValueMap(source="A", target="B")],
         )
@@ -392,13 +394,15 @@ class TestValidateRepMapFields:
         assert any("source" in i for i in issues)
 
     def test_missing_target_reported(self):
-        """A RepresentationMap with no target should report it."""
+        """A RepresentationMap with an empty target should report it."""
+        # pysdmx >=1.14 rejects target=None when maps are set; an empty string
+        # still exercises tidysdmx's own "target is None or empty" check.
         rep_map = RepresentationMap(
             id="RM",
             name="RM",
             agency="ECB",
             source="urn:source",
-            target=None,
+            target="",
             maps=[ValueMap(source="A", target="B")],
         )
 
@@ -653,12 +657,14 @@ class TestValidateStructureMapReferences:
             validate_structure_map_references(sm)
 
     def test_rep_map_missing_source_raises_value_error(self):
-        """RepresentationMap with no source must raise ValueError."""
+        """RepresentationMap with an empty source must raise ValueError."""
+        # pysdmx >=1.14 rejects source=None when maps are set; an empty string
+        # still triggers tidysdmx's reference validation.
         rep_map = RepresentationMap(
             id="RM",
             name="RM",
             agency="ECB",
-            source=None,
+            source="",
             target="urn:tgt",
             maps=[ValueMap(source="A", target="B")],
         )
