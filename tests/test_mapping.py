@@ -226,7 +226,13 @@ class TestApplyComponentMap:
         return ComponentMap(
             source="AREA",
             target="REGION",
-            values=RepresentationMap(id="RM", agency="WB", maps=value_maps),
+            values=RepresentationMap(
+                id="RM",
+                agency="WB",
+                source="String",
+                target="String",
+                maps=value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -338,7 +344,13 @@ class TestApplyMultiComponentMap:
         return MultiComponentMap(
             source=["AREA", "NOTE"],
             target=["URBANISATION"],
-            values=MultiRepresentationMap(id="MR", agency="WB", maps=multi_value_maps),
+            values=MultiRepresentationMap(
+                id="MR",
+                agency="WB",
+                source=["String", "String"],
+                target=["String"],
+                maps=multi_value_maps,
+            ),
         )
 
     def test_default_value_catch_all_assigns_default(self):
@@ -409,6 +421,8 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                source=["String"],
+                target=["String"],
                 maps=[MultiValueMap(source=["BE"], target=["BEL"])],
             ),
         )
@@ -431,6 +445,8 @@ class TestApplyMultiComponentMap:
             values=MultiRepresentationMap(
                 id="MR",
                 agency="WB",
+                source=["String"],
+                target=["String"],
                 maps=[
                     MultiValueMap(
                         source=[r"regex:2020-01-01 00:00:00"], target=["MATCHED"]

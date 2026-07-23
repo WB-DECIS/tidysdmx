@@ -12,6 +12,16 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from pysdmx.model import Schema
 from typeguard import typechecked
 
+_STANDARD_SDMX_REFERENCE_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
+
+# Per-context dispatch retained so context-specific columns can be
+# reintroduced later without touching call sites.
+_SDMX_REFERENCE_COLS_BY_CONTEXT: dict[str, tuple[str, ...]] = {
+    "dataflow": _STANDARD_SDMX_REFERENCE_COLS,
+    "datastructure": _STANDARD_SDMX_REFERENCE_COLS,
+    "provisionagreement": _STANDARD_SDMX_REFERENCE_COLS,
+}
+
 
 @typechecked
 def sdmx_reference_cols_for(
@@ -19,18 +29,20 @@ def sdmx_reference_cols_for(
 ) -> list[str]:
     """Return the SDMX reference columns for a given schema context.
 
+    Per the SDMX-CSV specification the reference column names are the same
+    for every context — only the values carried in the ``STRUCTURE`` column
+    differ (``dataflow``, ``datastructure``, ``provisionagreement``) — so
+    every context currently resolves to
+    ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]``.
+
     Args:
         context: The SDMX schema context.
 
     Returns:
-        The ``[STRUCTURE-like, STRUCTURE_ID-like, "ACTION"]`` column names
-        that an SDMX-CSV dataset is expected to carry for the given context.
+        The ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]`` column names that an
+        SDMX-CSV dataset is expected to carry for the given context.
     """
-    if context == "dataflow":
-        return ["DATAFLOW", "DATAFLOW_ID", "ACTION"]
-    if context == "datastructure":
-        return ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
-    return ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"]
+    return list(_SDMX_REFERENCE_COLS_BY_CONTEXT[context])
 
 
 @typechecked
@@ -49,9 +61,9 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
             - codelist_ids: Dictionary with coded components as keys and
               list of codelist IDs as values.
             - dim_comp: List of dimension component names.
-            - sdmx_cols: SDMX reference columns expected in the dataset,
-              inferred from the schema's context (e.g. ``DATAFLOW`` /
-              ``DATAFLOW_ID`` / ``ACTION`` for a dataflow-context schema).
+            - sdmx_cols: SDMX reference columns expected in the dataset
+              (``STRUCTURE`` / ``STRUCTURE_ID`` / ``ACTION`` for every
+              schema context), resolved via the schema's context.
     """
     comp = schema.components
     valid_comp = [c.id for c in comp]

@@ -446,7 +446,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | **Apply structure maps** | `StructureMap`, `FixedValueMap`, `ImplicitComponentMap`, `ComponentMap`, `MultiComponentMap` | `map_structures()` — applies a StructureMap to a DataFrame; individual `apply_*` functions |
 | **Build structure maps** | Raw pysdmx map constructors | `build_fixed_map()`, `build_implicit_component_map()`, `build_date_pattern_map()`, `build_value_map()`, `build_representation_map()`, `build_multi_representation_map()`, `build_single_component_map()`, `build_structure_map_from_template_wb()` |
 | **Create schema from data** | `Schema`, `Components`, `Component`, `Codelist`, `Code`, `Concept`, `DataType`, `Role` | `create_schema_from_table()` — infers an SDMX Schema from a pandas DataFrame |
-| **Output standardisation** | None | `standardize_output()` — adds SDMX reference columns (`STRUCTURE`/`DATAFLOW`/`PROVISIONAGREEMENT`, `*_ID`, `ACTION`) and reorders columns |
+| **Output standardisation** | None | `standardize_output()` — adds SDMX reference columns (`STRUCTURE`, `STRUCTURE_ID`, `ACTION`) and reorders columns |
 | **Excel mapping workflow** | None | `write_excel_mapping_template()`, `parse_mapping_template_wb()`, `build_structure_map_from_template_wb()` |
 
 ---
@@ -540,13 +540,13 @@ result_df = map_structures(df, smap)
 
 ## 10. SDMX Reference Columns Added by tidysdmx
 
-When a dataset is ready for upload, `standardize_output()` adds reference columns that identify which SDMX artefact the data belongs to and what operation to perform. The column names depend on the artefact type:
+When a dataset is ready for upload, `standardize_output()` adds reference columns that identify which SDMX artefact the data belongs to and what operation to perform. Per the SDMX-CSV specification, the column names are the same for every artefact type — the artefact type is carried as the *value* of the `STRUCTURE` column:
 
 | Artefact type | Col 1 | Col 2 | Col 3 |
 |---|---|---|---|
 | `"datastructure"` | `STRUCTURE` | `STRUCTURE_ID` | `ACTION` |
-| `"dataflow"` | `DATAFLOW` | `DATAFLOW_ID` | `ACTION` |
-| `"provisionagreement"` | `PROVISIONAGREEMENT` | `PROVISION_AGREEMENT_ID` | `ACTION` |
+| `"dataflow"` | `STRUCTURE` | `STRUCTURE_ID` | `ACTION` |
+| `"provisionagreement"` | `STRUCTURE` | `STRUCTURE_ID` | `ACTION` |
 
 `ACTION` values follow SDMX conventions: `"I"` (Insert), `"U"` (Update), `"D"` (Delete).
 
