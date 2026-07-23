@@ -321,7 +321,7 @@ result = standardize_output(df, artefact_id="WB:WDI(1.0.0)", schema=schema, acti
 # Adds reference columns, drops non-schema columns, moves metadata columns to front
 ```
 
-Internally, `standardize_output` reads `schema.context` to determine the correct column names (`STRUCTURE` / `DATAFLOW` / `PROVISIONAGREEMENT`), then calls `_add_sdmx_reference_cols()`. The analyst specifies the action (`"I"`, `"U"`, `"D"`) in plain English terms; the SDMX column value is identical.
+Internally, `standardize_output` reads `schema.context` and calls `_add_sdmx_reference_cols()`, which adds the standard SDMX-CSV reference columns (`STRUCTURE`, `STRUCTURE_ID`, `ACTION`) with the context (`dataflow` / `datastructure` / `provisionagreement`) as the `STRUCTURE` value. The analyst specifies the action (`"I"`, `"U"`, `"D"`) in plain English terms; the SDMX column value is identical.
 
 ---
 

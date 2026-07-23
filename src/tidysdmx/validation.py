@@ -10,6 +10,13 @@ from .utils import extract_validation_info, sdmx_reference_cols_for
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
+# Context-specific reference columns produced by tidysdmx <= 0.9.0; `valid`
+# dicts cached under those versions may still carry them.
+_LEGACY_CONTEXT_SDMX_COLS: tuple[list[str], ...] = (
+    ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+    ["PROVISIONAGREEMENT", "PROVISION_AGREEMENT_ID", "ACTION"],
+)
+
 
 def _truncation_note(shown: int, total: int, max_errors: int) -> str:
     """Return a canonical suffix describing truncated error output.
@@ -81,7 +88,7 @@ def validate_dataset_local(
     df: pd.DataFrame,
     schema: Schema | None = None,
     valid: dict[str, object] | None = None,
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
     max_errors: int = 1000,
 ) -> pd.DataFrame:
     """Validate that a DataFrame is SDMX compliant and return a DataFrame of errors.
@@ -98,11 +105,13 @@ def validate_dataset_local(
             :func:`~tidysdmx.utils.extract_validation_info`. This argument
             will be removed in a future release; pass ``schema`` directly
             instead.
-        sdmx_cols: SDMX reference columns expected in the dataset. When
-            omitted, the columns are inferred from the schema's context
-            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']`` for a dataflow
-            schema, ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']`` for a
-            datastructure schema).
+        sdmx_cols: SDMX reference columns expected in the dataset, as a
+            list or tuple. When omitted, they resolve to the standard
+            SDMX-CSV columns ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``
+            for every schema context; if only a ``valid`` dict is given,
+            context-specific column sets cached under tidysdmx <= 0.9.0
+            (e.g. ``['DATAFLOW', 'DATAFLOW_ID', 'ACTION']``) are likewise
+            normalized to the standard columns.
         max_errors: Maximum number of individual errors to report per
             validation check. Defaults to ``1000``.
 
@@ -123,18 +132,20 @@ def validate_dataset_local(
             raise ValueError("Either a schema or precomputed 'valid' must be provided.")
         valid = extract_validation_info(schema)
 
-    if sdmx_cols is None:
+    if sdmx_cols is not None:
+        sdmx_cols = list(sdmx_cols)
+    elif schema is not None:
+        # The schema is authoritative: ignore `valid["sdmx_cols"]`, which may
+        # carry stale context-specific names cached under tidysdmx <= 0.9.0.
+        sdmx_cols = sdmx_reference_cols_for(schema.context)
+    else:
+        # TODO(deprecated): fallbacks for callers passing only a cached
+        # `valid` dict. Remove once the deprecated `valid` parameter itself
+        # is dropped.
         inferred = valid.get("sdmx_cols")
-        if inferred is not None:
-            sdmx_cols = list(inferred)
-        else:
-            # TODO(deprecated): legacy fallback for `valid` dicts built under
-            # the pre-#218 shape (missing the "sdmx_cols" key). Remove once
-            # the deprecated `valid` parameter itself is dropped.
-            if schema is not None:
-                sdmx_cols = sdmx_reference_cols_for(schema.context)
-            else:
-                sdmx_cols = list(_DEFAULT_SDMX_COLS)
+        sdmx_cols = list(inferred) if inferred is not None else list(_DEFAULT_SDMX_COLS)
+        if sdmx_cols in _LEGACY_CONTEXT_SDMX_COLS:
+            sdmx_cols = list(_DEFAULT_SDMX_COLS)
 
     error_records: list[dict[str, str]] = []
 
@@ -188,7 +199,7 @@ def validate_dataset_local(
 def validate_columns(
     df: pd.DataFrame,
     valid_columns: list[str],
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
     max_errors: int = 1000,
 ) -> None:
     """Validate that all DataFrame columns are valid components or SDMX references.
@@ -196,8 +207,8 @@ def validate_columns(
     Args:
         df: The DataFrame to validate.
         valid_columns: List of valid component names.
-        sdmx_cols: List of additional allowed column names. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        sdmx_cols: Additional allowed column names, as a list or tuple.
+            Defaults to ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
         max_errors: Maximum number of unexpected columns to include in the
             error message. Defaults to ``1000``.
 
@@ -205,8 +216,7 @@ def validate_columns(
         ValueError: If any columns in the DataFrame are not in ``valid_columns``
             or ``sdmx_cols``, listing all offending names up to ``max_errors``.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    sdmx_cols = list(_DEFAULT_SDMX_COLS) if sdmx_cols is None else list(sdmx_cols)
     unexpected = _get_unexpected_columns(df, valid_columns, sdmx_cols)
     if unexpected:
         capped = unexpected[:max_errors]
@@ -219,21 +229,20 @@ def validate_columns(
 def validate_mandatory_columns(
     df: pd.DataFrame,
     mandatory_columns: list[str],
-    sdmx_cols: list[str] | None = None,
+    sdmx_cols: list[str] | tuple[str, ...] | None = None,
 ) -> None:
     """Validate that all mandatory columns are present in the DataFrame.
 
     Args:
         df: The DataFrame to validate.
         mandatory_columns: List of mandatory component names.
-        sdmx_cols: List of additional mandatory column names. Defaults to
-            ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
+        sdmx_cols: Additional mandatory column names, as a list or tuple.
+            Defaults to ``['STRUCTURE', 'STRUCTURE_ID', 'ACTION']``.
 
     Raises:
         ValueError: If any mandatory column is absent from the DataFrame.
     """
-    if sdmx_cols is None:
-        sdmx_cols = list(_DEFAULT_SDMX_COLS)
+    sdmx_cols = list(_DEFAULT_SDMX_COLS) if sdmx_cols is None else list(sdmx_cols)
     required_columns = set(mandatory_columns + sdmx_cols)
     missing_columns = sorted(required_columns - set(df.columns))
 

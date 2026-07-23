@@ -68,6 +68,11 @@ class TestValidateMandatoryColumns:
                 df, mandatory_columns=["col1", "col2"], sdmx_cols=[]
             )
 
+    def test_sdmx_cols_accepts_tuple(self):
+        """A tuple of reference columns is accepted (issue #255)."""
+        df = pd.DataFrame({"col1": [1], "REF": ["x"]})
+        validate_mandatory_columns(df, mandatory_columns=["col1"], sdmx_cols=("REF",))
+
 
 class TestValidateColumns:
     @pytest.mark.parametrize(
@@ -121,6 +126,13 @@ class TestValidateColumns:
             validate_columns(df, valid_columns=valid_columns, sdmx_cols=sdmx_cols)
         assert "Found unexpected columns" in str(exc_info.value)
         assert invalid_col in str(exc_info.value)
+
+    def test_sdmx_cols_accepts_tuple(self):
+        """A tuple of reference columns is accepted (issue #255)."""
+        df = pd.DataFrame(columns=["COMP1", "STRUCTURE"])
+        validate_columns(
+            df, valid_columns=["COMP1"], sdmx_cols=("STRUCTURE", "STRUCTURE_ID")
+        )
 
     def test_empty_dataframe_passes(self):
         """Tests that an empty DataFrame passes validation."""
@@ -369,12 +381,12 @@ class TestValidateDatasetLocal:
         with pytest.raises(ValueError):
             validate_dataset_local(df)
 
-    def test_dataflow_schema_accepts_dataflow_columns(self, sdmx_schema):
-        """Dataflow-context schema infers DATAFLOW/DATAFLOW_ID reference columns.
+    def test_dataflow_schema_accepts_structure_columns(self, sdmx_schema):
+        """Dataflow-context schema accepts the standard SDMX reference columns.
 
-        Regression test for issue #218: validation must not flag DATAFLOW /
-        DATAFLOW_ID as unexpected or report STRUCTURE / STRUCTURE_ID as
-        missing when the schema's context is ``dataflow``.
+        Regression test for issue #255: validation must not flag STRUCTURE /
+        STRUCTURE_ID / ACTION as unexpected or report other reference columns
+        as missing when the schema's context is ``dataflow``.
         """
         df = pd.DataFrame(
             {
@@ -382,8 +394,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020", "2021"],
                 "SEX": ["F", "M"],
                 "OBS_VALUE": [100, 200],
-                "DATAFLOW": ["dataflow", "dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow", "dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)", "tidysdmx:tx1(1.0)"],
                 "ACTION": ["I", "I"],
             }
         )
@@ -391,15 +403,15 @@ class TestValidateDatasetLocal:
         assert isinstance(result, pd.DataFrame)
         assert result.empty, f"Expected no errors, got:\n{result}"
 
-    def test_explicit_sdmx_cols_overrides_inference(self, sdmx_schema):
-        """Caller-provided sdmx_cols win over schema-inferred ones."""
+    def test_sdmx_cols_accepts_tuple(self, sdmx_schema):
+        """A tuple of reference columns is accepted (issue #255)."""
         df = pd.DataFrame(
             {
                 "INDICATOR": ["IND1"],
                 "TIME_PERIOD": ["2020"],
                 "SEX": ["F"],
                 "OBS_VALUE": [100],
-                "STRUCTURE": ["datastructure"],
+                "STRUCTURE": ["dataflow"],
                 "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
                 "ACTION": ["I"],
             }
@@ -407,8 +419,102 @@ class TestValidateDatasetLocal:
         result = validate_dataset_local(
             df,
             schema=sdmx_schema,
-            sdmx_cols=["STRUCTURE", "STRUCTURE_ID", "ACTION"],
+            sdmx_cols=("STRUCTURE", "STRUCTURE_ID", "ACTION"),
         )
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_explicit_sdmx_cols_overrides_inference(self, sdmx_schema):
+        """Caller-provided sdmx_cols win over schema-inferred ones.
+
+        Datasets carrying non-standard reference columns (e.g. DATAFLOW /
+        DATAFLOW_ID, as in issue #218) can still be validated by passing
+        those columns explicitly.
+        """
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1"],
+                "TIME_PERIOD": ["2020"],
+                "SEX": ["F"],
+                "OBS_VALUE": [100],
+                "DATAFLOW": ["dataflow"],
+                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(
+            df,
+            schema=sdmx_schema,
+            sdmx_cols=["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+        )
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_stale_valid_dict_with_context_cols_normalized(self):
+        """`valid` dicts cached under <=0.9.0 with DATAFLOW columns are normalized.
+
+        Regression test for the PR #257 review: a stale cached dict must not
+        resurrect the context-specific reference columns fixed in #255.
+        """
+        stale_valid = {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {},
+            "dim_comp": ["TIME_PERIOD", "AREA"],
+            "sdmx_cols": ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+        }
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, valid=stale_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_valid_dict_with_custom_sdmx_cols_respected(self):
+        """Non-legacy custom sdmx_cols in a `valid` dict are still honored."""
+        custom_valid = {
+            "valid_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "mandatory_comp": ["TIME_PERIOD", "OBS_VALUE", "AREA"],
+            "codelist_ids": {},
+            "dim_comp": ["TIME_PERIOD", "AREA"],
+            "sdmx_cols": ["REF_COL"],
+        }
+        df = pd.DataFrame(
+            {
+                "TIME_PERIOD": ["2020"],
+                "OBS_VALUE": [100],
+                "AREA": ["COL"],
+                "REF_COL": ["x"],
+            }
+        )
+        result = validate_dataset_local(df, valid=custom_valid)
+        assert result.empty, f"Expected no errors, got:\n{result}"
+
+    def test_schema_overrides_stale_valid_sdmx_cols(self, sdmx_schema):
+        """When both schema and valid are passed, schema.context wins."""
+        stale_valid = {
+            "valid_comp": ["INDICATOR", "TIME_PERIOD", "SEX", "OBS_VALUE"],
+            "mandatory_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+            "codelist_ids": {},
+            "dim_comp": ["INDICATOR", "TIME_PERIOD", "SEX"],
+            "sdmx_cols": ["DATAFLOW", "DATAFLOW_ID", "ACTION"],
+        }
+        df = pd.DataFrame(
+            {
+                "INDICATOR": ["IND1"],
+                "TIME_PERIOD": ["2020"],
+                "SEX": ["F"],
+                "OBS_VALUE": [100],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
+                "ACTION": ["I"],
+            }
+        )
+        result = validate_dataset_local(df, schema=sdmx_schema, valid=stale_valid)
         assert result.empty, f"Expected no errors, got:\n{result}"
 
     def test_legacy_valid_dict_without_sdmx_cols_uses_default(self):
@@ -446,8 +552,8 @@ class TestValidateDatasetLocal:
                 "TIME_PERIOD": ["2020"],
                 "SEX": ["F"],
                 "OBS_VALUE": [100],
-                "DATAFLOW": ["dataflow"],
-                "DATAFLOW_ID": ["tidysdmx:tx1(1.0)"],
+                "STRUCTURE": ["dataflow"],
+                "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"],
                 "ACTION": ["I"],
             }
         )
