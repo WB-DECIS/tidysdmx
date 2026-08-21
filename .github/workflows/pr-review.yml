@@ -6,39 +6,58 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  pull-requests: write
 
 jobs:
   review:
-    name: Claude Code Review
-    runs-on: ubuntu-latest
+    name: Claude code review
     if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Get PR diff
+      - name: Detect Python changes
         id: diff
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          git fetch origin ${{ github.event.pull_request.base.ref }}
-          DIFF=$(git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- '*.py')
-          echo "has_python_changes=$([ -n "$DIFF" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          git fetch --quiet origin "$BASE_REF"
+          if git diff --quiet "origin/$BASE_REF...HEAD" -- '*.py'; then
+            echo "has_python_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_python_changes=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run Claude review
         if: steps.diff.outputs.has_python_changes == 'true'
-        uses: anthropics/claude-code-action@beta
+        # No `model:` is set on purpose — the action's default tracks a current
+        # model, so this workflow cannot rot the way a hardcoded dated model id
+        # does.
+        uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: "claude-sonnet-4-20250514"
-          direct_prompt: |
-            Review this PR. Focus on:
-            1. SDMX correctness — do artefacts conform to the information model?
-            2. pysdmx wrapping — is upstream called where possible instead of reimplemented?
-            3. Type safety — are @typechecked and full annotations present?
-            4. Test coverage — are new/changed public functions tested?
-            5. Google docstrings — are they present and accurate?
-            6. General code quality — bugs, edge cases, simplification opportunities
+          prompt: |
+            Review this pull request. Focus on:
 
-            Be concise. Only comment on issues that matter.
+            1. Correctness — logic errors, unhandled edge cases, off-by-one and
+               boundary conditions, incorrect error handling.
+            2. Type safety — are annotations complete and accurate? Would mypy
+               --strict accept this without an ignore? Flag any new `Any`.
+            3. Test coverage — does every new or changed public function have a
+               test, including its failure paths?
+            4. Public API surface — is anything newly exported that should stay
+               private? Is `__all__` still accurate? Any breaking change to an
+               existing signature that is not marked with `!` in the commit?
+            5. Docstrings — Google style, with accurate Args/Returns/Raises that
+               match the actual signature and behaviour.
+            6. Simplification — duplicated logic, or something the standard
+               library or an existing helper in this repo already does.
+
+            Do not comment on formatting or lint rules: ruff already enforces
+            those and its findings appear separately. Be concise, and only raise
+            things that actually matter.

@@ -2,56 +2,107 @@ name: CI
 
 on:
   push:
-    branches: [master, dev]
+  # DEVIATION from pypackage-template, which assumes a single `main`. tidysdmx
+  # keeps `dev` for integration and `main` for releases, so CI must run on both.
+  # Re-apply this after `copier update`.
+    branches: [main, dev]
   pull_request:
-    branches: [master, dev]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install --only dev
+      - run: uv sync --locked --only-group dev
       - name: Ruff check
-        run: poetry run ruff check .
+        run: uv run ruff check --output-format=github .
       - name: Ruff format check
-        run: poetry run ruff format --check .
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # mypy needs the package's own dependencies installed to resolve imports.
+      - run: uv sync --locked
+      - name: mypy
+        run: uv run mypy
 
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install
-      - name: Run unit tests with coverage
-        run: |
-          poetry run pytest -m "not integration" --cov --cov-report=xml --cov-report=term-missing
-      - name: Upload coverage artifact
+      - run: uv sync --locked
+      - name: Unit tests with coverage
+        run: >-
+          uv run pytest -m "not integration"
+          --cov --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage
         if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: coverage.xml
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+      # Catches the classic src-layout failure where the wheel builds fine but
+      # ships nothing importable. Installing into an isolated environment is the
+      # only way to see it — an editable install in the repo always "works".
+      - name: Verify the wheel is importable
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import tidysdmx; print(tidysdmx.__version__)"

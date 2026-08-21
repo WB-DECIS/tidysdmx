@@ -1,0 +1,31 @@
+name: Task
+description: A unit of planned work, usually part of a larger effort
+labels: [task]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this work is needed, and what it belongs to.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How we will know it is done. One checkbox per outcome.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicitly out of scope
+      description: >-
+        What this task deliberately does not cover, so scope does not drift.
+    validations:
+      required: false

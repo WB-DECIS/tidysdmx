@@ -2,11 +2,11 @@ name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
     inputs:
       noop:
-        description: "Dry run: compute the release without changing anything (publish steps are skipped)"
+        description: "Dry run: compute the release without changing anything"
         type: boolean
         default: false
 
@@ -16,55 +16,109 @@ permissions:
 jobs:
   release:
     name: Semantic release
-    # Dispatch guard: only master may release. semantic-release's branch
-    # config would refuse other branches anyway; this skips cleanly instead.
-    if: github.ref_name == 'master'
+    # Dispatch guard: only main may release. semantic-release's branch config
+    # would refuse anything else anyway; this skips cleanly instead of failing.
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-release-${{ github.ref_name }}
+      # Never cancel a half-finished release: it may already have tagged.
       cancel-in-progress: false
     permissions:
-      contents: write # push version commit + tag, create the GitHub Release
+      contents: write # push the version commit + tag, create the GitHub Release
     outputs:
       released: ${{ steps.release.outputs.released || 'false' }}
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
-
     steps:
+      # Credentials are deliberately persisted here (no persist-credentials:
+      # false): semantic-release has to push the version commit and the tag back
+      # to main. Every other checkout in this repo does disable them.
       - name: Checkout release branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
-          # If master branch protection rejects the release push, create a
+          # If branch protection on main rejects the release push, create a
           # fine-grained PAT (Contents: read/write) as GH_RELEASE_TOKEN and
-          # uncomment here and in the semantic-release step below.
+          # uncomment this line and the one in the release step below.
           # token: ${{ secrets.GH_RELEASE_TOKEN }}
 
+      # Guards against main having moved between the trigger and the checkout.
       - name: Force branch to workflow sha
         run: git reset --hard ${{ github.sha }}
 
+      # semantic-release computes its baseline from tags REACHABLE from the branch,
+      # but checks "already released?" against the GLOBAL tag namespace. If a release
+      # commit is ever orphaned — a branch reset or deletion is enough — the baseline
+      # silently falls back to 0.0.0, the computed version collides with the tag that
+      # still exists, and the non-strict path returns without error: a green job that
+      # cuts nothing, indefinitely. Fail loudly instead.
+      - name: Refuse to release while a tag is unreachable from this branch
+        run: |
+          # tag_format is "v{version}", so every release tag is v<digit>… Both
+          # probes below must use the SAME glob: a reachable tag outside the
+          # release namespace — a nightly, a vendor freeze marker — would
+          # otherwise satisfy `git describe` and silence this guard entirely.
+          glob='v[0-9]*'
+          if git tag -l "$glob" | grep -q . \
+            && ! git describe --tags --abbrev=0 --match "$glob" >/dev/null 2>&1; then
+            echo "::error::release tags exist but none is reachable from HEAD — a release commit was orphaned."
+            echo "Merge the orphaned release commit back into this branch; a cherry-pick will not work,"
+            echo "because only an ancestor relationship makes the tag visible to git describe."
+            git tag -l "$glob"
+            exit 1
+          fi
+
+      # No build happens here: `build_command` is unset in pyproject.toml. This
+      # action is a Docker container action, so uv on the runner is invisible to
+      # it — the `build` job below does the packaging instead.
       - name: Version, changelog, tag, GitHub Release
         id: release
-        uses: python-semantic-release/python-semantic-release@v10.5.3
+        uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }} # or secrets.GH_RELEASE_TOKEN, see above
-          git_committer_name: "github-actions"
-          git_committer_email: "actions@users.noreply.github.com"
+          github_token: ${{ secrets.GITHUB_TOKEN }} # or GH_RELEASE_TOKEN, see above
+          git_committer_name: github-actions
+          git_committer_email: actions@users.noreply.github.com
           no_operation_mode: ${{ inputs.noop || false }}
 
-      # In noop mode semantic-release still reports released=true but skips
-      # the build, so every step past this point must also skip.
-      - name: Attach distributions to GitHub Release
-        if: steps.release.outputs.released == 'true' && inputs.noop != true
-        uses: python-semantic-release/publish-action@v10.5.3
+  build:
+    name: Build distributions
+    needs: release
+    # semantic-release still reports released=true in noop mode, so every job
+    # past this point must re-check the noop flag as well.
+    if: needs.release.outputs.released == 'true' && inputs.noop != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the distributions to the GitHub Release
+    steps:
+      # Check out the tag semantic-release just created, so the artifacts are
+      # built from exactly the released commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.release.outputs.tag }}
-
-      - name: Store distribution artifacts
-        if: steps.release.outputs.released == 'true' && inputs.noop != true
-        uses: actions/upload-artifact@v4
+          ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+      - name: Verify the wheel is importable
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import tidysdmx; print(tidysdmx.__version__)"
+      - name: Attach distributions to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber
+      - name: Store distributions for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: distribution-artifacts
           path: dist
@@ -72,23 +126,24 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
+    needs: [release, build]
     runs-on: ubuntu-latest
-    needs: release
-    if: needs.release.outputs.released == 'true' && inputs.noop != true
     environment:
       name: pypi
       url: https://pypi.org/project/tidysdmx/${{ needs.release.outputs.version }}/
     permissions:
-      id-token: write # PyPI Trusted Publishing (OIDC) — no token secret needed
+      # PyPI Trusted Publishing (OIDC) — no API token secret needed. Also what
+      # lets the action attach PEP 740 Sigstore attestations, which it does by
+      # default from v1.11.0 onward.
+      id-token: write
     steps:
-      - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+      - name: Download distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: distribution-artifacts
           path: dist
-
       - name: Upload package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist
           print-hash: true
