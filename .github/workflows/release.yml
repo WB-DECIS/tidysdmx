@@ -70,17 +70,53 @@ jobs:
             exit 1
           fi
 
-      # No build happens here: `build_command` is unset in pyproject.toml. This
-      # action is a Docker container action, so uv on the runner is invisible to
-      # it — the `build` job below does the packaging instead.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+
+      # semantic-release runs here as a CLI on the runner rather than via its
+      # Docker container action, because `build_command = "uv lock"` needs uv and
+      # a container action cannot see anything installed on the runner.
+      #
+      # That command is load-bearing, not a packaging step: uv.lock records the
+      # project's own version, so stamping project.version without re-locking
+      # leaves `uv sync --locked` failing on every subsequent CI run. PSR runs
+      # build_command after writing the version and before creating the commit,
+      # and `assets = ["uv.lock"]` stages the refreshed lockfile into it.
+      #
+      # Distributions are still built in the `build` job below, against the tag.
       - name: Version, changelog, tag, GitHub Release
         id: release
-        uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }} # or GH_RELEASE_TOKEN, see above
-          git_committer_name: github-actions
-          git_committer_email: actions@users.noreply.github.com
-          no_operation_mode: ${{ inputs.noop || false }}
+        env:
+          # PSR reads GH_TOKEN for the GitHub Release (hvcs/github.py).
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # or GH_RELEASE_TOKEN, see above
+          NOOP: ${{ inputs.noop && '--noop' || '' }}
+        run: |
+          git config user.name github-actions
+          git config user.email actions@users.noreply.github.com
+
+          before=$(git rev-parse HEAD)
+          # shellcheck disable=SC2086 # NOOP is intentionally word-split (empty or --noop)
+          uv run --group release semantic-release -v $NOOP version
+          after=$(git rev-parse HEAD)
+
+          # PSR only creates a commit when it actually releases, so comparing HEAD
+          # is a reliable signal — and it reports false under --noop, where the
+          # action's own `released` output used to report true.
+          if [ "$before" = "$after" ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "No release was made."
+            exit 0
+          fi
+
+          tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*')
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "Released $tag"
 
   build:
     name: Build distributions

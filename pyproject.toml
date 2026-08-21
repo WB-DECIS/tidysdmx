@@ -101,12 +101,20 @@ allow_zero_version = true    # stay on 0.x; without this the next release would 
 major_on_zero = false        # while on 0.x, breaking changes bump minor; set true to release 1.0.0
 tag_format = "v{version}"    # matches the existing v0.2.0..v0.10.0 tags
 commit_message = "chore(release): {version} [skip ci]"
-# `build_command` is deliberately UNSET, which means semantic-release performs no
-# build. The distribution is built in a dedicated `build` job in
-# .github/workflows/release.yml using this project's own uv/hatchling toolchain —
-# the semantic-release action is a Docker container action, so anything installed
-# on the runner (including uv) is invisible to it. This replaces the previous
-# `pip install poetry && poetry build` run inside that container.
+
+# `uv.lock` records this project's OWN version, so stamping project.version
+# without re-locking leaves the lockfile stale and every later `uv sync --locked`
+# fails ("The lockfile at `uv.lock` needs to be updated"). semantic-release runs
+# build_command after writing the version and before creating the commit, and
+# `assets` are staged into that commit — so this pair keeps the two in step.
+#
+# It is not a packaging step: distributions are still built in a dedicated
+# `build` job in .github/workflows/release.yml, against the newly created tag.
+# Because this needs uv, that workflow runs semantic-release as a CLI on the
+# runner rather than through its Docker container action, which cannot see
+# anything installed on the runner.
+build_command = "uv lock"
+assets = ["uv.lock"]
 
 # Releases come from `main` only. This repository keeps a two-branch model
 # (`dev` for integration, `main` for releases), so this stanza is what stops a
