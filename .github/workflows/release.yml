@@ -61,16 +61,20 @@ jobs:
       - name: Refuse to release while a tag is unreachable from this branch
         run: |
           # tag_format is "v{version}", so every release tag is v<digit>… Both
-          # probes below must use the SAME glob: a reachable tag outside the
+          # probes below go through the SAME helper: a reachable tag outside the
           # release namespace — a nightly, a vendor freeze marker — would
-          # otherwise satisfy `git describe` and silence this guard entirely.
+          # otherwise satisfy the reachability probe and silence this guard
+          # entirely. Stable tags only, so the comparison never depends on how
+          # git orders a prerelease against the stable tags around it.
           glob='v[0-9]*'
-          newest_global=$(git tag -l "$glob" --sort=-v:refname | head -1)
+          stable() { git tag -l "$glob" "$@" --sort=-v:refname | grep -v -- '-'; }
+
+          newest_global=$(stable | head -1)
           if [ -z "$newest_global" ]; then
-            echo "No release tags yet — nothing to check."
+            echo "No stable release tags yet — nothing to check."
             exit 0
           fi
-          newest_reachable=$(git describe --tags --abbrev=0 --match "$glob" 2>/dev/null || true)
+          newest_reachable=$(stable --merged HEAD | head -1)
 
           # Compare the newest tag against the newest REACHABLE tag, rather than
           # merely asking whether any reachable tag exists. The weaker check
@@ -79,10 +83,15 @@ jobs:
           # baselines from v0.9.0, recomputes 0.10.0, finds it in the GLOBAL tag
           # namespace, and returns without releasing. A green job that cuts
           # nothing, indefinitely.
+          #
+          # Reachability is `--merged HEAD`, not `git describe --abbrev=0`, which
+          # returns the NEAREST tag by commit distance: on a branchy history that
+          # can be an older tag than the newest reachable one, and the comparison
+          # then fails a perfectly good push.
           if [ "$newest_global" != "$newest_reachable" ]; then
             echo "::error::newest release tag $newest_global is not reachable from HEAD (newest reachable: ${newest_reachable:-none}) — a release commit was orphaned."
             echo "Merge the orphaned release commit back into this branch; a cherry-pick will not work,"
-            echo "because only an ancestor relationship makes the tag visible to git describe."
+            echo "because only an ancestor relationship makes the tag reachable from HEAD."
             git tag -l "$glob" --sort=-v:refname
             exit 1
           fi
@@ -116,10 +125,15 @@ jobs:
           git config user.email actions@users.noreply.github.com
 
           before=$(git rev-parse HEAD)
+          # Deliberately NOT --strict. PSR's strict mode exits 2 whenever the
+          # computed version is already tagged, and "nothing to release" takes
+          # that exact path: next_version() returns the current version for
+          # LevelBump.NO_RELEASE, which is of course already in the released set.
+          # A release PR carrying only docs:/chore:/ci: commits would therefore
+          # fail this job rather than reporting "no release". The guard above
+          # already catches the orphaned-tag collision, before PSR runs.
           # shellcheck disable=SC2086 # NOOP is intentionally word-split (empty or --noop)
-          # --strict: without it, PSR exits 0 when the computed version is
-          # already in the global tag namespace, hiding a stuck release.
-          uv run --group release semantic-release -v --strict $NOOP version
+          uv run --group release semantic-release -v $NOOP version
           after=$(git rev-parse HEAD)
 
           # PSR only creates a commit when it actually releases, so comparing HEAD

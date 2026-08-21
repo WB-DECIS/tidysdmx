@@ -26,7 +26,10 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
    in the meantime to be attributed to the wrong release in the generated changelog.
 
 If nothing since the last tag warrants a release (only `docs:`/`chore:`/`test:`… commits),
-the workflow succeeds as a no-op and nothing is published.
+the workflow succeeds as a no-op and nothing is published: it prints *"No release
+was made."*, reports `released=false`, and skips the build and publish jobs. A
+green Release run with no new tag is the expected outcome there, not a failure to
+investigate.
 
 Dependabot's dependency bumps land as `build:`/`chore:`/`ci:` and deliberately
 release nothing — the lockfile affects development and CI, not what users

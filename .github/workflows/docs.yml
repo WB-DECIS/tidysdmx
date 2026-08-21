@@ -23,7 +23,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  # A literal prefix and the CALLER's ref, so the push build and the release
+  # redeploy land in the SAME group and the later one cancels the earlier.
+  # `github.workflow` cannot appear here: a called workflow inherits the caller's
+  # github context, so it reads "Release" for the redeploy and "Docs" for the
+  # push build. With `inputs.ref` in the key too, the two runs racing to publish
+  # the same branch could never cancel each other, and the pre-release build
+  # could finish last and republish the older site.
+  group: docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
