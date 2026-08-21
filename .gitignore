@@ -170,3 +170,6 @@ llms-full.txt
 .claude/settings.local.json
 
 # uv.lock is deliberately NOT ignored: CI runs `uv sync --locked`, which needs it.
+
+# Transient audit export (make audit / security workflow)
+requirements-audit.txt

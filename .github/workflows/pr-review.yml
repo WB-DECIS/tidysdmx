@@ -15,6 +15,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # claude-code-action exchanges an OIDC token for a GitHub App token, so it
+      # fails at startup without this ("Unable to get ACTIONS_ID_TOKEN_REQUEST_URL").
+      # docs.yml and release.yml already grant it; this job was the omission.
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

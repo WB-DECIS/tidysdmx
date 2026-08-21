@@ -9,6 +9,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Pull requests land on the integration branch, not the default branch —
+    # this repository releases from `main` and integrates on `dev`.
+    target-branch: dev
+    # Wait for a release to settle before proposing it. Without this the implicit
+    # default is 3 days, which zizmor's dependabot-cooldown audit rejects (it
+    # requires 7). Deviation from pypackage-template, which has neither key.
+    cooldown:
+      default-days: 7
     commit-message:
       # Conventional Commits, so semantic-release classifies these correctly:
       # `build:` is in exclude_commit_patterns and never triggers a release.
@@ -26,6 +34,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Pull requests land on the integration branch, not the default branch —
+    # this repository releases from `main` and integrates on `dev`.
+    target-branch: dev
+    # Wait for a release to settle before proposing it. Without this the implicit
+    # default is 3 days, which zizmor's dependabot-cooldown audit rejects (it
+    # requires 7). Deviation from pypackage-template, which has neither key.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: ci
     groups:

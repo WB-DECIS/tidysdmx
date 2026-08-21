@@ -51,8 +51,14 @@ docs-preview: ## Serve the documentation site locally with live reload
 	"$(UV)" run --group docs great-docs preview
 
 audit: ## Audit locked dependencies for known vulnerabilities
-	"$(UV)" export --format requirements-txt --no-emit-project --all-groups \
-		| "$(UV)" run --group security pip-audit --requirement /dev/stdin
+	# --locked so this audits the committed uv.lock rather than a fresh
+	# resolution, and a temp file rather than a pipe so a failed export fails the
+	# target: make runs recipes without pipefail, so a pipeline reports only the
+	# exit status of its last command.
+	"$(UV)" export --locked --format requirements-txt --no-emit-project \
+		--all-groups --no-hashes --output-file requirements-audit.txt
+	"$(UV)" run --group security pip-audit --requirement requirements-audit.txt
+	rm -f requirements-audit.txt
 
 release-dry: ## Show the version the next release would produce, changing nothing
 	"$(UV)" run --group release semantic-release -v --noop version
