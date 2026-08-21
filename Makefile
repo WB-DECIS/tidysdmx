@@ -50,15 +50,18 @@ docs: ## Build the documentation site
 docs-preview: ## Serve the documentation site locally with live reload
 	"$(UV)" run --group docs great-docs preview
 
+# --locked so this audits the committed uv.lock rather than a fresh resolution.
+# The export goes to a real file rather than a pipe for two reasons: /dev/stdin
+# does not exist on native Windows, and make runs recipes without pipefail, so a
+# pipeline would report only pip-audit's exit status and hide a failed export.
+# --no-hashes because pip-audit rejects a requirements set mixing hashed and
+# unhashed entries, and --strict so a dependency that cannot be audited fails
+# instead of being skipped silently. security.yml runs this same target, so the
+# local and CI audits cannot drift.
 audit: ## Audit locked dependencies for known vulnerabilities
-	# --locked so this audits the committed uv.lock rather than a fresh
-	# resolution, and a temp file rather than a pipe so a failed export fails the
-	# target: make runs recipes without pipefail, so a pipeline reports only the
-	# exit status of its last command.
 	"$(UV)" export --locked --format requirements-txt --no-emit-project \
 		--all-groups --no-hashes --output-file requirements-audit.txt
-	"$(UV)" run --group security pip-audit --requirement requirements-audit.txt
-	rm -f requirements-audit.txt
+	"$(UV)" run --group security pip-audit --requirement requirements-audit.txt --strict
 
 release-dry: ## Show the version the next release would produce, changing nothing
 	"$(UV)" run --group release semantic-release -v --noop version

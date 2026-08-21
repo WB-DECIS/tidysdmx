@@ -33,12 +33,11 @@ jobs:
           cache-dependency-glob: uv.lock
           python-version: "3.11"
       # Audit what is actually locked, across every group, rather than what the
-      # loose constraints in pyproject.toml would allow.
+      # loose constraints in pyproject.toml would allow. Runs `make audit` — not
+      # a re-typed copy of it — so this and the local audit cannot drift: both
+      # use the pip-audit pinned in the `security` group, with the same flags.
       - name: pip-audit over the resolved lockfile
-        run: |
-          uv export --locked --format requirements-txt --no-emit-project --all-groups \
-            --no-hashes --output-file requirements-audit.txt
-          uvx pip-audit --requirement requirements-audit.txt --strict
+        run: make audit
 
   workflows:
     name: Workflow security lint
