@@ -17,7 +17,7 @@ github_style: widget
 
 source:
   enabled: true
-  branch: dev
+  branch: main
   path: src/tidysdmx
 
 # ----------------------------------------------------------------------
@@ -121,9 +121,7 @@ reference:
       desc: Fetch and parse SDMX schemas from a Fusion Metadata Registry.
       contents:
         - fetch_schema
-        - fetch_dsd_schema
         - parse_artefact_id
-        - parse_dsd_id
         - create_schema_from_table
     - title: Structure Maps
       desc: Build, parse, validate, and write SDMX structure maps.
@@ -139,6 +137,7 @@ reference:
         - build_representation_map
         - build_multi_representation_map
         - build_single_component_map
+        - build_multi_component_map
         - collect_structure_map_artifacts
         - validate_structure_map_references
         - prepare_structure_map_for_upload
@@ -156,10 +155,8 @@ reference:
       contents:
         - standardize_output
         - standardize_sdmx
-        - standardize_data_for_upload
         - standardize_indicator_id
         - sanitize_variable
-        - add_sdmx_reference_cols
     - title: Validation
       desc: Validate datasets against schemas and codelists.
       contents:
@@ -186,6 +183,26 @@ reference:
         - read_mapping
         - fix_sdmx_xml_datatype_tags
         - gen_urn
+    - title: Artefact Builders
+      desc: >-
+        Build pysdmx artefacts from plain values, each validated for
+        publish-readiness before it is returned.
+      contents:
+        - build_agency_scheme
+        - build_category_scheme
+        - build_codelist
+        - build_concept_scheme
+        - build_data_structure_definition
+        - build_dataflow
+        - build_hierarchy
+    - title: Artefact Validation
+      desc: Check artefacts against publish-readiness rules before upload.
+      contents:
+        - validate
+        - validate_many
+        - raise_if_invalid
+        - ValidationIssue
+        - ValidationError
     - title: QA
       desc: Quality-assurance helpers.
       contents:
@@ -203,3 +220,13 @@ reference:
       contents:
         - vectorized_lookup_ordered_v1
         - vectorized_lookup_ordered_v2
+    - title: Deprecated
+      desc: >-
+        Retained for backwards compatibility and scheduled for removal. Each
+        emits FutureWarning; the replacement is named in its docstring. Do not
+        use these in new code.
+      contents:
+        - fetch_dsd_schema
+        - parse_dsd_id
+        - standardize_data_for_upload
+        - add_sdmx_reference_cols

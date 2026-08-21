@@ -15,7 +15,7 @@
 The library is format-neutral at the model layer: all formats parse into the same Python objects.
 
 **Key dependency versions used by tidysdmx:**
-- `pysdmx >= 1.8.1`
+- `pysdmx >= 1.13.0, < 2`
 - Internally uses `httpx` (HTTP/2), `msgspec` (fast serialisation), `parsy` (parsing)
 
 ---

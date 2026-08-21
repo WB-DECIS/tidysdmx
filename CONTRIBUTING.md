@@ -85,7 +85,7 @@ Before you submit a pull request, check that it meets these guidelines:
 
 ## Releasing
 
-Releases to PyPI are automated. See [RELEASING.md](RELEASING.md).
+Releases to PyPI are automated. See [RELEASING.md](https://github.com/WB-DECIS/tidysdmx/blob/main/RELEASING.md).
 
 ## Code of Conduct
 
