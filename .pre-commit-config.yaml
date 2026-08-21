@@ -38,7 +38,9 @@ repos:
         types_or: [python, pyi, jupyter, markdown]
 
   # The release pipeline computes versions from commit messages, so a malformed
-  # message is a real defect. This is the gate that catches it.
+  # message is a real defect. This is the gate that catches it. rev is kept in
+  # lockstep with the `uvx conventional-pre-commit@...` pin in ci.yml's
+  # pr-title job, which guards the squash-merge path this hook cannot see.
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.4.0
     hooks:

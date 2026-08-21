@@ -106,3 +106,52 @@ jobs:
         run: |
           uv run --isolated --no-project --with dist/*.whl \
             python -c "import tidysdmx; print(tidysdmx.__version__)"
+
+  pr-title:
+    name: PR title is a Conventional Commit
+    # Squash-merging makes the PR title the commit message that lands on the
+    # release branch, and nothing else validates it — the commit-msg hook only
+    # ever sees the individual commits. Same tool, same version as that hook,
+    # so the two cannot disagree about what "conventional" means. Push builds
+    # skip this job; the checks gate below counts that skip as a pass.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # No checkout in this job, so there is no lockfile to key a cache on.
+          enable-cache: false
+      - name: Validate the title
+        env:
+          # The title is attacker-controlled input. It must reach the script
+          # through the environment — interpolating it into `run:` directly
+          # would be a template injection.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          # Version kept in lockstep with the conventional-pre-commit rev in
+          # .pre-commit-config.yaml.
+          uvx conventional-pre-commit@4.4.0 "$RUNNER_TEMP/pr-title.txt"
+
+  # Branch protection should require THIS check and nothing else from this
+  # workflow: the matrix job names ("Test (Python 3.12)") change whenever the
+  # supported Python range moves, and a renamed required check blocks every
+  # merge until someone edits the ruleset by hand.
+  checks:
+    name: All checks
+    needs: [lint, typecheck, test, build, pr-title]
+    # always(): without it a failed dependency SKIPS this job, and a skipped
+    # required check shows as eternally "pending" to branch protection.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide from the needed jobs' results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          # `skipped` is deliberately a pass: pr-title does not run on push
+          # builds. `failure` and `cancelled` are not.
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "$RESULTS"
+          test "$FAILED" = "false"
