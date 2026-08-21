@@ -370,13 +370,13 @@ class TestCreateMappingRules:
     def test_create_mapping_rules_type_error_for_components(self):
         """TypeCheckError when components is not a Sequence[str]."""
         with pytest.raises(TypeCheckError):
-            create_mapping_rules(123, {"D2"})  # type: ignore
+            create_mapping_rules(123, {"D2"})
 
     def test_create_mapping_rules_type_error_for_rep_maps(self):
         """TypeCheckError when rep_maps is not a Set[str] or None."""
         components = ["D1", "D2"]
         with pytest.raises(TypeCheckError):
-            create_mapping_rules(components, [1, 2])  # type: ignore
+            create_mapping_rules(components, [1, 2])
 
 
 class TestBuildExcelWorkbook:

@@ -202,6 +202,87 @@ max-complexity = 10
 # stray debugging left in library code.
 "tests/fixtures/fxtr_*.py" = ["T20"]
 
+# ----------------------------------------------------------------------
+# Static typing
+#
+# pypackage-template's endpoint is `strict = true` over src and tests. This
+# repository shipped py.typed with annotations no checker had ever validated,
+# so the debt is real: 65 errors across 10 files on first run. Turning strict on
+# today would mean 65 blanket suppressions, which is worse than no checker.
+#
+# Instead: mypy runs and must stay green, and each module below is exempted only
+# from the specific error codes it still trips. Fix a module, delete its stanza.
+# When no stanzas remain, set `strict = true` and remove this comment.
+#
+# Burn-down order (cheapest first, by remaining error count):
+#   kedro.py (1) → tidy_raw.py (1) → mapping.py (4) → validation.py (6)
+#   → structures.py (11) → structure_map_writer.py (13)
+# ----------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# `warn_unused_configs` would flag the per-module stanzas below as they are
+# fixed, which is the signal we want when deleting them.
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# pysdmx ships no py.typed marker, and neither do openpyxl or the pandas stubs
+# we do not install. Untyped imports become Any rather than errors.
+# TODO: add `pandas-stubs` to the dev group and drop pandas from this list. It
+# is left out for now because turning on real pandas types surfaces a further
+# batch of errors that belongs in its own change.
+module = ["pysdmx.*", "openpyxl.*", "typeguard.*", "pandas.*", "numpy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Strict mode over a test suite demands annotations on every fixture and test
+# function — friction with no payoff. Matches the template.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+# --- Per-module debt. Each stanza is a TODO; delete it once the module is clean.
+
+[[tool.mypy.overrides]]
+# `pd.Series.__getitem__` on a possibly-None index expression.
+module = "tidysdmx.kedro"
+disable_error_code = ["operator"]
+
+[[tool.mypy.overrides]]
+# Passing a pandas Index where a list[str] is declared.
+module = "tidysdmx.tidy_raw"
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+# pysdmx types RepresentationMap fields as `RepresentationMap | str` (an
+# unresolved URN or the resolved object); this code assumes the resolved form
+# without narrowing. np.select's overloads reject a list of ndarray conditions.
+module = "tidysdmx.mapping"
+disable_error_code = ["union-attr", "call-overload"]
+
+[[tool.mypy.overrides]]
+module = "tidysdmx.validation"
+disable_error_code = ["arg-type", "call-overload"]
+
+[[tool.mypy.overrides]]
+module = "tidysdmx.structures"
+disable_error_code = ["arg-type", "assignment", "list-item", "var-annotated"]
+
+[[tool.mypy.overrides]]
+# The largest block. Includes StructureMap.__replace__, which pysdmx provides
+# via msgspec and which works at runtime — see the architecture review's mypy note.
+module = "tidysdmx.structure_map_writer"
+disable_error_code = ["arg-type", "call-arg", "union-attr"]
+
+[[tool.mypy.overrides]]
+# Tests construct pysdmx artefacts with deliberately wrong shapes to assert the
+# errors they raise, so argument-type complaints there are the point of the test.
+module = ["tests.test_structure_map_writer", "tests.test_structures", "tests.test_utils", "tests.fixtures.fxtr_schemas"]
+disable_error_code = ["arg-type", "call-arg", "var-annotated"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # --cov is deliberately NOT here: it would make `pytest -k one_test` trip the

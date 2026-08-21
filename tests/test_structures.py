@@ -236,14 +236,14 @@ class TestBuildDatePatternMap:
         with pytest.raises(TypeCheckError):
             build_date_pattern_map(
                 "DATE", "TIME_PERIOD", "MMM yy", "M", pattern_type="wrong"
-            )  # type: ignore
+            )
 
     def test_build_date_pattern_map_invalid_resolve_period(self):
         """Invalid resolve_period should raise TypeError."""
         with pytest.raises(TypeCheckError):
             build_date_pattern_map(
                 "DATE", "TIME_PERIOD", "MMM yy", "M", resolve_period="invalid"
-            )  # type: ignore
+            )
 
     def test_build_date_pattern_map_whitespace_source(self):
         """Whitespace-only source should raise ValueError."""

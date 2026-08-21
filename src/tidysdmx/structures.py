@@ -1857,7 +1857,7 @@ def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule 
 
             if mapping_rule == "fixed":
                 fixed_val = parsed["fixed_value"]  # guaranteed non-empty by parser
-                generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
+                generated_maps.append(build_fixed_map(target_id, fixed_val))
 
             elif mapping_rule == "implicit":
                 generated_maps.append(
