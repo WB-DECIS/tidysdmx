@@ -7,12 +7,24 @@ on:
   # Re-apply this after `copier update`.
     branches: [main, dev]
   pull_request:
+  # Callable so release.yml can redeploy the site from the newly created tag.
+  # Without that, the site never rebuilds for a release: the release commit
+  # carries [skip ci] and is pushed with GITHUB_TOKEN, which by design cannot
+  # trigger workflows, and neither a tag push nor a Release event matches the
+  # branch filter above. The published version and changelog would sit one
+  # release behind, permanently.
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build the docs from. Defaults to the triggering ref.
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.ref }}
           # Full history so great-docs can date pages accurately.
           fetch-depth: 0
           persist-credentials: false
@@ -56,7 +69,9 @@ jobs:
     # early, but only main deploys. This is what stops the published site from
     # documenting unreleased API — the defect that made pypackage-template
     # mandate a single branch in the first place.
-    if: github.ref == 'refs/heads/main'
+    # `inputs.ref` is only set when release.yml calls this workflow, which it
+    # does only after an actual release.
+    if: inputs.ref != '' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write

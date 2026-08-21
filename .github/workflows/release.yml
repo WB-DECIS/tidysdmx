@@ -61,12 +61,25 @@ jobs:
           # release namespace — a nightly, a vendor freeze marker — would
           # otherwise satisfy `git describe` and silence this guard entirely.
           glob='v[0-9]*'
-          if git tag -l "$glob" | grep -q . \
-            && ! git describe --tags --abbrev=0 --match "$glob" >/dev/null 2>&1; then
-            echo "::error::release tags exist but none is reachable from HEAD — a release commit was orphaned."
+          newest_global=$(git tag -l "$glob" --sort=-v:refname | head -1)
+          if [ -z "$newest_global" ]; then
+            echo "No release tags yet — nothing to check."
+            exit 0
+          fi
+          newest_reachable=$(git describe --tags --abbrev=0 --match "$glob" 2>/dev/null || true)
+
+          # Compare the newest tag against the newest REACHABLE tag, rather than
+          # merely asking whether any reachable tag exists. The weaker check
+          # passes whenever some older tag is still reachable — so with v0.9.0
+          # reachable and v0.10.0 orphaned it stays silent, semantic-release
+          # baselines from v0.9.0, recomputes 0.10.0, finds it in the GLOBAL tag
+          # namespace, and returns without releasing. A green job that cuts
+          # nothing, indefinitely.
+          if [ "$newest_global" != "$newest_reachable" ]; then
+            echo "::error::newest release tag $newest_global is not reachable from HEAD (newest reachable: ${newest_reachable:-none}) — a release commit was orphaned."
             echo "Merge the orphaned release commit back into this branch; a cherry-pick will not work,"
             echo "because only an ancestor relationship makes the tag visible to git describe."
-            git tag -l "$glob"
+            git tag -l "$glob" --sort=-v:refname
             exit 1
           fi
 
@@ -100,7 +113,9 @@ jobs:
 
           before=$(git rev-parse HEAD)
           # shellcheck disable=SC2086 # NOOP is intentionally word-split (empty or --noop)
-          uv run --group release semantic-release -v $NOOP version
+          # --strict: without it, PSR exits 0 when the computed version is
+          # already in the global tag namespace, hiding a stuck release.
+          uv run --group release semantic-release -v --strict $NOOP version
           after=$(git rev-parse HEAD)
 
           # PSR only creates a commit when it actually releases, so comparing HEAD
@@ -117,6 +132,20 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "Released $tag"
+
+  # Rebuild and redeploy the site from the release tag, so the published version
+  # and changelog match the release that just happened rather than lagging by one.
+  deploy-docs:
+    name: Publish docs for the release
+    needs: release
+    if: needs.release.outputs.released == 'true' && inputs.noop != true
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
 
   build:
     name: Build distributions
