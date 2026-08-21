@@ -2,6 +2,10 @@ name: Release
 
 on:
   push:
+    # DEVIATION from pypackage-template's `main_dev`, which also releases from
+    # `dev` as rc prereleases. `dev` here is internal integration that nobody
+    # installs from, so there is no rc machinery and no
+    # [tool.semantic_release.branches.dev] group. Re-apply after `copier update`.
     branches: [main]
   workflow_dispatch:
     inputs:

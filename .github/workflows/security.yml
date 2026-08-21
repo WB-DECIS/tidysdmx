@@ -2,9 +2,8 @@ name: Security
 
 on:
   push:
-  # DEVIATION from pypackage-template, which assumes a single `main`. tidysdmx
-  # keeps `dev` for integration and `main` for releases, so CI must run on both.
-  # Re-apply this after `copier update`.
+  # `branching_model: main_dev` in .copier-answers.yml — the template renders
+  # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
     branches: [main, dev]
   pull_request:
   schedule:

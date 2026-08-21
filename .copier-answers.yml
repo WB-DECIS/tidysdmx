@@ -2,11 +2,12 @@
 #
 # It records the answers used to generate this project so that `copier update`
 # can re-apply improvements from the template. Keep it committed.
-_commit: 0db6038
+_commit: v0.3.0
 _src_path: https://github.com/WB-DECIS/pypackage-template.git
 author_email: tonyfujs@gmail.com
 author_github: tonyfujs
 author_name: Tony Fujs
+branching_model: main_dev
 copyright_holder: DECGT - World Bank
 github_owner: WB-DECIS
 github_repo: tidysdmx

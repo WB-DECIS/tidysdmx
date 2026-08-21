@@ -174,9 +174,18 @@ Releasing is a `dev` → `main` pull request. After semantic-release pushes its
 version commit and tag to `main`, **merge `main` back into `dev`** or the two
 drift. See `RELEASING.md`.
 
-This is a deliberate deviation from pypackage-template, which mandates a single
-`main`. The workflows carry a comment saying so; re-apply it after
-`copier update`.
+Since template v0.3.0 this is a first-class option rather than a deviation:
+`.copier-answers.yml` records `branching_model: main_dev`, and the template
+renders the `dev` triggers, the Dependabot routing and the main-only Pages
+deploy for us.
+
+One deviation remains, and it is deliberate: the template's `main_dev` also
+makes `dev` a semantic-release branch group cutting `vX.Y.Z-rc.N` prereleases.
+`dev` here is internal integration that nobody installs from, so the rc
+machinery would be complexity without a consumer. There is no
+`[tool.semantic_release.branches.dev]` group and `release.yml` triggers on
+`main` only. Re-apply that after `copier update` until upstream stops coupling
+the two.
 
 ## Staying in Sync With the Template
 
