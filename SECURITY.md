@@ -44,6 +44,14 @@ long-term-support branches.
 - **Reproducible installs.** `uv.lock` is committed and CI installs with
   `uv sync --locked`, so a build never silently resolves a different dependency.
 
+## Releasing a dependency fix
+
+Routine Dependabot bumps land as `build:`/`chore:` commits and deliberately cut
+no release — the lockfile only affects development and CI, not what users
+install. When a vulnerability forces a change users must receive (raising a
+version floor in `dependencies`), title that change `fix(deps): ...` so a patch
+release ships immediately.
+
 ## Scope
 
 Vulnerabilities in this package's own code are in scope. Vulnerabilities in

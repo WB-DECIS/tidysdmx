@@ -20,6 +20,10 @@ updates:
     commit-message:
       # Conventional Commits, so semantic-release classifies these correctly:
       # `build:` is in exclude_commit_patterns and never triggers a release.
+      # That is the right default for a library — the lockfile only affects
+      # development and CI. When a bump must reach users (a CVE forces a floor
+      # raise on a runtime dependency), retitle it `fix(deps): ...` so a patch
+      # release ships — see SECURITY.md.
       prefix: build
       prefix-development: chore
     groups:

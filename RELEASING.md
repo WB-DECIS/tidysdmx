@@ -8,7 +8,11 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
 
 1. Work is merged into `dev` through PRs, using Conventional Commit messages.
 2. When it is time to release, open a PR from `dev` to `main` and merge it —
-   **the merge is the release**.
+   **the merge is the release**. Merge it with a **merge commit, never a
+   squash**: PSR computes the version from the individual `feat:`/`fix:`
+   commits, and a squash collapses them into whatever the PR title says. The
+   merge commit also keeps `dev`'s history an ancestor of `main`, which is what
+   the release workflow's orphaned-tag guard checks.
 3. The push to `main` triggers the `Release` workflow, which:
    - computes the next version from the Conventional Commits since the last `v*` tag;
    - stamps `project.version` in `pyproject.toml`;
@@ -23,6 +27,11 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
 
 If nothing since the last tag warrants a release (only `docs:`/`chore:`/`test:`… commits),
 the workflow succeeds as a no-op and nothing is published.
+
+Dependabot's dependency bumps land as `build:`/`chore:`/`ci:` and deliberately
+release nothing — the lockfile affects development and CI, not what users
+install. When a security fix must actually reach users, see *Releasing a
+dependency fix* in `SECURITY.md`.
 
 The release commit itself triggers no CI: pushes made with `GITHUB_TOKEN` never start
 workflows, and the `[skip ci]` marker is additionally
