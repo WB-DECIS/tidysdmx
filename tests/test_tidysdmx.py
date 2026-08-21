@@ -23,6 +23,13 @@ from tidysdmx.tidysdmx import (
 
 
 class TestParseDsdId:
+    # parse_dsd_id is deprecated in favour of parse_artefact_id and emits
+    # FutureWarning by design, so every test in this class would trip
+    # `filterwarnings = ["error"]`. Scoped to the class rather than ignored
+    # globally: the suppression disappears when the function is removed
+    # (backlog ARCH-05), instead of quietly outliving it.
+    pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+
     def test_parse_dsd_id_valid_input(self):
         # Test with a valid DSD ID
         dsd_id = "WB:WDI(1.0)"

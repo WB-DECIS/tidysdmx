@@ -204,18 +204,34 @@ max-complexity = 10
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# --cov is deliberately NOT here: it would make `pytest -k one_test` trip the
+# coverage gate, which trains people to bypass the gate. Use `make cov` (or CI)
+# for a gated, measured run.
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+xfail_strict = true
 markers = [
     "unit: fast, isolated unit tests (no network)",
     "integration: tests that hit FMR or external services",
 ]
-addopts = "--strict-markers"
+# Warnings are errors so deprecations surface early. Prefer a class-level
+# `pytestmark = pytest.mark.filterwarnings(...)` next to the tests that need it
+# over adding a blanket ignore here — a scoped suppression disappears together
+# with the deprecated code it covers.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["src/tidysdmx"]
+relative_files = true
+# TODO(TEST-05): kedro.py imports no kedro APIs — partitioned datasets are plain
+# dicts of callables — so this exemption is unfounded and the module can be unit
+# tested with fakes. Note this is a hardcoded path: it must move if the module does.
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-fail_under = 70
+# Raised from 70. Actual coverage is ~89, and a gate 19 points below reality
+# cannot catch a regression. This is a floor, not a target: raise it again once
+# real coverage moves up.
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
