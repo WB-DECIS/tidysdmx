@@ -11,10 +11,11 @@ allowed-tools:
 ---
 
 Write tests for `$ARGUMENTS`, or if no argument was given, for whatever changed
-since `main`:
+on this branch relative to its base:
 
 ```bash
-git diff main...HEAD --name-only -- 'src/**/*.py'
+base=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo dev)
+git diff "$base...HEAD" --name-only -- 'src/**/*.py'
 ```
 
 1. **Read the source** and any existing tests for that module, so you match the

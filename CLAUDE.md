@@ -67,7 +67,7 @@ Single test: `uv run pytest -k test_name -v`
 - `/test` — run the test suite (accepts pytest flags)
 - `/lint` — ruff lint and format checks
 - `/typecheck` — mypy, and help fixing what it finds
-- `/review-pr` — review the current branch's changes against `dev`
+- `/review-pr` — review the current branch's changes against the PR base branch
 - `/add-tests` — generate tests for new or changed functions
 - `/commit` — stage and write a Conventional Commit
 - `/docs` — build the docs and report what broke
@@ -152,7 +152,10 @@ source directly rather than guessing. Locate it with
   never seen this package's internals
 - **SDMX correctness**: all artefacts must conform to the SDMX information model
 - **Type everything.** The package ships `py.typed`, so annotations are part of the
-  public contract — a wrong annotation is a bug in downstream users' type checking
+  public contract — a wrong annotation is a bug in downstream users' type checking.
+  Static checking is not input validation: values crossing a boundary (an Excel
+  workbook, a JSON mapping file) are annotated `object` and narrowed at runtime —
+  see `.claude/rules/python-conventions.md`
 - **Google docstrings** on every public function, enforced by ruff's `D` rules.
   Accuracy of `Args`/`Returns`/`Raises` is on you, not the linter
 - **Specific exceptions.** `ValueError`/`TypeError`, never bare `Exception`
@@ -187,6 +190,12 @@ uvx copier update --trust
 
 Review the diff — conflicts are left as `.rej` files, and the documented
 deviations above will need re-applying. Keep `.copier-answers.yml` committed.
+
+The recorded baseline is template **v0.3.0**, which added the `branching_model`
+question this repository answers `main_dev`. Reconciliation to that version was
+done by hand rather than by `copier update`: this repository diverges from the
+rendered tree in most files, so a real update produces mostly-noise conflicts and
+re-creates the deleted example module.
 
 ## CI/CD
 

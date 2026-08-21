@@ -95,6 +95,14 @@ Before you submit a pull request, check that it meets these guidelines:
 3. The pull request should work for all currently supported operating systems and versions of Python.
 4. Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org/)
    (`feat:`, `fix:`, `docs:`, …) — they drive automated versioning and the changelog.
+5. Title the PR as a Conventional Commit too. CI validates the title with the same
+   checker as the `commit-msg` hook, so a malformed title fails the `All checks`
+   gate rather than silently producing no release later.
+6. Where an input is genuinely untrusted — a parsed Excel workbook, a JSON mapping
+   file, an FMR response — annotate it `object` and narrow it with `isinstance`,
+   raising `TypeError`. Static checking verifies that annotations are *consistent*;
+   it says nothing about the values that arrive at runtime. See
+   `.claude/rules/python-conventions.md`.
 
 ## Releasing
 

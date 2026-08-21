@@ -7,17 +7,20 @@ allowed-tools:
   - Glob
 ---
 
-Review the changes on this branch against `dev`, the integration branch that
-feature branches target here. (Use `main` only when reviewing a release PR.)
+Review the changes on this branch against its base branch.
 
-1. **Get the diff**: `git diff dev...HEAD` (use `--stat` first to see the shape).
-2. **Read the changed files in full**, not just the diff hunks — a diff hides the
+1. **Find the base**: `gh pr view --json baseRefName -q .baseRefName` if a PR
+   exists; otherwise assume `dev`, the integration branch feature branches
+   target here (a release PR's base is `main`).
+2. **Get the diff**: `git diff <base>...HEAD` (use `--stat` first to see the
+   shape).
+3. **Read the changed files in full**, not just the diff hunks — a diff hides the
    context that makes a change wrong.
-3. **Assess each change** against:
+4. **Assess each change** against:
    - **Correctness** — logic errors, unhandled edge cases, boundary and
      off-by-one conditions, error paths that cannot actually be reached.
-   - **Type safety** — complete and accurate annotations; would `mypy --strict`
-     accept this without an ignore? Flag any new `Any`.
+   - **Type safety** — complete and accurate annotations; would mypy accept this
+     without an ignore, and without widening a per-module exemption? Flag any new `Any`.
    - **Tests** — does every new or changed public function have tests, including
      its failure paths? Are new tests actually asserting something meaningful?
    - **Public API** — anything newly exported that should stay private? Is
@@ -28,7 +31,7 @@ feature branches target here. (Use `main` only when reviewing a release PR.)
      in this repo already does.
    - **Commit messages** — do the types match what actually changed? A `feat`
      labelled `chore` silently withholds a release.
-4. **Report** grouped by file, each finding marked **critical** (must fix) or
+5. **Report** grouped by file, each finding marked **critical** (must fix) or
    **suggestion**. Include the concrete failure case for anything you call
    critical — if you cannot describe how it breaks, say so and downgrade it.
 

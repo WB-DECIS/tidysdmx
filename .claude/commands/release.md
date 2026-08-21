@@ -8,7 +8,7 @@ allowed-tools:
 Help cut a release. Read `RELEASING.md` first and follow it — this command is a
 guide through it, not a replacement for it.
 
-1. **Confirm the branch is releasable.** On `main`, up to date, clean tree, and
+1. **Confirm the branch is releasable.** On `dev`, up to date, clean tree, and
    `make check` green.
 2. **Dry run, always:**
    ```bash
@@ -25,7 +25,8 @@ guide through it, not a replacement for it.
 4. **Explain what will happen** when this merges to `main`: version stamped in
    `pyproject.toml`, `CHANGELOG.md` updated, tagged, GitHub Release created,
    distributions built from the tag and attached.
-5. **Stop there.** Releasing is a merge to `main` performed by a human. Do not
+5. **Stop there.** Releasing is a `dev` → `main` pull request merged by a human,
+   with a merge commit and never a squash (see RELEASING.md). Do not
    push tags, do not edit the version by hand, and do not run
    `semantic-release version` without `--noop`.
 

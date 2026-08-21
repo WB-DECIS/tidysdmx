@@ -38,6 +38,33 @@ enforces.
 - The package ships `py.typed`, so annotations are part of the public contract. A
   wrong annotation breaks downstream users' type checking — treat it as a bug.
 
+### Static checking vs runtime validation
+
+They answer different questions, and one does not replace the other:
+
+- mypy answers *"are our annotations consistent?"* — it verifies every call
+  inside the package, and protects downstream callers who type-check. It knows
+  nothing about the values that actually arrive at runtime.
+- Runtime validation answers *"is this untrusted value what we assumed?"* — a
+  parsed Excel workbook, a JSON mapping file, an FMR response. No type checker
+  can see those.
+- At a boundary, annotate what you actually hold — `object`, not the type you
+  hope for — then narrow with `isinstance` and raise `TypeError` naming the
+  expected and actual types.
+- Never `isinstance`-guard a parameter that is already precisely annotated:
+  once mypy runs with `warn_unreachable`, it flags the guard body as dead code,
+  and it is right — such a guard distrusts your own annotation. Either the
+  annotation is wrong (fix it) or the value is untrusted (annotate it `object`).
+
+This is also the shape the typeguard removal should take. `@typechecked` today
+covers both cases indiscriminately. When it goes, a `TypeCheckError` test at a
+genuine boundary — `parse_mapping_template_wb` reading a workbook,
+`read_mapping` reading JSON — becomes an explicit guard raising `TypeError`,
+not a deleted test; only the tests covering already-annotated internal
+parameters simply go. typeguard's pytest plugin is a compatible middle path if
+runtime verification is still wanted at test time, without the production cost
+or `TypeCheckError` in the public contract.
+
 ## Naming
 
 - Functions: `snake_case` verbs — `fetch_schema`, `validate_dataset`.
