@@ -70,6 +70,7 @@ If the imports succeed, you're ready to go. Continue to the [quick start](02-qui
 Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. The `pysdmx` FMR client is bundled with tidysdmx and can be instantiated directly:
 
 ```python
-import pysdmx as px
-client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+from pysdmx.api.fmr import RegistryClient
+
+client = RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
 ```

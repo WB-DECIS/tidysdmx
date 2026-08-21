@@ -35,7 +35,7 @@ fmt: ## Auto-fix lint violations and format
 	"$(UV)" run ruff check --fix .
 	"$(UV)" run ruff format .
 
-typecheck: ## Run mypy in strict mode
+typecheck: ## Run mypy (not strict yet — see the burn-down in pyproject.toml)
 	"$(UV)" run mypy
 
 test: ## Run unit tests (no coverage gate, so -k works as expected)

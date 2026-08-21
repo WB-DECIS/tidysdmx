@@ -99,14 +99,14 @@ schema = fetch_schema(
 
 ```python
 # pysdmx — analyst must understand Component structure
+from pysdmx.model import Role
+
 mandatory = [c.id for c in schema.components if schema.components[c.id].required]
 coded = [
     c.id for c in schema.components if schema.components[c.id].local_codes is not None
 ]
 dims = [
-    c.id
-    for c in schema.components
-    if schema.components[c.id].role == px.model.Role.DIMENSION
+    c.id for c in schema.components if schema.components[c.id].role == Role.DIMENSION
 ]
 
 # tidysdmx — one call, plain dict

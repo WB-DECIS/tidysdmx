@@ -6,7 +6,7 @@
 
 ### Bug Fixes
 
-- Adjust for compatibility with pysdmx 1,17
+- Adjust for compatibility with pysdmx 1.17
   ([`4ddb8e1`](https://github.com/WB-DECIS/tidysdmx/commit/4ddb8e1ce18ad780a81ea6e56abcd097bced2992))
 
 - **validation**: Guard against stale cached valid dicts from <=0.9.0

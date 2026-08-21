@@ -65,8 +65,10 @@ dev = [
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "mypy>=2.3",
-    # Keep this in lockstep with the ruff-pre-commit rev in
-    # .pre-commit-config.yaml, or a commit passes the hook and then fails CI.
+    # This is a floor, not a pin; uv.lock is what actually fixes the version
+    # (0.16.4 today). Keep that resolved version and the ruff-pre-commit rev in
+    # .pre-commit-config.yaml moving together, or a commit passes the hook and
+    # then fails CI.
     "ruff>=0.16.3",
     "pre-commit>=4.6",
 ]
@@ -240,6 +242,8 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 # pysdmx ships no py.typed marker, and neither do openpyxl or the pandas stubs
 # we do not install. Untyped imports become Any rather than errors.
+# pysdmx does ship py.typed; it is listed here only so a future version that
+# drops it cannot silently degrade the MapRule alias below into a variable.
 # TODO: add `pandas-stubs` to the dev group and drop pandas from this list. It
 # is left out for now because turning on real pandas types surfaces a further
 # batch of errors that belongs in its own change.

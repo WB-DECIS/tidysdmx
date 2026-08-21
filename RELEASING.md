@@ -56,7 +56,7 @@ you also remove `allow_zero_version`) becomes 1.0.0.
       owner `WB-DECIS`, repository `tidysdmx`, workflow `release.yml`, environment `pypi`.
 - [ ] **GitHub environment** — repo *Settings → Environments* → create `pypi`.
       Optionally add required reviewers to gate PyPI uploads behind a manual approval.
-- [ ] **Master push access for the workflow** — PSR pushes the release commit + tag to
+- [ ] **Main push access for the workflow** — PSR pushes the release commit + tag to
       `main`, which is protected. Pick one:
       1. *Preferred:* put `main` under a ruleset and add the **GitHub Actions** app to
          its Bypass list (*Always allow*). `GITHUB_TOKEN` then pushes cleanly, and release

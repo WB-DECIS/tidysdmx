@@ -1,5 +1,5 @@
 ---
-description: Run mypy in strict mode and help fix what it finds
+description: Run mypy and help fix what it finds
 allowed-tools:
   - Bash
   - Read
@@ -14,7 +14,9 @@ Run the type checker:
 make typecheck
 ```
 
-mypy runs in `--strict` mode, and this package ships `py.typed` — so its
+mypy is not in `--strict` mode yet: each module is exempted only from the
+error codes it still trips, and the burn-down order is in `pyproject.toml`.
+This package ships `py.typed`, so its
 annotations are part of its public contract and a wrong one is a real bug for
 downstream users.
 

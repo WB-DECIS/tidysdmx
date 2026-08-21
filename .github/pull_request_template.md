@@ -18,7 +18,7 @@ version bump — so `feat:` vs `fix:` vs `chore:` matters here.
 ## Checklist
 
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
-- [ ] `make check` passes locally (lint, mypy strict, tests + coverage gate)
+- [ ] `make check` passes locally (lint, mypy, tests + coverage gate)
 - [ ] New or changed public functions have tests, including failure paths
 - [ ] New or changed public functions have Google-style docstrings
 - [ ] Docs updated if behaviour or the public API changed

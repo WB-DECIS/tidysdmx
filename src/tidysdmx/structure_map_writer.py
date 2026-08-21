@@ -1,5 +1,7 @@
 """Utility functions for writing complete StructureMaps with dependencies."""
 
+from typing import TypeAlias
+
 from pysdmx.model.__base import MaintainableArtefact
 from pysdmx.model.map import (
     ComponentMap,
@@ -15,7 +17,11 @@ from typeguard import typechecked
 
 from .structures import gen_urn
 
-MapRule = (
+# Annotated rather than a bare assignment: without the annotation mypy silently
+# treats this as a variable if the pysdmx names ever stop resolving, and the
+# error surfaces as a confusing "Variable ... is not valid as a type" cascade at
+# every use site instead of at the import.
+MapRule: TypeAlias = (
     ComponentMap
     | DatePatternMap
     | FixedValueMap

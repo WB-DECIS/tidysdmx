@@ -1,12 +1,16 @@
 """Shared pytest fixtures.
 
 Fixtures are imported here rather than registered through ``pytest_plugins``.
-pytest only honours ``pytest_plugins`` in the *rootdir* conftest; this file is
-``tests/conftest.py``, and the previous declaration worked only because
-``testpaths`` happened to make this directory resolve as top level — behaviour
-that is not guaranteed across pytest versions. Importing the fixture functions
-into this module registers them for the whole test session with no such
-dependency.
+The previous declaration listed bare module paths (``fixtures.fxtr_schemas``),
+which stopped resolving when the suite moved to ``--import-mode=importlib`` with
+``tests/`` as a real package — it raises ``ModuleNotFoundError: fixtures``.
+Importing the fixture functions directly keeps them registered for the whole
+session without depending on the shape of ``sys.path``.
+
+``pytest_plugins`` itself would be legal in this file: pytest rejects it only in
+conftests imported *after* configuration (``_pytest/config/__init__.py``,
+``_check_non_top_pytest_plugins``), and ``tests/conftest.py`` is loaded as an
+initial conftest. It is rejected one level down, e.g. in ``tests/fixtures/``.
 
 The re-exports below are deliberate: ruff would otherwise flag them as unused,
 hence ``__all__``.
