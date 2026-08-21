@@ -199,7 +199,7 @@ class TestExtractValidationInfo:
 
 class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
-        "context, expected",
+        ("context", "expected"),
         [
             ("dataflow", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
@@ -481,7 +481,8 @@ class TestParseMappingTemplateWb:
         """Test parsing a valid mapping template."""
         result = parse_mapping_template_wb(mapping_template_path)
         assert isinstance(result, dict)
-        assert "REP_MAPPING" in result and "COMP_MAPPING" in result
+        assert "REP_MAPPING" in result
+        assert "COMP_MAPPING" in result
         assert isinstance(result["REP_MAPPING"], pd.DataFrame)
         assert isinstance(result["COMP_MAPPING"], pd.DataFrame)
 

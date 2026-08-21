@@ -50,6 +50,11 @@ class TestParseDsdId:
         assert parse_dsd_id("WB:WDI:Extra(1.0)") == ("WB", "WDI:Extra", "1.0")
 
 
+_INVALID_ARTEFACT_ID_MSG = (
+    "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+)
+
+
 class TestParseArtefactId:
     def test_parse_artefact_id_valid_input(self):
         # Test with a valid artefact ID
@@ -60,46 +65,28 @@ class TestParseArtefactId:
     def test_parse_artefact_id_missing_colon(self):
         # Test with a artefact ID missing the colon
         artefact_id = "WBWDI(1.0)"
-        try:
+        with pytest.raises(ValueError, match=re.escape(_INVALID_ARTEFACT_ID_MSG)):
             parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
 
     def test_parse_artefact_id_missing_parentheses(self):
         # Test with a artefact ID missing the parentheses
         artefact_id = "WB:WDI1.0"
-        try:
+        with pytest.raises(ValueError, match=re.escape(_INVALID_ARTEFACT_ID_MSG)):
             parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
 
     def test_parse_artefact_id_empty_string(self):
         # Test with an empty string
         artefact_id = ""
-        try:
+        with pytest.raises(ValueError, match=re.escape(_INVALID_ARTEFACT_ID_MSG)):
             parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
 
     def test_parse_artefact_id_extra_colon(self):
-        # Test with an extra colon in the artefact ID
-        artefact_id = "WB:WDI:Extra(1.0)"
-        try:
-            parse_artefact_id(artefact_id)
-        except ValueError as e:
-            assert (
-                str(e)
-                == "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-            )
+        # An extra colon is accepted: only the first one separates the agency,
+        # so the remainder stays in the id. This asserts the same behaviour as
+        # TestParseDsdId.test_parse_dsd_id_extra_colon, which parse_dsd_id
+        # delegates to. Previously this test used try/except and so passed
+        # vacuously while claiming the opposite.
+        assert parse_artefact_id("WB:WDI:Extra(1.0)") == ("WB", "WDI:Extra", "1.0")
 
 
 class TestStandardizeIndicatorId:
@@ -629,7 +616,7 @@ class TestAddSdmxReferenceCols:
     """
 
     @pytest.mark.parametrize(
-        "artefact_type,expected_cols",
+        ("artefact_type", "expected_cols"),
         [
             ("dataflow", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             ("datastructure", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),

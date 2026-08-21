@@ -631,7 +631,8 @@ class TestBuildMultiValueMapList:
             build_multi_value_map_list(empty_df, ["col"], ["col"])
 
     @pytest.mark.parametrize(
-        "missing_cols, is_source", [(["missing_src"], True), (["missing_tgt"], False)]
+        ("missing_cols", "is_source"),
+        [(["missing_src"], True), (["missing_tgt"], False)],
     )
     def test_raises_value_error_when_columns_missing(
         self, valid_dataframe, missing_cols, is_source
@@ -1243,8 +1244,6 @@ class TestCreateSchemaFromTable:
         assert time_comp.role == Role.DIMENSION
         assert time_comp.local_dtype == DataType.PERIOD
         # assert time_comp.description == (
-        #     "Timespan or point in time to which the observation actually refers."
-        # )
 
         # Verify TIME_PERIOD concept properties
         assert isinstance(time_comp.concept, ItemReference)
@@ -1343,7 +1342,6 @@ class TestBuildSchemaFromWbTemplate:
             [
                 ["OnlyOne"],  # 1 valid cell -> Keep
                 ["Key", "Value", "Extra"],  # 3 valid cells -> Ignore
-                # [None, None, "SingleValid"],  # 1 valid cell post-nan -> Ignore
                 ["Key2", "Value2", None],  # 2 valid cells -> Keep
             ]
         )
@@ -1717,7 +1715,7 @@ class TestExtractArtefactId:
         )
 
     @pytest.mark.parametrize(
-        "structure_type,expected",
+        ("structure_type", "expected"),
         [
             ("dataflow", "AGENCY:DF_ID(1.0)"),
             ("dsd", "AGENCY:DSD_ID(2.0)"),
@@ -1789,7 +1787,6 @@ class TestBuildStructureMapFromTemplateWb:
         assert structure_map.agency == "AGENCY"
         assert structure_map.version == "1.0"
         assert len(structure_map.maps) == 3  # fixed, implicit, representation
-        # assert any("Mapping for TGT3" in str(m) for m in structure_map.maps)
 
     def test_missing_comp_mapping_sheet_raises_valueerror(self, valid_mappings):
         """Tests that missing COMP_MAPPING sheet raises ValueError."""
@@ -2131,7 +2128,7 @@ class TestIsMissingToken:
     """Tests for `_is_missing_token` which checks if a string is a missing token."""
 
     @pytest.mark.parametrize(
-        "input_str,expected",
+        ("input_str", "expected"),
         [
             ("nan", True),
             ("NaN", True),
@@ -2505,7 +2502,7 @@ class TestCollectRequiredSheetErrors:
         assert errors == []
 
     @pytest.mark.parametrize(
-        "missing_sheets,expected_messages",
+        ("missing_sheets", "expected_messages"),
         [
             (["Sheet2"], ["Missing required sheet: 'Sheet2'."]),
             (
@@ -2604,7 +2601,7 @@ class TestCollectMappingRulesErrors:
         )
 
     @pytest.mark.parametrize(
-        "values, valid_rules, expected_error_count",
+        ("values", "valid_rules", "expected_error_count"),
         [
             (["RULE1", "RULE2"], ["RULE1", "RULE2"], 0),
             (["RULE1", None, "RULE2"], ["RULE1", "RULE2"], 0),
@@ -2632,7 +2629,7 @@ class TestCollectMappingRulesErrors:
         assert len(errors) == expected_error_count
 
     @pytest.mark.parametrize(
-        "value, prefixes",
+        ("value", "prefixes"),
         [
             ("P:ABC", ["P:"]),
             ("Q=123", ["Q="]),
@@ -2658,7 +2655,7 @@ class TestCollectMappingRulesErrors:
         assert errors == []
 
     @pytest.mark.parametrize(
-        "raw_value, prefix",
+        ("raw_value", "prefix"),
         [
             ("P:", "P:"),
             ("P:   ", "P:"),

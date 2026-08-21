@@ -3,6 +3,7 @@
 import logging
 
 import pandas as pd
+from pysdmx.model.dataflow import Schema
 
 from .tidysdmx import (
     check_dict_keys,
@@ -95,8 +96,8 @@ def kd_standardize_sdmx(
 
 def kd_validate_dataset_local(
     df: pd.DataFrame,
-    schema=None,
-    valid=None,
+    schema: Schema | None = None,
+    valid: dict[str, object] | None = None,
 ) -> tuple[bool, dict]:
     """Validate a single DataFrame for SDMX compliance.
 
@@ -131,7 +132,7 @@ def kd_validate_dataset_local(
 
 def kd_validate_datasets_local(
     datasets: dict,
-    schema,
+    schema: Schema,
     boolean: bool,
 ) -> tuple[dict, dict]:
     """Validate multiple datasets for SDMX compliance.

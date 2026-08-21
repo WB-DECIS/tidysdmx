@@ -84,7 +84,7 @@ def _get_codelist_violations(
 
 
 @typechecked
-def validate_dataset_local(
+def validate_dataset_local(  # noqa: C901 - sequential guard clauses, one per validation rule
     df: pd.DataFrame,
     schema: Schema | None = None,
     valid: dict[str, object] | None = None,

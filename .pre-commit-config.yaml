@@ -1,22 +1,72 @@
+# Install with `make install` (or `uv run pre-commit install --install-hooks`).
+#
+# default_install_hook_types is what makes the commit-msg and pre-push hooks
+# actually get installed — without it `pre-commit install` wires up pre-commit
+# only, and the Conventional Commits gate below silently never runs. That gate
+# matters here because the release pipeline computes versions from commit
+# messages, and previously nothing validated them.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+default_language_version:
+  python: python3.11
+
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.6
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-      - id: ruff
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  # rev is kept in lockstep with the `ruff` pin in pyproject.toml's dev group so
+  # that the hook and `make lint` can never disagree.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
         args: [--fix, --exit-non-zero-on-fix]
+      # `types_or` includes markdown because ruff formats Python code blocks
+      # inside .md files. Without it the hook passes on files that `make lint`
+      # (and therefore CI) then rejects — a commit that succeeds locally and
+      # fails in CI is exactly the drift this config exists to prevent.
       - id: ruff-format
+        types_or: [python, pyi, jupyter, markdown]
+
+  # The release pipeline computes versions from commit messages, so a malformed
+  # message is a real defect. This is the gate that catches it.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
 
   - repo: local
     hooks:
+      # Notebooks are excluded from ruff (see pyproject.toml) and managed here
+      # instead. tidysdmx-specific: the template ships no notebooks.
       - id: nbstripout-local
         name: Strip Jupyter notebook outputs (local)
-        entry: python -m nbstripout
+        entry: uv run --group notebooks python -m nbstripout
         language: system
         files: "\\.ipynb$"
 
-      - id: pytest-unit
-        name: Run unit tests
-        entry: poetry run pytest -m "not integration" --no-header -q
+      # mypy needs whole-project context, so it ignores the changed-file list and
+      # checks the paths configured in [tool.mypy].
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest (unit)
+        entry: uv run pytest -m "not integration" -q
         language: system
         pass_filenames: false
         always_run: true

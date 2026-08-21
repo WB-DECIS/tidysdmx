@@ -157,9 +157,16 @@ notebooks/TMP/
 TMP/
 docs/.local-docs
 notebooks/tidysdmx/config.json
-# Ignore everything under scripts/
-scripts/*
-## But keep the scripts directory itself
-!scripts/ 
-## And keep this specific debug script
-!scripts/debug-config-checks.py
+
+# Documentation build output (great-docs + Quarto)
+great-docs/
+.quarto/
+_site/
+_freeze/
+llms.txt
+llms-full.txt
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# uv.lock is deliberately NOT ignored: CI runs `uv sync --locked`, which needs it.

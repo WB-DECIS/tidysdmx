@@ -73,8 +73,8 @@ from pysdmx.model.map import StructureMap, ComponentMap, ...     # also here
 schema = client.get_schema("dataflow", "WB", "WDI", "1.0.0")
 
 # Access components
-schema.components          # Components container (iterable)
-schema.context             # "dataflow" | "datastructure" | "provisionagreement"
+schema.components  # Components container (iterable)
+schema.context  # "dataflow" | "datastructure" | "provisionagreement"
 ```
 
 ---
@@ -125,9 +125,10 @@ if comp["FREQ"].local_codes is not None:
 
 # Check role
 from pysdmx.model import Role
-comp["FREQ"].role == Role.DIMENSION   # True for dimensions
-comp["FREQ"].role == Role.MEASURE     # True for measures
-comp["FREQ"].role == Role.ATTRIBUTE   # True for attributes
+
+comp["FREQ"].role == Role.DIMENSION  # True for dimensions
+comp["FREQ"].role == Role.MEASURE  # True for measures
+comp["FREQ"].role == Role.ATTRIBUTE  # True for attributes
 
 # Check if mandatory
 comp["FREQ"].required  # True or False
@@ -236,7 +237,7 @@ smap = StructureMap(
     agency="ECB",
     version="1.0",
     name="My mapping",
-    maps=[fixed_map, implicit_map, component_map]
+    maps=[fixed_map, implicit_map, component_map],
 )
 ```
 
@@ -378,7 +379,7 @@ from pysdmx.io.format import StructureFormat
 
 client = fmr.RegistryClient(
     base_url="https://your-fmr-host/FMR/sdmx/v2/",
-    format=StructureFormat.FUSION_JSON  # recommended format
+    format=StructureFormat.FUSION_JSON,  # recommended format
 )
 ```
 
@@ -386,10 +387,10 @@ client = fmr.RegistryClient(
 
 ```python
 schema = client.get_schema(
-    context,   # "dataflow" | "datastructure" | "provisionagreement"
-    agency,    # e.g. "WB"
-    id,        # e.g. "WDI"
-    version    # e.g. "1.0.0"
+    context,  # "dataflow" | "datastructure" | "provisionagreement"
+    agency,  # e.g. "WB"
+    id,  # e.g. "WDI"
+    version,  # e.g. "1.0.0"
 )
 # Returns: Schema object
 ```
@@ -428,6 +429,7 @@ Examples:
 **Parsing in tidysdmx:**
 ```python
 from tidysdmx import parse_artefact_id
+
 agency, id, version = parse_artefact_id("WB:WDI(1.0.0)")
 # → ("WB", "WDI", "1.0.0")
 ```
@@ -457,9 +459,9 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 ```python
 from tidysdmx import fetch_schema, extract_validation_info
 
-schema = fetch_schema(base_url="https://fmr.example.com",
-                      artefact_id="WB:WDI(1.0.0)",
-                      context="dataflow")
+schema = fetch_schema(
+    base_url="https://fmr.example.com", artefact_id="WB:WDI(1.0.0)", context="dataflow"
+)
 
 valid = extract_validation_info(schema)
 # valid = {
@@ -478,9 +480,9 @@ for component in schema.components:
 
 # Access by ID
 obs_val = schema.components["OBS_VALUE"]
-obs_val.role        # Role.MEASURE
-obs_val.required    # True
-obs_val.local_codes # None (numeric measures are typically uncoded)
+obs_val.role  # Role.MEASURE
+obs_val.required  # True
+obs_val.local_codes  # None (numeric measures are typically uncoded)
 ```
 
 ### Checking codes
@@ -505,7 +507,7 @@ from tidysdmx import (
     build_single_component_map,
     build_structure_map,
     build_structure_map_from_template_wb,
-    map_structures
+    map_structures,
 )
 import pandas as pd
 
@@ -516,23 +518,26 @@ fmap = build_fixed_map(target="CONF_STATUS", value="F")
 imap = build_implicit_component_map(source="SourceFreq", target="FREQ")
 
 # 3. Date pattern
-dpm = build_date_pattern_map(source="DATE", target="TIME_PERIOD",
-                              pattern="MMM yy", frequency="M")
+dpm = build_date_pattern_map(
+    source="DATE", target="TIME_PERIOD", pattern="MMM yy", frequency="M"
+)
 
 # 4. Value-level representation map from DataFrame
 mapping_df = pd.DataFrame({"source": ["GB", "US"], "target": ["GBR", "USA"]})
 rep_map = build_representation_map(mapping_df, agency="ECB", id="RM_COUNTRY")
 
 # 5. Single component map (wraps representation map)
-cm = build_single_component_map(df=mapping_df,
-                                 source_component="COUNTRY_SRC",
-                                 target_component="REF_AREA",
-                                 agency="ECB")
+cm = build_single_component_map(
+    df=mapping_df,
+    source_component="COUNTRY_SRC",
+    target_component="REF_AREA",
+    agency="ECB",
+)
 
 # 6. Apply a StructureMap to a DataFrame
 from pysdmx.model.map import StructureMap
-smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0",
-                    maps=[fmap, imap, cm])
+
+smap = StructureMap(id="MY_MAP", agency="ECB", version="1.0", maps=[fmap, imap, cm])
 result_df = map_structures(df, smap)
 ```
 

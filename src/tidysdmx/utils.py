@@ -119,9 +119,14 @@ def extract_component_ids(schema: Schema) -> list[str]:
         >>> from pysdmx.model import Schema, Components, Component
         >>> comp1 = Component(id="FREQ")
         >>> comp2 = Component(id="TIME_PERIOD")
-        >>> schema = Schema(context="datastructure", agency="ECB", id_="EXR",
-        ...                 components=Components([comp1, comp2]),
-        ...                 version="1.0.0", urns=[])
+        >>> schema = Schema(
+        ...     context="datastructure",
+        ...     agency="ECB",
+        ...     id_="EXR",
+        ...     components=Components([comp1, comp2]),
+        ...     version="1.0.0",
+        ...     urns=[],
+        ... )
         >>> extract_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """

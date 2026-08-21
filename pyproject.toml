@@ -135,9 +135,14 @@ changelog_file = "CHANGELOG.md"
 [tool.ruff]
 src = ["src"]
 target-version = "py311"
+line-length = 88
 # Notebooks are exploratory and managed via nbstripout, not ruff. Linting them
 # raises Jupyter-specific false positives (cross-cell imports/names), so exclude.
+# Documented deviation from pypackage-template, which ships no notebooks.
 extend-exclude = ["notebooks"]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
 select = [
@@ -149,18 +154,53 @@ select = [
     "B",    # flake8-bugbear — common bug patterns
     "SIM",  # flake8-simplify — simplifiable constructs
     "RUF",  # Ruff-specific rules
+    "N",    # pep8-naming
+    "ANN",  # flake8-annotations
+    "S",    # flake8-bandit — security linting without a separate bandit run
+    "T20",  # flake8-print — no stray print() in library code
+    "PT",   # flake8-pytest-style
+    "ERA",  # eradicate — commented-out code
+    "C90",  # mccabe complexity
 ]
 ignore = [
-    "D107",  # allow missing docstrings on __init__
-    "D105",  # allow missing docstrings on magic methods
+    "D107",   # allow missing docstrings on __init__
+    "D105",   # allow missing docstrings on magic methods
+    "ANN401", # allow explicit Any where it is genuinely the right type
 ]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.mccabe]
+# The template's value. The four functions that exceed it today carry a
+# `# noqa: C901` with a reason, rather than the limit being raised for
+# everything — a new complex function still gets caught.
+max-complexity = 10
+
 [tool.ruff.lint.per-file-ignores]
-# Docstrings are not required anywhere in tests (module/class/method/function).
-"tests/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D106"]
+"tests/**/*.py" = [
+    # Docstrings are not required anywhere in tests, bare asserts are the point,
+    # and annotating every fixture buys nothing.
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D106",
+    "S101",
+    "ANN",
+    # Cassette fixtures load pickled pysdmx Schema objects from files this
+    # repository generates and commits itself. Not untrusted input.
+    "S301",
+    # TODO(TEST-15): 54 `pytest.raises` calls lack `match=`. Burning those down
+    # is its own change — see docs/reviews/2026-06-architecture-review.md.
+    # Remove this line once they are done.
+    "PT011",
+]
+# The fxtr_* modules carry `if __name__ == "__main__"` cassette-regeneration
+# blocks; their print() calls are progress output for a human running them, not
+# stray debugging left in library code.
+"tests/fixtures/fxtr_*.py" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

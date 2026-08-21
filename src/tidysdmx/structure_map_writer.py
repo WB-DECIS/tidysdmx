@@ -120,9 +120,7 @@ def collect_structure_map_artifacts(
         >>>
         >>> # Write them all together
         >>> xml = write_sdmx(
-        ...     artifacts,
-        ...     sdmx_format=Format.STRUCTURE_SDMX_ML_3_0,
-        ...     prettyprint=True
+        ...     artifacts, sdmx_format=Format.STRUCTURE_SDMX_ML_3_0, prettyprint=True
         ... )
     """
     artifacts: list[MaintainableArtefact] = [
@@ -234,7 +232,8 @@ def prepare_structure_map_for_upload(
 
     Example:
         >>> from pysdmx.api.fmr.maintenance import (
-        ...     RegistryMaintenanceClient, StructureAction,
+        ...     RegistryMaintenanceClient,
+        ...     StructureAction,
         ... )
         >>> from tidysdmx.structure_map_writer import prepare_structure_map_for_upload
         >>>
@@ -245,7 +244,7 @@ def prepare_structure_map_for_upload(
         >>> client = RegistryMaintenanceClient(
         ...     api_endpoint="https://your-fmr/sdmx/v2/",
         ...     user="username",
-        ...     password="password"
+        ...     password="password",
         ... )
         >>> client.put_structures(artifacts, action=StructureAction.Replace)
     """
