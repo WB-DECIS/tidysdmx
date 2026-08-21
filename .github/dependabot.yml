@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  # Dependabot has understood pyproject.toml + uv.lock natively since the uv
+  # ecosystem reached GA in March 2025, so it keeps the lockfile in sync rather
+  # than only bumping constraints.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      # Conventional Commits, so semantic-release classifies these correctly:
+      # `build:` is in exclude_commit_patterns and never triggers a release.
+      prefix: build
+      prefix-development: chore
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Actions are pinned to commit SHAs, which only stay current if something
+  # bumps them. This is that something.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
