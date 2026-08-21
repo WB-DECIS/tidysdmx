@@ -57,11 +57,24 @@ Ready to contribute? Here's how to set up `tidysdmx` for local development.
         $ ./tidysdmx/Scripts/activate
         ```
 
-3. Install `tidysdmx` using `poetry`:
+3. Install `tidysdmx` and its development tooling with [uv](https://docs.astral.sh/uv/):
 
     ```console
-    $ poetry install
+    $ make install
     ```
+
+    That runs `uv sync --all-groups` and installs the git hooks. The hooks
+    include a `commit-msg` gate that rejects non-Conventional commit messages,
+    and a `pre-push` gate that runs the unit tests, so both need `uv` on your
+    `PATH`.
+
+    Before opening a pull request, run what CI runs:
+
+    ```console
+    $ make check
+    ```
+
+    Pull requests target **`dev`**, not `main`. `main` is the release branch.
 
 4. Use `git` (or similar) to create a branch for local development and make your changes:
 

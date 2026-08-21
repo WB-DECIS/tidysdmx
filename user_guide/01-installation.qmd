@@ -14,6 +14,12 @@ tidysdmx requires **Python 3.11.9 or later**.
 pip install tidysdmx
 ```
 
+## With uv
+
+```bash
+uv add tidysdmx
+```
+
 ## With Poetry
 
 ```bash
@@ -22,11 +28,13 @@ poetry add tidysdmx
 
 ## From source (development)
 
+tidysdmx is developed with [uv](https://docs.astral.sh/uv/).
+
 ```bash
 git clone https://github.com/WB-DECIS/tidysdmx.git
 cd tidysdmx
-poetry install
-poetry run pytest -m "not integration"
+make install          # uv sync --all-groups, plus the pre-commit hooks
+make check            # lint, typecheck, and unit tests with the coverage gate
 ```
 
 ## Runtime dependencies
@@ -35,6 +43,7 @@ tidysdmx depends on:
 
 - [`pysdmx`](https://py.sdmx.io) — the underlying SDMX information-model library.
 - [`pandas`](https://pandas.pydata.org) — the tabular workhorse.
+- [`numpy`](https://numpy.org) — vectorised lookups behind the mapping helpers.
 - [`typeguard`](https://typeguard.readthedocs.io) — runtime type checking.
 - [`openpyxl`](https://openpyxl.readthedocs.io) — Excel mapping template support.
 

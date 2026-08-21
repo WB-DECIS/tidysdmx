@@ -14,7 +14,17 @@ It provides:
 The project wraps pysdmx where possible, but also adds higher-level functionality
 not present in pysdmx itself.
 
+Import name: `tidysdmx`. Everything public is re-exported from the top-level
+package and listed in `src/tidysdmx/__init__.py`'s `__all__`.
+
+<!-- These imports pull the conventions into context. Do not remove them: without
+     them the rules files are documentation nobody reads. -->
+@.claude/rules/python-conventions.md
+@.claude/rules/testing-conventions.md
+@.claude/rules/commit-conventions.md
+
 ## Before Writing Any Code
+
 Always read the following documents first — they define the domain and the
 upstream dependency your code wraps:
 
@@ -22,33 +32,52 @@ upstream dependency your code wraps:
 2. `docs/pysdmx-overview.md` — understand how pysdmx models those artefacts
 3. `docs/tidysdmx-architecture.md` — understand how tidysdmx maps onto pysdmx
 
+`docs/reviews/` holds architecture reviews. `docs/reviews/2026-06-architecture-review.md`
+§7 is the live refactoring backlog; several `TODO` comments in this repository
+cite its IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn).
+
 ## Python Environment
 
 - Python 3.11.9+
-- Package manager: **Poetry** — install with `poetry install`
-- Core runtime dependencies: `pysdmx`, `pandas`, `typeguard`, `openpyxl`
+- Package manager: **uv** — `uv sync --all-groups` installs everything
+- Dependency groups (PEP 735): `dev`, `docs`, `release`, `security`, `notebooks`
+- Core runtime dependencies: `pysdmx`, `pandas`, `numpy`, `openpyxl`, `typeguard`
+
+Always run project commands through `uv run` so they use the locked environment,
+never a system Python. `poetry` is gone — do not reintroduce it.
 
 ## Key Commands
 
-- Run tests: `poetry run pytest`
-- Run unit tests only: `poetry run pytest -m "not integration"`
-- Run tests with coverage: `poetry run pytest --cov --cov-report=term-missing`
-- Lint: `poetry run ruff check .`
-- Format check: `poetry run ruff format --check .`
-- Auto-fix lint + format: `poetry run ruff check --fix . && poetry run ruff format .`
-- Pre-commit (all files): `pre-commit run --all-files`
+Defined once in the `Makefile` — prefer these over retyping the underlying
+commands, and update the `Makefile` rather than inventing new invocations.
+
+- `make check` — lint + typecheck + tests with the coverage gate (what CI runs)
+- `make lint` / `make fmt` — ruff check + format check / auto-fix both
+- `make typecheck` — mypy
+- `make test` — unit tests, no coverage gate (so `-k` works)
+- `make cov` — unit tests with coverage, gate enforced
+- `make docs` / `make docs-preview` — build / live-preview the docs site
+- `make audit` — pip-audit over the locked dependencies
+- `make release-dry` — show what the next release would be, changing nothing
+
+Single test: `uv run pytest -k test_name -v`
 
 ## Claude Code Commands
 
-- `/test` — run the test suite (accepts pytest flags, e.g. `/test -k test_name`)
-- `/lint` — run ruff linting and format checks
-- `/review-pr` — review current branch changes against master
-- `/add-tests` — generate tests for new/changed functions
+- `/test` — run the test suite (accepts pytest flags)
+- `/lint` — ruff lint and format checks
+- `/typecheck` — mypy, and help fixing what it finds
+- `/review-pr` — review the current branch's changes against `dev`
+- `/add-tests` — generate tests for new or changed functions
+- `/commit` — stage and write a Conventional Commit
+- `/docs` — build the docs and report what broke
+- `/release` — walk the release runbook, dry run first
 
 ## Repository Layout
 
 ```
 src/tidysdmx/
+├── __init__.py             — public API re-exports, __all__, __version__
 ├── tidysdmx.py             — Core: fetch schemas from FMR, standardise/map SDMX data
 ├── structures.py           — Build SDMX artefacts (StructureMap, ValueMap, Codelist, etc.)
 ├── mapping.py              — Apply StructureMaps to DataFrames
@@ -59,20 +88,22 @@ src/tidysdmx/
 ├── utils.py                — Utilities: extract components, build mapping rules, Excel helpers
 ├── qa_utils.py             — QA helpers: coerce numeric, remove duplicates
 ├── kedro.py                — Kedro pipeline node wrappers
-└── tidy_raw.py             — Raw/tidy data filtering
+├── tidy_raw.py             — Raw/tidy data filtering
+└── py.typed                — PEP 561 marker; this package ships its types
 
 tests/
-├── conftest.py             — Loads fixture plugins
-└── fixtures/
-    ├── fxtr_schemas.py     — Pickled Schema fixtures
-    ├── fxtr_dummy_data.py  — Dummy DataFrame fixtures
-    ├── fxtr_structures.py  — SDMX structure artefact fixtures
-    └── fxtr_mapping.py     — StructureMap fixtures
+├── conftest.py             — shared fixtures (NOT pytest_plugins — see the rules)
+├── fixtures/fxtr_*.py      — reusable test data and cassettes, imported by conftest
+└── test_*.py               — one file per source module
 
-.claude/
-├── settings.json           — Pre-approved permissions for common commands
-├── commands/               — Slash commands (/test, /lint, /review-pr, /add-tests)
-└── rules/                  — Python and testing convention rules
+docs/                       — SDMX domain references and architecture reviews.
+                              Contributor- and agent-facing, NOT published by great-docs.
+great-docs.yml              — docs site config; reference.sections lists the public API
+index.qmd                   — docs landing page
+user_guide/*.qmd            — narrative documentation
+SKILL.md                    — API summary published for AI agents consuming this package
+
+.github/workflows/          — ci, release, docs, security, pr-review
 ```
 
 ## Key pysdmx Classes Used
@@ -87,10 +118,17 @@ tests/
 - `pysdmx.api.fmr` — FMR API client
 - `pysdmx.io.format.StructureFormat` — structure serialisation formats
 
+Import these by name (`from pysdmx.model.map import StructureMap`). Do **not**
+write `import pysdmx as px` and then reference `px.model.map.StructureMap`: a
+clean `import pysdmx` has no `.model` attribute, so that form resolves only when
+some other module happens to have imported the submodule first.
+
 ## pysdmx Source Code
+
 When you need to understand how pysdmx implements something, read the installed
 source directly rather than guessing. Locate it with
-`poetry run python -c "import pysdmx; print(pysdmx.__file__)"`. Key modules:
+`uv run python -c "import pysdmx; print(pysdmx.__file__)"`. Key modules:
+
 - `pysdmx/model/` — core data model classes
 - `pysdmx/io/` — readers and writers
 
@@ -102,37 +140,69 @@ source directly rather than guessing. Locate it with
   client handles API calls
 - When unsure about SDMX semantics, consult the official SDMX information model
   before making assumptions
+- Two distinct validation vocabularies share the word "validate": `validation.py`
+  checks *datasets* against a schema and returns an error DataFrame;
+  `artefact_validation.py` checks *artefacts* for publish-readiness and raises
+  `ValidationError`. Do not conflate them.
 
 ## Design Principles
 
 - **Don't reimplement pysdmx**: call upstream wherever pysdmx provides the functionality
-- **Pythonic API**: method names and signatures should be intuitive to Python developers
-  unfamiliar with SDMX internals
+- **Pythonic API**: names and signatures should read naturally to someone who has
+  never seen this package's internals
 - **SDMX correctness**: all artefacts must conform to the SDMX information model
-- **Type safety**: use `typeguard`'s `@typechecked` decorator and full type annotations;
-  prefer pysdmx types over reinventing them
-- **Google docstrings**: enforced by ruff (`convention = "google"`)
+- **Type everything.** The package ships `py.typed`, so annotations are part of the
+  public contract — a wrong annotation is a bug in downstream users' type checking
+- **Google docstrings** on every public function, enforced by ruff's `D` rules.
+  Accuracy of `Args`/`Returns`/`Raises` is on you, not the linter
+- **Specific exceptions.** `ValueError`/`TypeError`, never bare `Exception`
+- **Return new objects** instead of mutating arguments
 
-## Testing
+## Branching and Releases
 
-- Tests live in `tests/`, with files mirroring `src/tidysdmx/` module names
-- Use fixtures in `tests/fixtures/` to construct pysdmx artefacts and dummy datasets —
-  do not create inline artefacts when a fixture already exists
-- Fixtures are loaded as pytest plugins via `conftest.py`
-- Every new public function must have a corresponding test
-- Mark tests: `@pytest.mark.unit` (default) or `@pytest.mark.integration` (FMR/network)
-- See `.claude/rules/testing-conventions.md` for full test writing guidelines
+Two long-lived branches:
+
+- **`dev`** — integration. Feature branches target this, and it is where day-to-day
+  work lands.
+- **`main`** — releases. Only `main` cuts a release, deploys the docs site, and
+  publishes to PyPI.
+
+Releasing is a `dev` → `main` pull request. After semantic-release pushes its
+version commit and tag to `main`, **merge `main` back into `dev`** or the two
+drift. See `RELEASING.md`.
+
+This is a deliberate deviation from pypackage-template, which mandates a single
+`main`. The workflows carry a comment saying so; re-apply it after
+`copier update`.
+
+## Staying in Sync With the Template
+
+This repository is generated from
+[WB-DECIS/pypackage-template](https://github.com/WB-DECIS/pypackage-template) and
+records its answers in `.copier-answers.yml`. Pull in template improvements with:
+
+```bash
+uvx copier update --trust
+```
+
+Review the diff — conflicts are left as `.rej` files, and the documented
+deviations above will need re-applying. Keep `.copier-answers.yml` committed.
 
 ## CI/CD
 
-- **GitHub Actions CI** (`.github/workflows/ci.yml`): runs ruff lint + format check, then
-  pytest with coverage on Python 3.11 and 3.12 — triggered on push/PR to master and dev
-- **Claude PR Review** (`.github/workflows/pr-review.yml`): automated code review on PRs
-  using Claude, checking SDMX correctness, type safety, test coverage, and code quality
-- **Release** (`.github/workflows/release.yml`): on push to master,
-  `python-semantic-release` computes the version from commit messages, tags, creates a
-  GitHub Release, and publishes to PyPI via Trusted Publishing — see `RELEASING.md`.
-  Never hand-edit the version in `pyproject.toml`.
+- **`ci.yml`** — ruff lint + format, mypy, pytest on Python 3.11–3.14, then a build
+  that checks metadata and verifies the wheel is importable. Runs on `main` and `dev`.
+- **`release.yml`** — on push to `main`, python-semantic-release computes the version
+  from commit messages, tags, and creates the GitHub Release; a separate job builds
+  with `uv build` and publishes to PyPI via Trusted Publishing.
+  **Never hand-edit the version in `pyproject.toml`** — it is generated. See `RELEASING.md`.
+- **`docs.yml`** — builds the great-docs/Quarto site on `main` and `dev`, but deploys
+  to GitHub Pages only from `main`, so the published site tracks released API.
+- **`security.yml`** — pip-audit over the lockfile, plus zizmor on the workflows.
+- **`pr-review.yml`** — automated Claude review on pull requests.
+
+Actions are pinned to full commit SHAs. If you add a workflow step, pin it the
+same way and add the `# vX.Y.Z` comment.
 
 ## What NOT to Do
 
@@ -140,5 +210,15 @@ source directly rather than guessing. Locate it with
 - Do not invent SDMX concepts not present in the information model
 - Do not expose raw pysdmx internal objects in the public API without considering
   whether wrapping is appropriate
+- Do not hand-edit the version in `pyproject.toml` or write `CHANGELOG.md` by hand —
+  both are generated from commit messages
+- Do not commit with a non-Conventional message; the `commit-msg` hook will reject
+  it, and the release pipeline depends on it
+- Do not add `# type: ignore` or `# noqa` to silence a real problem. Fix it, or
+  explain the exemption in a comment
 - Do not skip writing tests for new public functions
-- Do not merge code that fails ruff checks or pytest
+- Do not add a public name to `__all__` without also adding it to
+  `great-docs.yml`'s `reference.sections` — the docs build fails on missing names
+- Do not add `--cov` to pytest's `addopts`; it would make focused `-k` runs trip the
+  coverage gate. Use `make cov`
+- Do not reintroduce Poetry, Sphinx, or Read the Docs — all three were removed

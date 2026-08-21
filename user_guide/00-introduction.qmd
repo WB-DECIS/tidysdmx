@@ -29,7 +29,7 @@ If you already know pysdmx, you can think of tidysdmx as a set of opinionated co
 
 ## What's covered in this guide?
 
-- [Installation](01-installation.qmd) — install with pip or Poetry and verify your environment.
+- [Installation](01-installation.qmd) — install with pip, uv or Poetry and verify your environment.
 - [Quick start](02-quick-start.qmd) — the smallest end-to-end example.
 
 More chapters — end-to-end workflow, SDMX concepts, FMR integration, mapping templates, validation, and LLM/agent artefacts — are in progress and will be linked here as they land.

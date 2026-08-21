@@ -1,16 +1,38 @@
 {
   "permissions": {
     "allow": [
-      "Bash(poetry run pytest*)",
-      "Bash(poetry run ruff*)",
-      "Bash(poetry install*)",
-      "Bash(poetry run python*)",
-      "Bash(pre-commit run*)",
-      "Bash(git status*)",
-      "Bash(git diff*)",
-      "Bash(git log*)",
-      "Bash(git add*)",
-      "Bash(git commit*)"
+      "Bash(make:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pre-commit:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv lock:*)",
+      "Bash(uv build)",
+      "Bash(uv tree:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh release:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(uv publish:*)",
+      "Bash(twine upload:*)",
+      "Bash(rm -rf:*)",
+      "Read(.env)",
+      "Read(.env.*)"
     ]
   }
 }

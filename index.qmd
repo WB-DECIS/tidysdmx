@@ -55,7 +55,7 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
   <a href="user_guide/01-installation.html" class="gd-cta-card">
     <span class="gd-cta-icon">📦</span>
     <span class="gd-cta-title">Installation</span>
-    <span class="gd-cta-desc">Install tidysdmx with pip or Poetry, set up an FMR client, and sanity-check.</span>
+    <span class="gd-cta-desc">Install tidysdmx with pip, uv or Poetry, set up an FMR client, and sanity-check.</span>
     <span class="gd-cta-arrow">→</span>
   </a>
   <a href="user_guide/02-quick-start.html" class="gd-cta-card">
