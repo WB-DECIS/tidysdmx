@@ -76,7 +76,7 @@ class TestValidateMandatoryColumns:
 
 class TestValidateColumns:
     @pytest.mark.parametrize(
-        "df_columns, valid_columns, sdmx_cols",
+        ("df_columns", "valid_columns", "sdmx_cols"),
         [
             (
                 ["STRUCTURE", "STRUCTURE_ID", "ACTION"],
@@ -101,7 +101,7 @@ class TestValidateColumns:
         validate_columns(df, valid_columns=valid_columns, sdmx_cols=sdmx_cols)
 
     @pytest.mark.parametrize(
-        "df_columns, valid_columns, sdmx_cols, invalid_col",
+        ("df_columns", "valid_columns", "sdmx_cols", "invalid_col"),
         [
             (
                 ["COMP1", "INVALID"],
@@ -152,7 +152,7 @@ class TestValidateColumns:
 
 
 class TestValidateCodelistIds:
-    @pytest.fixture()
+    @pytest.fixture
     def sample_codelist_ids(self):
         """Fixture that returns a dictionary of allowed IDs for columns."""
         return {
@@ -179,7 +179,8 @@ class TestValidateCodelistIds:
         with pytest.raises(ValueError) as excinfo:
             validate_codelist_ids(df, sample_codelist_ids)
         msg = str(excinfo.value)
-        assert "col1" in msg and "col2" in msg
+        assert "col1" in msg
+        assert "col2" in msg
 
     def test_column_not_in_dataframe_is_ignored(self, sample_codelist_ids):
         """Tests that columns not present in DataFrame are ignored."""
@@ -192,7 +193,7 @@ class TestValidateCodelistIds:
         validate_codelist_ids(df, sample_codelist_ids)
 
     @pytest.mark.parametrize(
-        "df_values,expected_error",
+        ("df_values", "expected_error"),
         [
             ({"col1": ["A1", "WRONG"], "col2": ["B1", "B2"]}, "col1"),
             ({"col1": ["A1", "A2"], "col2": ["WRONG", "B2"]}, "col2"),
@@ -216,7 +217,7 @@ class TestValidateDatasetLocal:
     # ``pytest.warns``.
     pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
-    @pytest.fixture()
+    @pytest.fixture
     def valid_info(self):
         """Fixture providing a mock valid dictionary for validation."""
         return {

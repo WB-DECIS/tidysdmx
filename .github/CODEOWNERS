@@ -1,0 +1,11 @@
+# Every pull request gets a review request routed automatically.
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Replace the owner below with a team (e.g. @WB-DECIS/maintainers) once
+# one exists — teams survive people changing roles, individuals do not.
+* @tonyfujs
+
+# Changes to the release and security machinery deserve a closer look than
+# ordinary code, so keep these lines even if you broaden ownership above.
+/.github/workflows/ @tonyfujs
+/pyproject.toml     @tonyfujs

@@ -7,22 +7,34 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
 ## How it works
 
 1. Work is merged into `dev` through PRs, using Conventional Commit messages.
-2. When it is time to release, open a PR from `dev` to `master` and merge it —
-   **the merge is the release**.
-3. The push to `master` triggers the `Release` workflow, which:
+2. When it is time to release, open a PR from `dev` to `main` and merge it —
+   **the merge is the release**. Merge it with a **merge commit, never a
+   squash**: PSR computes the version from the individual `feat:`/`fix:`
+   commits, and a squash collapses them into whatever the PR title says. The
+   merge commit also keeps `dev`'s history an ancestor of `main`, which is what
+   the release workflow's orphaned-tag guard checks.
+3. The push to `main` triggers the `Release` workflow, which:
    - computes the next version from the Conventional Commits since the last `v*` tag;
-   - stamps `tool.poetry.version` in `pyproject.toml`;
+   - stamps `project.version` in `pyproject.toml`;
    - inserts a generated section into `CHANGELOG.md` under the `<!-- version list -->` marker;
    - commits (`chore(release): X.Y.Z [skip ci]`), tags `vX.Y.Z`, and creates a GitHub Release;
-   - builds the sdist + wheel with Poetry;
+   - hands off to a separate `build` job that runs `uv build` against the new tag;
    - publishes to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC — no token).
-4. After the release, **back-merge `master` into `dev` immediately, before merging
+4. After the release, **back-merge `main` into `dev` immediately, before merging
    any new work into `dev`**, so the release commit (version bump + changelog) reaches
    `dev`. Skipping it reintroduces version drift; delaying it can cause commits merged
    in the meantime to be attributed to the wrong release in the generated changelog.
 
 If nothing since the last tag warrants a release (only `docs:`/`chore:`/`test:`… commits),
-the workflow succeeds as a no-op and nothing is published.
+the workflow succeeds as a no-op and nothing is published: it prints *"No release
+was made."*, reports `released=false`, and skips the build and publish jobs. A
+green Release run with no new tag is the expected outcome there, not a failure to
+investigate.
+
+Dependabot's dependency bumps land as `build:`/`chore:`/`ci:` and deliberately
+release nothing — the lockfile affects development and CI, not what users
+install. When a security fix must actually reach users, see *Releasing a
+dependency fix* in `SECURITY.md`.
 
 The release commit itself triggers no CI: pushes made with `GITHUB_TOKEN` never start
 workflows, and the `[skip ci]` marker is additionally
@@ -56,9 +68,9 @@ you also remove `allow_zero_version`) becomes 1.0.0.
       owner `WB-DECIS`, repository `tidysdmx`, workflow `release.yml`, environment `pypi`.
 - [ ] **GitHub environment** — repo *Settings → Environments* → create `pypi`.
       Optionally add required reviewers to gate PyPI uploads behind a manual approval.
-- [ ] **Master push access for the workflow** — PSR pushes the release commit + tag to
-      `master`, which is protected. Pick one:
-      1. *Preferred:* put `master` under a ruleset and add the **GitHub Actions** app to
+- [ ] **Main push access for the workflow** — PSR pushes the release commit + tag to
+      `main`, which is protected. Pick one:
+      1. *Preferred:* put `main` under a ruleset and add the **GitHub Actions** app to
          its Bypass list (*Always allow*). `GITHUB_TOKEN` then pushes cleanly, and release
          commits trigger no recursive workflow runs.
       2. *Fallback:* a repo admin creates a fine-grained PAT (this repo only,
@@ -71,12 +83,12 @@ you also remove `allow_zero_version`) becomes 1.0.0.
 
 1. Ensure CI is green on `dev`.
 2. (Optional) dry run — see below.
-3. Open a PR `dev` → `master`; the diff is the release content. Merge it.
+3. Open a PR `dev` → `main`; the diff is the release content. Merge it.
 4. Watch *Actions → Release*. Verify afterwards:
    - PyPI shows the new version (with project links and classifiers);
    - `pip install tidysdmx==<version>` works;
    - the `vX.Y.Z` tag, GitHub Release (with dists attached), and CHANGELOG entry exist.
-5. Back-merge `master` → `dev`.
+5. Back-merge `main` → `dev`.
 
 ## Dry runs
 
@@ -85,19 +97,19 @@ you also remove `allow_zero_version`) becomes 1.0.0.
   publishing. GitHub only lists a `workflow_dispatch` workflow in the Actions tab
   once its file exists on the default branch, so the *Release* entry (and its
   *Run workflow* button) only appears after the first release PR has been merged
-  to `master`.
+  to `main`.
 - **Locally** (works any time, including before the first release):
-  semantic-release only computes releases on a branch named `master`/`main`, so
+  semantic-release only computes releases on a branch named `main`, so
   running it on `dev` fails with "branch not in any release groups". Instead,
-  simulate the post-merge state on a temporary **local** `master` — nothing is
+  simulate the post-merge state on a temporary **local** `main` — nothing is
   pushed at any point:
 
   ```bash
   git fetch origin
-  git checkout -B master origin/dev     # local master at dev's tip = what master will contain after the release PR
-  poetry run semantic-release -v --noop version
+  git checkout -B main origin/dev     # local main at dev's tip = what main will contain after the release PR
+  make release-dry
   git checkout dev
-  git branch -f master origin/master    # restore your local master
+  git branch -f main origin/main    # restore your local main
   ```
 
   Expected output: `The next version is: X.Y.Z!` followed by `[NOP]` lines showing
@@ -105,7 +117,7 @@ you also remove `allow_zero_version`) becomes 1.0.0.
 
 ## Troubleshooting & manual fallback
 
-- **Push rejected (protected branch):** complete the "master push access" setup above,
+- **Push rejected (protected branch):** complete the "main push access" setup above,
   then re-run via *Actions → Release → Run workflow*. Nothing was tagged or published.
 - **"No release will be made":** no `feat`/`fix`/`perf` commits since the last tag.
   Expected for doc/chore-only merges.
@@ -115,8 +127,8 @@ you also remove `allow_zero_version`) becomes 1.0.0.
 
   ```bash
   git checkout vX.Y.Z
-  poetry build
-  poetry publish -u __token__ -p <pypi-token>
+  uv build
+  uv publish --token <pypi-token>
   ```
 
   PyPI versions are immutable — never delete and re-upload a version.

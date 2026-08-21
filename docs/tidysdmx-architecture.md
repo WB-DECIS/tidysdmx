@@ -74,17 +74,16 @@ The table below captures the philosophical gap at each stage of the workflow:
 from pysdmx.api import fmr
 from pysdmx.io.format import StructureFormat
 
-client = fmr.RegistryClient("https://fmr.example.com/FMR/sdmx/v2/",
-                             format=StructureFormat.FUSION_JSON)
+client = fmr.RegistryClient(
+    "https://fmr.example.com/FMR/sdmx/v2/", format=StructureFormat.FUSION_JSON
+)
 schema = client.get_schema("dataflow", "WB", "WDI", "1.0.0")
 
 # tidysdmx — analyst passes the ID they already have
 from tidysdmx import fetch_schema
 
 schema = fetch_schema(
-    base_url="https://fmr.example.com",
-    artefact_id="WB:WDI(1.0.0)",
-    context="dataflow"
+    base_url="https://fmr.example.com", artefact_id="WB:WDI(1.0.0)", context="dataflow"
 )
 ```
 
@@ -100,13 +99,19 @@ schema = fetch_schema(
 
 ```python
 # pysdmx — analyst must understand Component structure
+from pysdmx.model import Role
+
 mandatory = [c.id for c in schema.components if schema.components[c.id].required]
-coded     = [c.id for c in schema.components if schema.components[c.id].local_codes is not None]
-dims      = [c.id for c in schema.components
-             if schema.components[c.id].role == px.model.Role.DIMENSION]
+coded = [
+    c.id for c in schema.components if schema.components[c.id].local_codes is not None
+]
+dims = [
+    c.id for c in schema.components if schema.components[c.id].role == Role.DIMENSION
+]
 
 # tidysdmx — one call, plain dict
 from tidysdmx import extract_validation_info
+
 valid = extract_validation_info(schema)
 # valid["mandatory_comp"] → ["FREQ", "REF_AREA", "TIME_PERIOD", "OBS_VALUE", ...]
 # valid["coded_comp"]     → ["FREQ", "REF_AREA", "INDICATOR"]
@@ -160,10 +165,11 @@ For non-programmers or mixed technical/non-technical teams, tidysdmx generates a
 ```python
 from tidysdmx import fetch_schema, extract_component_ids, write_excel_mapping_template
 
-schema     = fetch_schema(base_url, "WB:WDI(1.0.0)", "dataflow")
+schema = fetch_schema(base_url, "WB:WDI(1.0.0)", "dataflow")
 components = extract_component_ids(schema)
-write_excel_mapping_template(components, rep_maps=["REF_AREA", "INDICATOR"],
-                              output_path=Path("mapping.xlsx"))
+write_excel_mapping_template(
+    components, rep_maps=["REF_AREA", "INDICATOR"], output_path=Path("mapping.xlsx")
+)
 ```
 
 The workbook has a `COMP_MAPPING` sheet (source component → target component, with a `MAPPING_RULES` column accepting `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
@@ -220,10 +226,14 @@ df = map_to_sdmx(df, mapping)
 #### Path B — pysdmx `StructureMap` → `map_structures()`
 
 ```python
-from tidysdmx import map_structures, build_structure_map_from_template_wb, parse_mapping_template_wb
+from tidysdmx import (
+    map_structures,
+    build_structure_map_from_template_wb,
+    parse_mapping_template_wb,
+)
 
 mappings = parse_mapping_template_wb("mapping.xlsx")
-smap     = build_structure_map_from_template_wb(mappings, agency="WB")
+smap = build_structure_map_from_template_wb(mappings, agency="WB")
 
 result_df = map_structures(df, smap)
 ```
@@ -277,11 +287,11 @@ from tidysdmx import create_schema_from_table
 schema = create_schema_from_table(
     dataframe=df,
     dimensions=["FREQ", "REF_AREA"],
-    time_dimension="YEAR",         # mapped to standard TIME_PERIOD component
+    time_dimension="YEAR",  # mapped to standard TIME_PERIOD component
     measure="OBS_VALUE",
     attributes=["OBS_STATUS"],
     agency_id="WB",
-    schema_id="INFERRED_WDI"
+    schema_id="INFERRED_WDI",
 )
 ```
 
@@ -309,7 +319,7 @@ from tidysdmx import validate_dataset_local, extract_validation_info
 errors = validate_dataset_local(df, schema=schema)
 
 # Or pre-compute validation info for reuse across many datasets
-valid  = extract_validation_info(schema)
+valid = extract_validation_info(schema)
 errors = validate_dataset_local(df, valid=valid)
 
 # errors is a plain pd.DataFrame:

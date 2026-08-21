@@ -67,13 +67,12 @@ class TestFilterRows:
         assert result is not sample_df  # Distinct object (copy)
 
     @pytest.mark.parametrize(
-        "codelist_ids,expected_rows",
+        ("codelist_ids", "expected_rows"),
         # filter_rows() does not remove None currently.
         # This is reflected in the expected results of the unit tests
         # This might not be the behavior that we want
         # May need to be changed
         [
-            # ({"code": ["1", "2"]}, [0, 1]),  # Filter by numeric column
             ({"status": ["A", "C"]}, [0, 2, 4]),  # Filter by string column.
             ({"code": ["1", "2"], "status": ["A", "C"]}, [0]),  # Combined filter
             ({"code": ["do_not_exist"]}, [3]),  # No matches.
@@ -133,10 +132,9 @@ class TestFilterTidyRaw:
         result = filter_tidy_raw(sdmx_df, sdmx_schema)
         assert isinstance(result, pd.DataFrame)
 
-    def test_filter_tidy_raw_filters_invalid_codes(
-        self, sdmx_schema, sdmx_df, incorrect_ind_code="INCORRECT_IND"
-    ):
+    def test_filter_tidy_raw_filters_invalid_codes(self, sdmx_schema, sdmx_df):
         """Check that rows with invalid codes are removed."""
+        incorrect_ind_code = "INCORRECT_IND"
         result = filter_tidy_raw(sdmx_df, sdmx_schema)
 
         # Assert that invalid code row is removed
@@ -177,7 +175,7 @@ class TestFilterTidyRaw:
             filter_tidy_raw()
 
     @pytest.mark.parametrize(
-        "invalid_df,invalid_schema",
+        ("invalid_df", "invalid_schema"),
         [
             (None, None),
             ("not_a_dataframe", "not_a_schema"),

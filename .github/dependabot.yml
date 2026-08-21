@@ -1,0 +1,54 @@
+version: 2
+
+updates:
+  # Dependabot has understood pyproject.toml + uv.lock natively since the uv
+  # ecosystem reached GA in March 2025, so it keeps the lockfile in sync rather
+  # than only bumping constraints.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Pull requests land on the integration branch, not the default branch —
+    # this repository releases from `main` and integrates on `dev`.
+    target-branch: dev
+    # Wait for a release to settle before proposing it. Without this the implicit
+    # default is 3 days, which zizmor's dependabot-cooldown audit rejects (it
+    # requires 7). Deviation from pypackage-template, which has neither key.
+    cooldown:
+      default-days: 7
+    commit-message:
+      # Conventional Commits, so semantic-release classifies these correctly:
+      # `build:` is in exclude_commit_patterns and never triggers a release.
+      # That is the right default for a library — the lockfile only affects
+      # development and CI. When a bump must reach users (a CVE forces a floor
+      # raise on a runtime dependency), retitle it `fix(deps): ...` so a patch
+      # release ships — see SECURITY.md.
+      prefix: build
+      prefix-development: chore
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Actions are pinned to commit SHAs, which only stay current if something
+  # bumps them. This is that something.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Pull requests land on the integration branch, not the default branch —
+    # this repository releases from `main` and integrates on `dev`.
+    target-branch: dev
+    # Wait for a release to settle before proposing it. Without this the implicit
+    # default is 3 days, which zizmor's dependabot-cooldown audit rejects (it
+    # requires 7). Deviation from pypackage-template, which has neither key.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

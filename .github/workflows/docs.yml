@@ -1,47 +1,84 @@
-name: CI Docs
+name: Docs
 
 on:
   push:
-    branches:
-      - dev
+  # `branching_model: main_dev` in .copier-answers.yml — the template renders
+  # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
+    branches: [main, dev]
   pull_request:
+  # Callable so release.yml can redeploy the site from the newly created tag.
+  # Without that, the site never rebuilds for a release: the release commit
+  # carries [skip ci] and is pushed with GITHUB_TOKEN, which by design cannot
+  # trigger workflows, and neither a tag push nor a Release event matches the
+  # branch filter above. The published version and changelog would sit one
+  # release behind, permanently.
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build the docs from. Defaults to the triggering ref.
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A literal prefix and the CALLER's ref, so the push build and the release
+  # redeploy land in the SAME group and the later one cancels the earlier.
+  # `github.workflow` cannot appear here: a called workflow inherits the caller's
+  # github context, so it reads "Release" for the redeploy and "Docs" for the
+  # push build. With `inputs.ref` in the key too, the two runs racing to publish
+  # the same branch could never cancel each other, and the pre-release build
+  # could finish last and republish the older site.
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-docs:
-    name: "Build Docs"
+  build:
+    name: Build docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # Full history for accurate page timestamps
-
-      - uses: actions/setup-python@v6
+          ref: ${{ inputs.ref || github.ref }}
+          # Full history so great-docs can date pages accurately.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.12"
-
-      - name: Install package and dependencies
-        run: |
-          python -m pip install poetry
-          poetry install
-          poetry run pip install great-docs
-
-      - name: Set up Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # great-docs introspects the installed package (`dynamic: true` in
+      # great-docs.yml), so the project itself must be installed, not just the
+      # docs group.
+      # Quarto arrives via the docs group (quarto-cli on PyPI), so its version is
+      # pinned in uv.lock rather than in a separate setup action — the same
+      # binary a contributor gets from `make docs`.
+      - run: uv sync --locked --group docs
+      - name: Show Quarto version
+        run: uv run quarto --version
       - name: Build docs
-        run: poetry run great-docs build
-
-      - name: Save docs artifact
-        uses: actions/upload-artifact@v7
+        run: uv run great-docs build
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docs-html
           path: great-docs/_site
+          if-no-files-found: error
 
-  publish-docs:
-    name: "Publish Docs"
+  publish:
+    name: Publish to GitHub Pages
+    needs: build
+    # Build runs on dev and on pull requests so a broken docs build is caught
+    # early, but only main deploys. This is what stops the published site from
+    # documenting unreleased API — the defect that made pypackage-template
+    # mandate a single branch in the first place.
+    # `inputs.ref` is only set when release.yml calls this workflow, which it
+    # does only after an actual release.
+    if: inputs.ref != '' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    needs: "build-docs"
-    if: github.ref == 'refs/heads/dev'
     permissions:
       pages: write
       id-token: write
@@ -49,65 +86,15 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/download-artifact@v7
+      - name: Download docs artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: docs-html
           path: great-docs/_site
-
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: great-docs/_site
-
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
-
-  preview-docs:
-    name: "Preview Docs"
-    runs-on: ubuntu-latest
-    needs: "build-docs"
-    if: github.event_name == 'pull_request'
-    permissions:
-      deployments: write
-      pull-requests: write
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: docs-html
-          path: great-docs/_site
-
-      # Start deployment
-      - name: Configure pull release name
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          echo "RELEASE_NAME=pr-${{ github.event.number }}" >> $GITHUB_ENV
-
-      - name: Configure branch release name
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          # use branch name, but replace slashes. E.g. feat/a -> feat-a
-          echo "RELEASE_NAME=${GITHUB_REF_NAME//\//-}" >> $GITHUB_ENV
-
-      # Deploy
-      - name: Create Github Deployment
-        uses: bobheadxi/deployments@v1
-        id: deployment
-        if: ${{ !github.event.pull_request.head.repo.fork }}
-        with:
-          step: start
-          token: ${{ secrets.GITHUB_TOKEN }}
-          env: ${{ env.RELEASE_NAME }}
-          ref: ${{ github.head_ref }}
-          logs: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-      # Always close the deployment so it doesn't sit in pending forever.
-      - name: Finish Github Deployment
-        uses: bobheadxi/deployments@v1
-        if: always() && steps.deployment.outputs.deployment_id != ''
-        with:
-          step: finish
-          token: ${{ secrets.GITHUB_TOKEN }}
-          status: ${{ job.status }}
-          env: ${{ steps.deployment.outputs.env }}
-          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

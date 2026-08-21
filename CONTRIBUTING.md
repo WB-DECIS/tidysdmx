@@ -57,11 +57,24 @@ Ready to contribute? Here's how to set up `tidysdmx` for local development.
         $ ./tidysdmx/Scripts/activate
         ```
 
-3. Install `tidysdmx` using `poetry`:
+3. Install `tidysdmx` and its development tooling with [uv](https://docs.astral.sh/uv/):
 
     ```console
-    $ poetry install
+    $ make install
     ```
+
+    That runs `uv sync --all-groups` and installs the git hooks. The hooks
+    include a `commit-msg` gate that rejects non-Conventional commit messages,
+    and a `pre-push` gate that runs the unit tests, so both need `uv` on your
+    `PATH`.
+
+    Before opening a pull request, run what CI runs:
+
+    ```console
+    $ make check
+    ```
+
+    Pull requests target **`dev`**, not `main`. `main` is the release branch.
 
 4. Use `git` (or similar) to create a branch for local development and make your changes:
 
@@ -82,10 +95,18 @@ Before you submit a pull request, check that it meets these guidelines:
 3. The pull request should work for all currently supported operating systems and versions of Python.
 4. Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org/)
    (`feat:`, `fix:`, `docs:`, …) — they drive automated versioning and the changelog.
+5. Title the PR as a Conventional Commit too. CI validates the title with the same
+   checker as the `commit-msg` hook, so a malformed title fails the `All checks`
+   gate rather than silently producing no release later.
+6. Where an input is genuinely untrusted — a parsed Excel workbook, a JSON mapping
+   file, an FMR response — annotate it `object` and narrow it with `isinstance`,
+   raising `TypeError`. Static checking verifies that annotations are *consistent*;
+   it says nothing about the values that arrive at runtime. See
+   `.claude/rules/python-conventions.md`.
 
 ## Releasing
 
-Releases to PyPI are automated. See [RELEASING.md](RELEASING.md).
+Releases to PyPI are automated. See [RELEASING.md](https://github.com/WB-DECIS/tidysdmx/blob/main/RELEASING.md).
 
 ## Code of Conduct
 

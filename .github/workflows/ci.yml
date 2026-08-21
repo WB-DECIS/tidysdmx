@@ -2,56 +2,162 @@ name: CI
 
 on:
   push:
-    branches: [master, dev]
+  # `branching_model: main_dev` in .copier-answers.yml — the template renders
+  # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
+    branches: [main, dev]
   pull_request:
-    branches: [master, dev]
+    # `edited` so a retitled PR re-runs the title gate below. The default
+    # activity types are opened/synchronize/reopened only, which leaves a red
+    # pr-title check — and therefore a red "All checks" — stuck until someone
+    # pushes a commit, even after the title has been fixed. The cost is
+    # re-running the rest of CI on a title or body edit; the concurrency group
+    # above cancels the superseded run.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install --only dev
+      - run: uv sync --locked --only-group dev
       - name: Ruff check
-        run: poetry run ruff check .
+        run: uv run ruff check --output-format=github .
       - name: Ruff format check
-        run: poetry run ruff format --check .
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # mypy needs the package's own dependencies installed to resolve imports.
+      - run: uv sync --locked
+      - name: mypy
+        run: uv run mypy
 
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install
-      - name: Run unit tests with coverage
-        run: |
-          poetry run pytest -m "not integration" --cov --cov-report=xml --cov-report=term-missing
-      - name: Upload coverage artifact
+      - run: uv sync --locked
+      - name: Unit tests with coverage
+        run: >-
+          uv run pytest -m "not integration"
+          --cov --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage
         if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: coverage.xml
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+      # Catches the classic src-layout failure where the wheel builds fine but
+      # ships nothing importable. Installing into an isolated environment is the
+      # only way to see it — an editable install in the repo always "works".
+      - name: Verify the wheel is importable
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import tidysdmx; print(tidysdmx.__version__)"
+
+  pr-title:
+    name: PR title is a Conventional Commit
+    # Squash-merging makes the PR title the commit message that lands on the
+    # release branch, and nothing else validates it — the commit-msg hook only
+    # ever sees the individual commits. Same tool, same version as that hook,
+    # so the two cannot disagree about what "conventional" means. Push builds
+    # skip this job; the checks gate below counts that skip as a pass.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # No checkout in this job, so there is no lockfile to key a cache on.
+          enable-cache: false
+      - name: Validate the title
+        env:
+          # The title is attacker-controlled input. It must reach the script
+          # through the environment — interpolating it into `run:` directly
+          # would be a template injection.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          # Version kept in lockstep with the conventional-pre-commit rev in
+          # .pre-commit-config.yaml.
+          uvx conventional-pre-commit@4.4.0 "$RUNNER_TEMP/pr-title.txt"
+
+  # Branch protection should require THIS check and nothing else from this
+  # workflow: the matrix job names ("Test (Python 3.12)") change whenever the
+  # supported Python range moves, and a renamed required check blocks every
+  # merge until someone edits the ruleset by hand.
+  checks:
+    name: All checks
+    needs: [lint, typecheck, test, build, pr-title]
+    # always(): without it a failed dependency SKIPS this job, and a skipped
+    # required check shows as eternally "pending" to branch protection.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide from the needed jobs' results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          # `skipped` is deliberately a pass: pr-title does not run on push
+          # builds. `failure` and `cancelled` are not.
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "$RESULTS"
+          test "$FAILED" = "false"

@@ -216,10 +216,7 @@ def build_date_pattern_map(
 
     Examples:
         >>> dpm = build_date_pattern_map(
-        ...     source="DATE",
-        ...     target="TIME_PERIOD",
-        ...     pattern="MMM yy",
-        ...     frequency="M"
+        ...     source="DATE", target="TIME_PERIOD", pattern="MMM yy", frequency="M"
         ... )
         >>> print(dpm)
         source: DATE, target: TIME_PERIOD, pattern: MMM yy, frequency: M
@@ -328,13 +325,13 @@ def build_value_map_list(
     Examples:
         >>> import pandas as pd
         >>> data = {
-        ...     'source': ['BE', 'FR'],
-        ...     'target': ['BEL', 'FRA'],
-        ...     'valid_from': ['2020-01-01', None],
-        ...     'valid_to': ['2025-12-31', None]
+        ...     "source": ["BE", "FR"],
+        ...     "target": ["BEL", "FRA"],
+        ...     "valid_from": ["2020-01-01", None],
+        ...     "valid_to": ["2025-12-31", None],
         ... }
         >>> df = pd.DataFrame(data)
-        >>> value_maps = build_value_map_list(df, 'source', 'target')
+        >>> value_maps = build_value_map_list(df, "source", "target")
         >>> isinstance(value_maps[0], ValueMap)
         True
     """
@@ -375,7 +372,7 @@ def build_value_map_list(
 
 
 @typechecked
-def build_multi_value_map_list(
+def build_multi_value_map_list(  # noqa: C901 - column/validity handling; splits with ARCH-02 (B1)
     df: pd.DataFrame,
     source_cols: Sequence[str],
     target_cols: Sequence[str],
@@ -412,16 +409,14 @@ def build_multi_value_map_list(
     Examples:
         >>> import pandas as pd
         >>> data = {
-        ...     'country': ['DE', 'CH'],
-        ...     'currency_src': ['LC', 'LC'],
-        ...     'currency_tgt': ['EUR', 'CHF'],
-        ...     'region_tgt': ['EU', 'Non-EU']
+        ...     "country": ["DE", "CH"],
+        ...     "currency_src": ["LC", "LC"],
+        ...     "currency_tgt": ["EUR", "CHF"],
+        ...     "region_tgt": ["EU", "Non-EU"],
         ... }
         >>> df = pd.DataFrame(data)
         >>> maps = build_multi_value_map_list(
-        ...     df,
-        ...     ['country', 'currency_src'],
-        ...     ['currency_tgt', 'region_tgt']
+        ...     df, ["country", "currency_src"], ["currency_tgt", "region_tgt"]
         ... )
         >>> len(maps)
         2
@@ -548,15 +543,19 @@ def build_representation_map(
     Examples:
         >>> import pandas as pd
         >>> data = {
-        ...     'source': ['BE', 'FR'],
-        ...     'target': ['BEL', 'FRA'],
-        ...     'valid_from': ['2020-01-01', None],
-        ...     'valid_to': ['2025-12-31', None]
+        ...     "source": ["BE", "FR"],
+        ...     "target": ["BEL", "FRA"],
+        ...     "valid_from": ["2020-01-01", None],
+        ...     "valid_to": ["2025-12-31", None],
         ... }
         >>> df = pd.DataFrame(data)
         >>> rm = build_representation_map(
-        ...     df, 'urn:source:codelist', 'urn:target:codelist', 'RM1',
-        ...     'Country Map', 'ECB'
+        ...     df,
+        ...     "urn:source:codelist",
+        ...     "urn:target:codelist",
+        ...     "RM1",
+        ...     "Country Map",
+        ...     "ECB",
         ... )
         >>> isinstance(rm, RepresentationMap)
         True
@@ -766,10 +765,10 @@ def build_single_component_map(
     Examples:
         >>> import pandas as pd
         >>> data = {
-        ...     'source': ['BE', 'FR'],
-        ...     'target': ['BEL', 'FRA'],
-        ...     'valid_from': ['2020-01-01', None],
-        ...     'valid_to': ['2025-12-31', None]
+        ...     "source": ["BE", "FR"],
+        ...     "target": ["BEL", "FRA"],
+        ...     "valid_from": ["2020-01-01", None],
+        ...     "valid_to": ["2025-12-31", None],
         ... }
         >>> df = pd.DataFrame(data)
         >>> cm = build_single_component_map(
@@ -780,7 +779,7 @@ def build_single_component_map(
         ...     id="CM1",
         ...     name="Country Component Map",
         ...     source_cl="urn:source:codelist",
-        ...     target_cl="urn:target:codelist"
+        ...     target_cl="urn:target:codelist",
         ... )
         >>> isinstance(cm, ComponentMap)
         True
@@ -881,11 +880,13 @@ def build_multi_component_map(
 
     Examples:
         >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     "COUNTRY": ["DE", "CH"],
-        ...     "CURRENCY": ["LC", "LC"],
-        ...     "ISO_CURRENCY": ["EUR", "CHF"],
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "COUNTRY": ["DE", "CH"],
+        ...         "CURRENCY": ["LC", "LC"],
+        ...         "ISO_CURRENCY": ["EUR", "CHF"],
+        ...     }
+        ... )
         >>> cm = build_multi_component_map(
         ...     df,
         ...     source_components=["COUNTRY", "CURRENCY"],
@@ -1281,7 +1282,7 @@ def create_schema_from_table(
 
 # --- Excel template parsing ---
 @typechecked
-def _parse_info_sheet(
+def _parse_info_sheet(  # noqa: C901 - one branch per optional INFO key; splits with ARCH-02 (B1)
     sheets: dict[str, pd.DataFrame], sheet_name: str = "INFO"
 ) -> pd.DataFrame:
     """Parse the INFO sheet into key-value metadata.
@@ -1753,7 +1754,7 @@ def gen_urn(
 
 
 @typechecked
-def build_structure_map_from_template_wb(
+def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule type; splits with ARCH-02 (B1)
     mappings: dict[str, pd.DataFrame],
     agency: str = "SDMX",
     structure_map_id: str = "WB_STRUCTURE_MAP",
@@ -1807,7 +1808,7 @@ def build_structure_map_from_template_wb(
         ...             "MAPPING_RULES": ["fixed:VAL"],
         ...         }
         ...     ),
-        ...     "REP_MAPPING": pd.DataFrame({"source": ["a"], "target": ["b"]})
+        ...     "REP_MAPPING": pd.DataFrame({"source": ["a"], "target": ["b"]}),
         ... }
         >>> smap = build_structure_map_from_template_wb(mappings)
         >>> isinstance(smap, StructureMap)
@@ -1856,7 +1857,7 @@ def build_structure_map_from_template_wb(
 
             if mapping_rule == "fixed":
                 fixed_val = parsed["fixed_value"]  # guaranteed non-empty by parser
-                generated_maps.append(build_fixed_map(target_id, fixed_val))  # type: ignore[arg-type]
+                generated_maps.append(build_fixed_map(target_id, fixed_val))
 
             elif mapping_rule == "implicit":
                 generated_maps.append(
@@ -1987,10 +1988,12 @@ def _extract_all_artefact_ids(info_df: pd.DataFrame) -> dict[str, str]:
         TypeError: If info_df is not a pandas DataFrame.
 
     Examples:
-        >>> df = pd.DataFrame({
-        ...     'Key': ['dataflow', 'datastructure', 'provisionagreement'],
-        ...     'Value': ['AGENCY:DF1(1.0)', 'AGENCY:DSD1(1.0)', 'AGENCY:PA1(1.0)']
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "Key": ["dataflow", "datastructure", "provisionagreement"],
+        ...         "Value": ["AGENCY:DF1(1.0)", "AGENCY:DSD1(1.0)", "AGENCY:PA1(1.0)"],
+        ...     }
+        ... )
         >>> _extract_all_artefact_ids(df)
         {'dataflow': 'DF1', 'datastructure': 'DSD1', 'provisionagreement': 'PA1'}
     """

@@ -1,72 +1,128 @@
 [project]
 name = "tidysdmx"
-dynamic = ["version", "description", "authors", "license", "readme", "dependencies", "requires-python", "classifiers"]
-keywords = ["sdmx", "statistics", "data", "metadata", "fmr", "pysdmx"]
-
-[project.urls]
-Homepage = "https://github.com/WB-DECIS/tidysdmx"
-Repository = "https://github.com/WB-DECIS/tidysdmx"
-Documentation = "https://wb-decis.github.io/tidysdmx/"
-Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/master/CHANGELOG.md"
-Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
-
-[tool.poetry]
-version = "0.9.0"
+# Managed by python-semantic-release — never hand-edit. See RELEASING.md.
+version = "0.10.0"
 description = "A toolbox to work with SDMX data"
-authors = ["Tony Fujs", "Daniel Gil-Sanchez"]
-license = "MIT"
 readme = "README.md"
-packages = [{ include = "tidysdmx", from = "src" }]
-# License and Python-version classifiers are auto-added by Poetry
-# ("classifiers" is listed in [project] dynamic). 3.11 must be listed
-# manually: auto-enrichment skips it because >=3.11.9 excludes part of 3.11.
+# 3.11.9 rather than 3.11: the floor is a patch-level constraint, which the
+# template's `python_min` question cannot express. Documented deviation.
+requires-python = ">=3.11.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Tony Fujs", email = "tonyfujs@gmail.com" },
+    { name = "Daniel Gil-Sanchez" },
+]
+keywords = ["sdmx", "statistics", "data", "metadata", "fmr", "pysdmx"]
+# Licence classifiers are deliberately absent: PEP 639 supersedes them with the
+# SPDX `license` expression above. Python version classifiers are now written by
+# hand — Poetry used to synthesise them, hatchling does not.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "pysdmx>=1.13.0,<2",
+    "pandas>=2.2.3,<3",
+    "numpy>=1.26",
+    "openpyxl>=3.1.5,<4",
+    # typeguard is scheduled for removal once mypy reaches strict — see
+    # .claude/rules/python-conventions.md. Until then it is a runtime dependency
+    # because @typechecked raises TypeCheckError as part of the public contract.
+    "typeguard>=4.4.4,<5",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.11.9"
-pysdmx = "^1.13.0"
-pandas = "^2.2.3"
-numpy = ">=1.26"
-typeguard = "^4.4.4"
-openpyxl = "^3.1.5"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.5"
-pytest-cov = "^6.1.1"
-python-semantic-release = {version = "^10.2.0", python = ">=3.11.9"}
-myst-nb = "^1.3.0"
-sphinx-autoapi = "^3.6.1"
-sphinx-rtd-theme = "^3.0.2"
-jupyterlab = "^4.4.10"
-ipykernel = "^7.1.0"
-ipython = "^9.6.0"
-notebook = "^7.4.7"
-ruff = "^0.14.6"
-pre-commit = "^4.5.0"
-nbstripout = "^0.8.2"
+[project.urls]
+Homepage = "https://github.com/WB-DECIS/tidysdmx"
+Repository = "https://github.com/WB-DECIS/tidysdmx"
+Documentation = "https://wb-decis.github.io/tidysdmx/"
+Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/main/CHANGELOG.md"
+Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.32"]
+build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/tidysdmx"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "CHANGELOG.md"]
+
+# ----------------------------------------------------------------------
+# Dependency groups (PEP 735). `uv sync` installs `dev` by default;
+# `uv sync --all-groups` installs everything.
+# ----------------------------------------------------------------------
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "pytest-cov>=7.1",
+    "mypy>=2.3",
+    # This is a floor, not a pin; uv.lock is what actually fixes the version
+    # (0.16.4 today). Keep that resolved version and the ruff-pre-commit rev in
+    # .pre-commit-config.yaml moving together, or a commit passes the hook and
+    # then fails CI.
+    "ruff>=0.16.3",
+    "pre-commit>=4.6",
+]
+# great-docs is pinned exactly rather than floated: it is a young, pre-1.0
+# project whose config schema can still change, and an unpinned docs tool
+# silently breaks the site. This replaces the previous
+# `poetry run pip install great-docs`, which installed outside the lockfile.
+# quarto-cli is the official Posit-published Quarto binary, so the Quarto
+# version lives in uv.lock and `make docs` matches the CI docs job.
+docs = ["great-docs==0.17.0", "quarto-cli==1.10.18"]
+release = ["python-semantic-release>=10.2.0,<11"]
+security = ["pip-audit>=2.10"]
+# Documented deviation from pypackage-template, which has no notebooks. Kept out
+# of `dev` so CI does not install the Jupyter stack merely to run ruff — most of
+# this repository's pip-audit findings come from it.
+notebooks = [
+    "jupyterlab>=4.4.10",
+    "ipykernel>=7.1.0",
+    "ipython>=9.6.0",
+    "notebook>=7.4.7",
+    "nbstripout>=0.8.2",
+]
+
+# ----------------------------------------------------------------------
+# Release automation — see RELEASING.md
+# ----------------------------------------------------------------------
 [tool.semantic_release]
 version_toml = [
-    "pyproject.toml:tool.poetry.version",
+    "pyproject.toml:project.version",
 ]
 allow_zero_version = true    # stay on 0.x; without this the next release would jump to 1.0.0
 major_on_zero = false        # while on 0.x, breaking changes bump minor; set true to release 1.0.0
-tag_format = "v{version}"    # matches the existing v0.2.0..v0.8.0 tags
-# The release workflow's PSR container has no Poetry preinstalled.
-build_command = "python -m pip install 'poetry>=2.3,<3' && poetry build"
+tag_format = "v{version}"    # matches the existing v0.2.0..v0.10.0 tags
 commit_message = "chore(release): {version} [skip ci]"
+
+# `uv.lock` records this project's OWN version, so stamping project.version
+# without re-locking leaves the lockfile stale and every later `uv sync --locked`
+# fails ("The lockfile at `uv.lock` needs to be updated"). semantic-release runs
+# build_command after writing the version and before creating the commit, and
+# `assets` are staged into that commit — so this pair keeps the two in step.
+#
+# It is not a packaging step: distributions are still built in a dedicated
+# `build` job in .github/workflows/release.yml, against the newly created tag.
+# Because this needs uv, that workflow runs semantic-release as a CLI on the
+# runner rather than through its Docker container action, which cannot see
+# anything installed on the runner.
+build_command = "uv lock"
+assets = ["uv.lock"]
+
+# Releases come from `main` only. This repository keeps a two-branch model
+# (`dev` for integration, `main` for releases), so this stanza is what stops a
+# `dev` build from ever cutting a release.
+[tool.semantic_release.branches.main]
+match = "main"
 
 [tool.semantic_release.changelog]
 # "update" inserts new sections under insertion_flag and leaves the
@@ -90,9 +146,14 @@ changelog_file = "CHANGELOG.md"
 [tool.ruff]
 src = ["src"]
 target-version = "py311"
+line-length = 88
 # Notebooks are exploratory and managed via nbstripout, not ruff. Linting them
 # raises Jupyter-specific false positives (cross-cell imports/names), so exclude.
+# Documented deviation from pypackage-template, which ships no notebooks.
 extend-exclude = ["notebooks"]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
 select = [
@@ -104,33 +165,167 @@ select = [
     "B",    # flake8-bugbear — common bug patterns
     "SIM",  # flake8-simplify — simplifiable constructs
     "RUF",  # Ruff-specific rules
+    "N",    # pep8-naming
+    "ANN",  # flake8-annotations
+    "S",    # flake8-bandit — security linting without a separate bandit run
+    "T20",  # flake8-print — no stray print() in library code
+    "PT",   # flake8-pytest-style
+    "ERA",  # eradicate — commented-out code
+    "C90",  # mccabe complexity
 ]
 ignore = [
-    "D107",  # allow missing docstrings on __init__
-    "D105",  # allow missing docstrings on magic methods
+    "D107",   # allow missing docstrings on __init__
+    "D105",   # allow missing docstrings on magic methods
+    "ANN401", # allow explicit Any where it is genuinely the right type
 ]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.mccabe]
+# The template's value. The four functions that exceed it today carry a
+# `# noqa: C901` with a reason, rather than the limit being raised for
+# everything — a new complex function still gets caught.
+max-complexity = 10
+
 [tool.ruff.lint.per-file-ignores]
-# Docstrings are not required anywhere in tests (module/class/method/function).
-"tests/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D106"]
+"tests/**/*.py" = [
+    # Docstrings are not required anywhere in tests, bare asserts are the point,
+    # and annotating every fixture buys nothing.
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D106",
+    "S101",
+    "ANN",
+    # Cassette fixtures load pickled pysdmx Schema objects from files this
+    # repository generates and commits itself. Not untrusted input.
+    "S301",
+    # TODO(TEST-15): 54 `pytest.raises` calls lack `match=`. Burning those down
+    # is its own change — see docs/reviews/2026-06-architecture-review.md.
+    # Remove this line once they are done.
+    "PT011",
+]
+# The fxtr_* modules carry `if __name__ == "__main__"` cassette-regeneration
+# blocks; their print() calls are progress output for a human running them, not
+# stray debugging left in library code.
+"tests/fixtures/fxtr_*.py" = ["T20"]
+
+# ----------------------------------------------------------------------
+# Static typing
+#
+# pypackage-template's endpoint is `strict = true` over src and tests. This
+# repository shipped py.typed with annotations no checker had ever validated,
+# so the debt is real: 65 errors across 10 files on first run. Turning strict on
+# today would mean 65 blanket suppressions, which is worse than no checker.
+#
+# Instead: mypy runs and must stay green, and each module below is exempted only
+# from the specific error codes it still trips. Fix a module, delete its stanza.
+# When no stanzas remain, set `strict = true` and remove this comment.
+#
+# Burn-down order (cheapest first, by remaining error count):
+#   kedro.py (1) → tidy_raw.py (1) → mapping.py (4) → validation.py (6)
+#   → structures.py (11) → structure_map_writer.py (13)
+# ----------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# `warn_unused_configs` would flag the per-module stanzas below as they are
+# fixed, which is the signal we want when deleting them.
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# pysdmx ships no py.typed marker, and neither do openpyxl or the pandas stubs
+# we do not install. Untyped imports become Any rather than errors.
+# pysdmx does ship py.typed; it is listed here only so a future version that
+# drops it cannot silently degrade the MapRule alias below into a variable.
+# TODO: add `pandas-stubs` to the dev group and drop pandas from this list. It
+# is left out for now because turning on real pandas types surfaces a further
+# batch of errors that belongs in its own change.
+module = ["pysdmx.*", "openpyxl.*", "typeguard.*", "pandas.*", "numpy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Strict mode over a test suite demands annotations on every fixture and test
+# function — friction with no payoff. Matches the template.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+# --- Per-module debt. Each stanza is a TODO; delete it once the module is clean.
+
+[[tool.mypy.overrides]]
+# `pd.Series.__getitem__` on a possibly-None index expression.
+module = "tidysdmx.kedro"
+disable_error_code = ["operator"]
+
+[[tool.mypy.overrides]]
+# Passing a pandas Index where a list[str] is declared.
+module = "tidysdmx.tidy_raw"
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+# pysdmx types RepresentationMap fields as `RepresentationMap | str` (an
+# unresolved URN or the resolved object); this code assumes the resolved form
+# without narrowing. np.select's overloads reject a list of ndarray conditions.
+module = "tidysdmx.mapping"
+disable_error_code = ["union-attr", "call-overload"]
+
+[[tool.mypy.overrides]]
+module = "tidysdmx.validation"
+disable_error_code = ["arg-type", "call-overload"]
+
+[[tool.mypy.overrides]]
+module = "tidysdmx.structures"
+disable_error_code = ["arg-type", "assignment", "list-item", "var-annotated"]
+
+[[tool.mypy.overrides]]
+# The largest block. Includes StructureMap.__replace__, which pysdmx provides
+# via msgspec and which works at runtime — see the architecture review's mypy note.
+module = "tidysdmx.structure_map_writer"
+disable_error_code = ["arg-type", "call-arg", "union-attr"]
+
+[[tool.mypy.overrides]]
+# Tests construct pysdmx artefacts with deliberately wrong shapes to assert the
+# errors they raise, so argument-type complaints there are the point of the test.
+module = ["tests.test_structure_map_writer", "tests.test_structures", "tests.test_utils", "tests.fixtures.fxtr_schemas"]
+disable_error_code = ["arg-type", "call-arg", "var-annotated"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# --cov is deliberately NOT here: it would make `pytest -k one_test` trip the
+# coverage gate, which trains people to bypass the gate. Use `make cov` (or CI)
+# for a gated, measured run.
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+xfail_strict = true
 markers = [
     "unit: fast, isolated unit tests (no network)",
     "integration: tests that hit FMR or external services",
 ]
-addopts = "--strict-markers"
+# Warnings are errors so deprecations surface early. Prefer a class-level
+# `pytestmark = pytest.mark.filterwarnings(...)` next to the tests that need it
+# over adding a blanket ignore here — a scoped suppression disappears together
+# with the deprecated code it covers.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["src/tidysdmx"]
+relative_files = true
+# TODO(TEST-05): kedro.py imports no kedro APIs — partitioned datasets are plain
+# dicts of callables — so this exemption is unfounded and the module can be unit
+# tested with fakes. Note this is a hardcoded path: it must move if the module does.
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-fail_under = 70
+# Raised from 70. Actual coverage is ~89, and a gate 19 points below reality
+# cannot catch a regression. This is a floor, not a target: raise it again once
+# real coverage moves up.
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

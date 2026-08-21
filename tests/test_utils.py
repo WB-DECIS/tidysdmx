@@ -199,7 +199,7 @@ class TestExtractValidationInfo:
 
 class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
-        "context, expected",
+        ("context", "expected"),
         [
             ("dataflow", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
             ("datastructure", ["STRUCTURE", "STRUCTURE_ID", "ACTION"]),
@@ -370,13 +370,13 @@ class TestCreateMappingRules:
     def test_create_mapping_rules_type_error_for_components(self):
         """TypeCheckError when components is not a Sequence[str]."""
         with pytest.raises(TypeCheckError):
-            create_mapping_rules(123, {"D2"})  # type: ignore
+            create_mapping_rules(123, {"D2"})
 
     def test_create_mapping_rules_type_error_for_rep_maps(self):
         """TypeCheckError when rep_maps is not a Set[str] or None."""
         components = ["D1", "D2"]
         with pytest.raises(TypeCheckError):
-            create_mapping_rules(components, [1, 2])  # type: ignore
+            create_mapping_rules(components, [1, 2])
 
 
 class TestBuildExcelWorkbook:
@@ -481,7 +481,8 @@ class TestParseMappingTemplateWb:
         """Test parsing a valid mapping template."""
         result = parse_mapping_template_wb(mapping_template_path)
         assert isinstance(result, dict)
-        assert "REP_MAPPING" in result and "COMP_MAPPING" in result
+        assert "REP_MAPPING" in result
+        assert "COMP_MAPPING" in result
         assert isinstance(result["REP_MAPPING"], pd.DataFrame)
         assert isinstance(result["COMP_MAPPING"], pd.DataFrame)
 

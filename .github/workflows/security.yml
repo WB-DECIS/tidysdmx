@@ -1,0 +1,54 @@
+name: Security
+
+on:
+  push:
+  # `branching_model: main_dev` in .copier-answers.yml — the template renders
+  # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
+    branches: [main, dev]
+  pull_request:
+  schedule:
+    # Weekly, so a CVE published against an unchanged dependency still surfaces.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # Audit what is actually locked, across every group, rather than what the
+      # loose constraints in pyproject.toml would allow. Runs `make audit` — not
+      # a re-typed copy of it — so this and the local audit cannot drift: both
+      # use the pip-audit pinned in the `security` group, with the same flags.
+      - name: pip-audit over the resolved lockfile
+        run: make audit
+
+  workflows:
+    name: Workflow security lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Checks these workflows for template injection, credential persistence
+      # and excessive permissions.
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2

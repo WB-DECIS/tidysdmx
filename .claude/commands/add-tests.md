@@ -1,6 +1,6 @@
 ---
 description: Generate tests for new or changed functions
-argument-hint: "[module name or function name]"
+argument-hint: "[module or function name]"
 allowed-tools:
   - Bash
   - Read
@@ -10,20 +10,30 @@ allowed-tools:
   - Write
 ---
 
-Generate unit tests for the specified module or function following these rules:
+Write tests for `$ARGUMENTS`, or if no argument was given, for whatever changed
+on this branch relative to its base:
 
-1. **Find the target**: locate the module or function specified by `$ARGUMENTS`.
-   If no argument given, find functions changed since master: `git diff master...HEAD --name-only -- 'src/**/*.py'`
+```bash
+base=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || echo dev)
+git diff "$base...HEAD" --name-only -- 'src/**/*.py'
+```
 
-2. **Read the source** and existing tests for context.
+1. **Read the source** and any existing tests for that module, so you match the
+   established style rather than inventing a second one.
+2. **Check the conventions** in `.claude/rules/testing-conventions.md`. In short:
+   - place tests in `tests/test_<module>.py`, mirroring the source module
+   - group per function in a `class Test<FunctionName>:` block
+   - name them `test_<function>_<scenario>`
+   - one logical assertion per test
+   - reuse fixtures from `tests/fixtures/`; add new shared data there rather than
+     inlining it
+   - mark anything needing network `@pytest.mark.integration`
+3. **Cover all three**: the happy path, edge cases (empty, `None`, boundaries,
+   duplicates), and the error paths with
+   `pytest.raises(SomeError, match="...")` — always with `match=`, or the test
+   passes even when the error is raised for the wrong reason.
+4. **Run them**: `uv run pytest tests/test_<module>.py -v`, then `make cov` to
+   confirm the gate still passes.
 
-3. **Write tests** following the project conventions:
-   - Place tests in `tests/test_<module>.py`, mirroring the source module name.
-   - Use existing fixtures from `tests/fixtures/` — never create inline artefacts when a fixture exists.
-   - Mark tests that need network/FMR with `@pytest.mark.integration`.
-   - All other tests should be marked `@pytest.mark.unit`.
-   - Test happy path, edge cases (empty DataFrames, missing columns), and error conditions.
-   - Use descriptive test names: `test_<function>_<scenario>`.
-   - Keep tests focused — one assertion per logical concern.
-
-4. **Run the new tests** to verify they pass: `poetry run pytest <test_file> -v`
+A test that cannot fail is worse than no test. If you cannot construct a case
+that fails against broken code, say so instead of writing a placeholder.

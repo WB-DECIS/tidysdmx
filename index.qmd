@@ -14,7 +14,7 @@ pip install tidysdmx
 ```
 
 ```python
-import pysdmx as px
+from pysdmx.api.fmr import RegistryClient
 from tidysdmx import (
     create_schema_from_table,
     parse_mapping_template_wb,
@@ -25,7 +25,7 @@ from tidysdmx import (
 )
 
 # 1. Fetch the dissemination schema from FMR
-client = px.api.fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+client = RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
 dis_schema = client.get_schema(
     "datastructure",
     agency="WB.GGH.HSP", id="DS_ASPIRE", version="1.0.0",
@@ -52,13 +52,13 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 
 ```{=html}
 <div class="gd-cta-grid">
-  <a href="user_guide/01-installation.html" class="gd-cta-card">
+  <a href="user-guide/installation.html" class="gd-cta-card">
     <span class="gd-cta-icon">📦</span>
     <span class="gd-cta-title">Installation</span>
-    <span class="gd-cta-desc">Install tidysdmx with pip or Poetry, set up an FMR client, and sanity-check.</span>
+    <span class="gd-cta-desc">Install tidysdmx with pip, uv or Poetry, set up an FMR client, and sanity-check.</span>
     <span class="gd-cta-arrow">→</span>
   </a>
-  <a href="user_guide/02-quick-start.html" class="gd-cta-card">
+  <a href="user-guide/quick-start.html" class="gd-cta-card">
     <span class="gd-cta-icon">🚀</span>
     <span class="gd-cta-title">Quick start</span>
     <span class="gd-cta-desc">The smallest end-to-end tidysdmx example — tidy DataFrame in, validated output out.</span>

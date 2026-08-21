@@ -480,10 +480,12 @@ def standardize_indicator_id(df: pd.DataFrame) -> pd.DataFrame:
             value.
 
     Examples:
-        >>> df = pd.DataFrame({
-        ...     "DATABASE_ID": ["WB.DATA360", "WB.DATA360"],
-        ...     "INDICATOR": ["indicator.one", "indicator.two"],
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "DATABASE_ID": ["WB.DATA360", "WB.DATA360"],
+        ...         "INDICATOR": ["indicator.one", "indicator.two"],
+        ...     }
+        ... )
         >>> result = standardize_indicator_id(df)
         >>> list(result["INDICATOR"])
         ['WB_DATA360_INDICATOR_ONE', 'WB_DATA360_INDICATOR_TWO']
@@ -645,8 +647,15 @@ def _extract_artefact_type(
         >>> from pysdmx.model.dataflow import Schema, Components
         >>> from datetime import datetime, timezone
         >>> comps = Components([])
-        >>> s = Schema("dataflow", "ECB", "EXR", comps, "1.0", [],
-        ...            generated=datetime.now(timezone.utc))
+        >>> s = Schema(
+        ...     "dataflow",
+        ...     "ECB",
+        ...     "EXR",
+        ...     comps,
+        ...     "1.0",
+        ...     [],
+        ...     generated=datetime.now(timezone.utc),
+        ... )
         >>> _extract_artefact_type(s)
         'dataflow'
     """
