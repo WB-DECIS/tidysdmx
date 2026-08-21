@@ -6,6 +6,13 @@ on:
   # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
     branches: [main, dev]
   pull_request:
+    # `edited` so a retitled PR re-runs the title gate below. The default
+    # activity types are opened/synchronize/reopened only, which leaves a red
+    # pr-title check — and therefore a red "All checks" — stuck until someone
+    # pushes a commit, even after the title has been fixed. The cost is
+    # re-running the rest of CI on a title or body edit; the concurrency group
+    # above cancels the superseded run.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
