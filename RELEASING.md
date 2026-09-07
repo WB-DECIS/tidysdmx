@@ -41,6 +41,11 @@ workflows, and the `[skip ci]` marker is additionally
 [honored natively by GitHub Actions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
 for push/PR-triggered workflows (relevant if the PAT route is used).
 
+The release workflow runs on every push to `main`, independently of `ci.yml`: a
+direct push to `main` releases without the tests having run. Branch protection
+that requires the `All checks` job is what makes a green CI a precondition —
+see *One-time setup* below.
+
 ## Commit messages → version bumps
 
 | Commit type | Bump |
@@ -121,6 +126,20 @@ you also remove `allow_zero_version`) becomes 1.0.0.
   then re-run via *Actions → Release → Run workflow*. Nothing was tagged or published.
 - **"No release will be made":** no `feat`/`fix`/`perf` commits since the last tag.
   Expected for doc/chore-only merges.
+- **A tag exists but `main` cannot see it:** a release commit was orphaned,
+  almost always by a branch reset, a force-push, or deleting and re-creating
+  `main`. The tag survives while the commit it points at is an ancestor of no
+  branch, and semantic-release then computes its baseline from the tags it *can*
+  reach, recomputes a version that already exists, and returns silently. The
+  release workflow's orphaned-tag guard fails fast on this instead of staying
+  green. Fix it by **merging** the orphaned commit back — a cherry-pick will not
+  do, because only an ancestor relationship makes the tag reachable:
+
+  ```bash
+  git checkout -b restore/release-commit main
+  git merge --no-ff <orphaned-sha>
+  ```
+
 - **PyPI upload failed after the tag was created:** re-run the `publish-pypi` job
   (the built artifacts are stored on the run). As a last resort, publish manually from
   the tag with a project-scoped PyPI API token:

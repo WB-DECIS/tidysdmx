@@ -180,6 +180,10 @@ Releasing is a `dev` → `main` pull request. After semantic-release pushes its
 version commit and tag to `main`, **merge `main` back into `dev`** or the two
 drift. See `RELEASING.md`.
 
+Title every pull request as a Conventional Commit: `ci.yml`'s `pr-title` job
+rejects anything else, and its `All checks` job is the one branch protection
+requires. `CONTRIBUTING.md` has the full workflow.
+
 Since template v0.3.0 this is a first-class option rather than a deviation:
 `.copier-answers.yml` records `branching_model: main_dev`, and the template
 renders the `dev` triggers, the Dependabot routing and the main-only Pages
@@ -201,21 +205,28 @@ records its answers in `.copier-answers.yml`. Pull in template improvements with
 
 ```bash
 uvx copier update --trust
+# or, where a security policy refuses uvx's pip-generated launcher:
+uv run --with copier python -m copier update --trust
 ```
 
 Review the diff — conflicts are left as `.rej` files, and the documented
 deviations above will need re-applying. Keep `.copier-answers.yml` committed.
 
-The recorded baseline is template **v0.3.0**, which added the `branching_model`
-question this repository answers `main_dev`. Reconciliation to that version was
-done by hand rather than by `copier update`: this repository diverges from the
-rendered tree in most files, so a real update produces mostly-noise conflicts and
-re-creates the deleted example module.
+The recorded baseline is template **v0.5.0**. Reconciliation has so far been
+done by hand rather than by `copier update` — rendering the template at the old
+and new tags with this repository's answers, diffing the two renders, and
+porting each applicable hunk — because this repository diverges from the
+rendered tree in most files, so a real update produces mostly-noise conflicts
+and re-creates the deleted example module. Bump `_commit` only once every
+applicable hunk is in.
 
 ## CI/CD
 
-- **`ci.yml`** — ruff lint + format, mypy, pytest on Python 3.11–3.14, then a build
-  that checks metadata and verifies the wheel is importable. Runs on `main` and `dev`.
+- **`ci.yml`** — ruff lint + format, mypy, pytest on Python 3.11–3.14, a build
+  that checks metadata and verifies the wheel is importable, a `pr-title` gate
+  (the title must be a Conventional Commit), and the `All checks` aggregate that
+  branch protection requires. Every job runs a `Makefile` target. Runs on `main`
+  and `dev`.
 - **`release.yml`** — on push to `main`, python-semantic-release computes the version
   from commit messages, tags, and creates the GitHub Release; a separate job builds
   with `uv build` and publishes to PyPI via Trusted Publishing.

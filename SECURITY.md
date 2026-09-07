@@ -44,13 +44,37 @@ long-term-support branches.
 - **Reproducible installs.** `uv.lock` is committed and CI installs with
   `uv sync --locked`, so a build never silently resolves a different dependency.
 
+## Suppressing an advisory
+
+`make audit` audits **every** dependency group — the runtime dependencies users
+install, and the dev, docs, release, security and notebooks tooling — because a
+compromised build tool is a supply-chain problem too. The cost is that an
+advisory against a tool you cannot upgrade turns the audit red: a common case is
+a package in one of those groups that caps the vulnerable dependency below the
+patched version, which no bump in this repository can resolve.
+
+For that case, and only that case, list the advisory ID in `PIP_AUDIT_IGNORE`
+in the `Makefile`:
+
+```make
+# PYSEC-2026-0001: click < 8.2 is capped by python-semantic-release; re-check at
+# each PSR release. Added 2026-09-01.
+PIP_AUDIT_IGNORE ?= PYSEC-2026-0001
+```
+
+Each ID becomes a `--ignore-vuln` flag, locally and in `security.yml` alike.
+Write down why and when next to every entry, and remove it as soon as the
+upstream cap moves — a suppression that outlives its reason is a silent hole.
+To try a suppression without committing it:
+`make audit PIP_AUDIT_IGNORE="PYSEC-2026-0001 GHSA-xxxx-xxxx-xxxx"`.
+
 ## Releasing a dependency fix
 
 Routine Dependabot bumps land as `build:`/`chore:` commits and deliberately cut
 no release — the lockfile only affects development and CI, not what users
 install. When a vulnerability forces a change users must receive (raising a
-version floor in `dependencies`), title that change `fix(deps): ...` so a patch
-release ships immediately.
+version floor in `dependencies`), title that change `fix(deps): ...` (for a
+squash-merge, the PR title) so a patch release ships immediately.
 
 ## Scope
 

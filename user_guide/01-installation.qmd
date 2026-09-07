@@ -37,6 +37,9 @@ make install          # uv sync --all-groups, plus the pre-commit hooks
 make check            # lint, typecheck, and unit tests with the coverage gate
 ```
 
+The git hooks run every tool out of the project environment with `uv run`, so
+`uv` must be on your `PATH`. `CONTRIBUTING.md` has the details.
+
 ## Runtime dependencies
 
 tidysdmx depends on:
