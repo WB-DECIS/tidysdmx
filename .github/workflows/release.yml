@@ -24,6 +24,10 @@ jobs:
     # would refuse anything else anyway; this skips cleanly instead of failing.
     if: github.ref_name == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The release group is synced explicitly below; see ci.yml.
+      UV_NO_SYNC: "1"
     concurrency:
       group: ${{ github.workflow }}-release-${{ github.ref_name }}
       # Never cancel a half-finished release: it may already have tagged.
@@ -48,9 +52,14 @@ jobs:
           # uncomment this line and the one in the release step below.
           # token: ${{ secrets.GH_RELEASE_TOKEN }}
 
-      # Guards against main having moved between the trigger and the checkout.
+      # Guards against the branch having moved between the trigger and the
+      # checkout. Through env, like every other context value that reaches a
+      # script here — github.sha is not attacker-controlled, but one rule is
+      # easier to keep than one rule with an exception.
       - name: Force branch to workflow sha
-        run: git reset --hard ${{ github.sha }}
+        env:
+          SHA: ${{ github.sha }}
+        run: git reset --hard "$SHA"
 
       # semantic-release computes its baseline from tags REACHABLE from the branch,
       # but checks "already released?" against the GLOBAL tag namespace. If a release
@@ -102,18 +111,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           python-version: "3.11"
+      - run: uv sync --locked --only-group release
 
-      # semantic-release runs here as a CLI on the runner rather than via its
+      # semantic-release runs here as a CLI on the runner rather than through its
       # Docker container action, because `build_command = "uv lock"` needs uv and
       # a container action cannot see anything installed on the runner.
       #
-      # That command is load-bearing, not a packaging step: uv.lock records the
-      # project's own version, so stamping project.version without re-locking
-      # leaves `uv sync --locked` failing on every subsequent CI run. PSR runs
-      # build_command after writing the version and before creating the commit,
-      # and `assets = ["uv.lock"]` stages the refreshed lockfile into it.
-      #
-      # Distributions are still built in the `build` job below, against the tag.
+      # That command is load-bearing, not packaging: uv.lock records the project's
+      # own version, so stamping project.version without re-locking leaves every
+      # later `uv sync --locked` failing. PSR runs build_command after writing the
+      # version and before creating the commit, and `assets` stages the refreshed
+      # lockfile into it. Distributions are still built in the `build` job below,
+      # against the tag.
       - name: Version, changelog, tag, GitHub Release
         id: release
         env:
@@ -121,24 +130,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # or GH_RELEASE_TOKEN, see above
           NOOP: ${{ inputs.noop && '--noop' || '' }}
         run: |
-          git config user.name github-actions
-          git config user.email actions@users.noreply.github.com
+          # The identity GitHub links to the Actions bot, so the release
+          # commits show a real author in the history rather than an unknown one.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           before=$(git rev-parse HEAD)
           # Deliberately NOT --strict. PSR's strict mode exits 2 whenever the
           # computed version is already tagged, and "nothing to release" takes
           # that exact path: next_version() returns the current version for
           # LevelBump.NO_RELEASE, which is of course already in the released set.
-          # A release PR carrying only docs:/chore:/ci: commits would therefore
-          # fail this job rather than reporting "no release". The guard above
-          # already catches the orphaned-tag collision, before PSR runs.
+          # Since this workflow runs on every push to a release branch and
+          # docs:/chore:/ci: commits release nothing by design, --strict would
+          # fail the job on ordinary pushes. The guard above already catches the
+          # orphaned-tag collision, and it does so before PSR runs.
           # shellcheck disable=SC2086 # NOOP is intentionally word-split (empty or --noop)
-          uv run --group release semantic-release -v $NOOP version
+          uv run --group release python -m semantic_release -v $NOOP version
           after=$(git rev-parse HEAD)
 
           # PSR only creates a commit when it actually releases, so comparing HEAD
           # is a reliable signal — and it reports false under --noop, where the
-          # action's own `released` output used to report true.
+          # action's own `released` output reported true.
           if [ "$before" = "$after" ]; then
             echo "released=false" >> "$GITHUB_OUTPUT"
             echo "No release was made."
@@ -151,27 +163,14 @@ jobs:
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
           echo "Released $tag"
 
-  # Rebuild and redeploy the site from the release tag, so the published version
-  # and changelog match the release that just happened rather than lagging by one.
-  deploy-docs:
-    name: Publish docs for the release
-    needs: release
-    if: needs.release.outputs.released == 'true' && inputs.noop != true
-    uses: ./.github/workflows/docs.yml
-    with:
-      ref: ${{ needs.release.outputs.tag }}
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-
   build:
     name: Build distributions
     needs: release
-    # semantic-release still reports released=true in noop mode, so every job
-    # past this point must re-check the noop flag as well.
+    # `released` is derived from whether HEAD moved, so it is already false under
+    # --noop; the explicit noop check below is belt and braces.
     if: needs.release.outputs.released == 'true' && inputs.noop != true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write # attach the distributions to the GitHub Release
     steps:
@@ -187,14 +186,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           python-version: "3.11"
-      - name: Build sdist and wheel
-        run: uv build
-      - name: Check distribution metadata
-        run: uvx twine check dist/*
-      - name: Verify the wheel is importable
-        run: |
-          uv run --isolated --no-project --with dist/*.whl \
-            python -c "import tidysdmx; print(tidysdmx.__version__)"
+      # twine lives in the release group. UV_NO_SYNC is left unset here on
+      # purpose: `make build`'s wheel-import step runs `uv run --no-project`,
+      # where the flag only produces a warning, and its twine step's implicit
+      # re-sync is a no-op right after the locked sync below.
+      - run: uv sync --locked --only-group release
+      - name: Build, check the metadata, and import the wheel
+        run: make build
       - name: Attach distributions to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -211,6 +209,7 @@ jobs:
     name: Publish to PyPI
     needs: [release, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/tidysdmx/${{ needs.release.outputs.version }}/
@@ -230,3 +229,29 @@ jobs:
         with:
           packages-dir: dist
           print-hash: true
+
+  # Rebuild and redeploy the site from the release tag, so the published version
+  # and changelog match the release that just happened rather than lagging by one.
+  #
+  # Deliberately LAST in the chain. This job runs docs.yml, whose concurrency
+  # group is shared with the push-triggered docs build — that sharing is what
+  # stops the pre-release build from finishing last and republishing the older
+  # site. But a called workflow has no run of its own: its jobs belong to THIS
+  # run, so while the redeploy is in flight a merge landing on this branch joins
+  # that group and cancels the whole Release run. Everything irreversible must
+  # therefore already be done, or the tag is pushed and the distributions and the
+  # PyPI upload go down with it — which is exactly what `cancel-in-progress:
+  # false` above exists to prevent. The cost is that a failed build (or upload)
+  # skips the redeploy; re-running the failed job re-evaluates this one.
+  deploy-docs:
+    name: Publish docs for the release
+    needs: [release, build, publish-pypi]
+    # No branch term: this workflow only runs on main (see the trigger above).
+    if: needs.release.outputs.released == 'true' && inputs.noop != true
+    uses: $/.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
