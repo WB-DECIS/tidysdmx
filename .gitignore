@@ -1,4 +1,7 @@
-# Byte-compiled / cache
+# Claude Code personal settings
+.claude/settings.local.json
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
