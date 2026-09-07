@@ -6,8 +6,9 @@ on:
   # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
     branches: [main, dev]
   pull_request:
+    branches: [main, dev]
   # Callable so release.yml can redeploy the site from the newly created tag.
-  # Without that, the site never rebuilds for a release: the release commit
+  # Without that the site never rebuilds for a release: the release commit
   # carries [skip ci] and is pushed with GITHUB_TOKEN, which by design cannot
   # trigger workflows, and neither a tag push nor a Release event matches the
   # branch filter above. The published version and changelog would sit one
@@ -37,6 +38,10 @@ jobs:
   build:
     name: Build docs
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The docs group was synced explicitly below; see ci.yml.
+      UV_NO_SYNC: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,7 +65,7 @@ jobs:
       - name: Show Quarto version
         run: uv run quarto --version
       - name: Build docs
-        run: uv run great-docs build
+        run: make docs
       - name: Upload docs artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -71,13 +76,13 @@ jobs:
   publish:
     name: Publish to GitHub Pages
     needs: build
-    # Build runs on dev and on pull requests so a broken docs build is caught
-    # early, but only main deploys. This is what stops the published site from
-    # documenting unreleased API — the defect that made pypackage-template
-    # mandate a single branch in the first place.
-    # `inputs.ref` is only set when release.yml calls this workflow, which it
-    # does only after an actual release.
-    if: inputs.ref != '' || github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    # dev pushes build the site to prove it still builds; only main publishes,
+    # so the published site never describes unreleased API.
+    # Also correct when release.yml calls this workflow: a called workflow
+    # inherits the caller's `github` context, and release.yml only calls it from
+    # main, so this stays true there and unchanged everywhere else.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
