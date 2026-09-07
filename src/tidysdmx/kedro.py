@@ -98,7 +98,7 @@ def kd_validate_dataset_local(
     df: pd.DataFrame,
     schema: Schema | None = None,
     valid: dict[str, object] | None = None,
-) -> tuple[bool, dict]:
+) -> tuple[bool, dict[str, list[str]]]:
     """Validate a single DataFrame for SDMX compliance.
 
     Wrapper that calls validate_dataset_local to obtain a DataFrame of errors,
