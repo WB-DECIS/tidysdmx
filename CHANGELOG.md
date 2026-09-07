@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.10.0 (2026-07-23)
+
+### Bug Fixes
+
+- Adjust for compatibility with pysdmx 1.17
+  ([`4ddb8e1`](https://github.com/WB-DECIS/tidysdmx/commit/4ddb8e1ce18ad780a81ea6e56abcd097bced2992))
+
+- **validation**: Guard against stale cached valid dicts from <=0.9.0
+  ([`fd220c6`](https://github.com/WB-DECIS/tidysdmx/commit/fd220c6680c722d0eb76e716a4f90ad3b69cc539))
+
+- **validation**: Use standard SDMX-CSV reference columns for all contexts
+  ([`7ce5589`](https://github.com/WB-DECIS/tidysdmx/commit/7ce558968b91fcd957f928bf02618984b521b8e4))
+
+
 ## v0.9.0 (2026-07-02)
 
 ### Bug Fixes

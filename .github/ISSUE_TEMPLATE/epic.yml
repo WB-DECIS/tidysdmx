@@ -1,0 +1,46 @@
+name: Epic
+description: A body of work spanning several issues, described as a user story.
+labels: [epic]
+body:
+  - type: textarea
+    id: user-story
+    attributes:
+      label: User story
+      description: Who needs this, what they need, and why.
+      value: |
+        **As a** [role]
+        **I need** [function]
+        **So that** [benefit]
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details and assumptions
+      description: What is known, and what is being assumed.
+      placeholder: |
+        - ...
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Gherkin scenarios that decide when this epic is done.
+      value: |
+        ```gherkin
+        Given [some context]
+        When [certain action is taken]
+        Then [the outcome of action is observed]
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: issues
+    attributes:
+      label: Child issues
+      description: The issues that make up this epic.
+      placeholder: |
+        - [ ] #123
+    validations:
+      required: false

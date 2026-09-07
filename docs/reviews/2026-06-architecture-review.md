@@ -206,6 +206,12 @@ independently shippable.
 - **A4** Untangle deprecation: re-route `standardize_sdmx` off
   `standardize_data_for_upload`; remove deprecated functions from great-docs;
   schedule removal (0.9: drop from `__all__`; 1.0: delete) (ARCH-05/CONS-21). *M*
+  **Now blocking a test:** `standardize_sdmx` (tidysdmx.py:196) still calls the
+  deprecated function, which warns at :553, and the suite sets
+  `filterwarnings = ["error"]`. It stays green only because `standardize_sdmx`
+  has no tests at all — so whoever adds the coverage TEST-03 asks for will hit an
+  immediate failure. Re-route the internal call first, then add the test.
+  Re-raised in review of PR #261.
 - **A5** Switch `Agency`/`ItemReference` imports to public `pysdmx.model`;
   isolate the two unavoidable private imports; request upstream re-export
   (PYSDMX-03). *S*
@@ -245,6 +251,13 @@ independently shippable.
   delete the fixture-contradicting tests (TEST-11). *M*
 - **B11** Mypy adoption: lenient config + per-module burn-down of the 45
   errors (PROD-03). *M*
+- **B12** `collect_structure_map_artifacts` collects one RepresentationMap per
+  map rule without deduplicating by artefact identity
+  (structure_map_writer.py:126). Two ComponentMaps embedding the same
+  RepresentationMap — a valid reuse case — put the same maintainable artefact in
+  the upload list twice, which FMR may reject or duplicate. Key a seen-set on the
+  URN (or agency/id/version) while preserving first-use order, and add a test
+  covering the shared-rep-map case. Raised in review of PR #261. *S*
 
 **C. Polish (P3)**
 - **C1** CI: matrix +3.13, slim lint job, dependency caching, drop dead uv step

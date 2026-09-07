@@ -1,5 +1,5 @@
 # SDMX Information Model Reference
-**Source:** SDMX Technical Standards Section 1 (Framework) & Section 2 (Information Model), Version 3.0, October 2021  
+**Source:** SDMX Technical Standards Section 1 (Framework) & Section 2 (Information Model), Version 3.0, October 2021
 **Authoritative reference:** https://www.sdmx.org | https://github.com/sdmx-twg
 
 ---
@@ -46,7 +46,7 @@ All SDMX artefacts are **identifiable objects** with a unique identity composed 
 - **ID** — the artefact's local identifier (e.g. `CL_FREQ`)
 - **Version** — semantic version string (e.g. `1.0.0`) — SDMX 3.0 adopts semver (https://semver.org)
 
-The full reference is expressed as a **URN**: `urn:sdmx:org.sdmx.infomodel.<type>=<AgencyID>:<ID>(<Version>)`.  
+The full reference is expressed as a **URN**: `urn:sdmx:org.sdmx.infomodel.<type>=<AgencyID>:<ID>(<Version>)`.
 In SDMX 3.0, URN is the **exclusive** mechanism for non-local cross-artefact referencing (agency+ID+version tuple references are deprecated).
 
 ### 3.1 Data Structure Definition (DSD)

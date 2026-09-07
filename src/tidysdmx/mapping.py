@@ -6,7 +6,13 @@ from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
-import pysdmx as px
+from pysdmx.model.map import (
+    ComponentMap,
+    FixedValueMap,
+    ImplicitComponentMap,
+    MultiComponentMap,
+    StructureMap,
+)
 from typeguard import typechecked
 
 logger = logging.getLogger(__name__)
@@ -44,7 +50,7 @@ def _value_map_rank(patterns: Sequence[str]) -> int:
 @typechecked
 def map_structures(
     df: pd.DataFrame,
-    structure_map: px.model.map.StructureMap,
+    structure_map: StructureMap,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Apply all mapping components from a StructureMap to a DataFrame.
@@ -67,13 +73,13 @@ def map_structures(
     multi_component_maps = []
 
     for m in structure_map.maps:
-        if isinstance(m, px.model.map.FixedValueMap):
+        if isinstance(m, FixedValueMap):
             fixed_value_maps.append(m)
-        elif isinstance(m, px.model.map.ImplicitComponentMap):
+        elif isinstance(m, ImplicitComponentMap):
             implicit_maps.append(m)
-        elif isinstance(m, px.model.map.ComponentMap):
+        elif isinstance(m, ComponentMap):
             component_maps.append(m)
-        elif isinstance(m, px.model.map.MultiComponentMap):
+        elif isinstance(m, MultiComponentMap):
             multi_component_maps.append(m)
         else:
             raise TypeError(f"Unknown map type: {type(m)}")
@@ -105,7 +111,7 @@ def map_structures(
 @typechecked
 def apply_fixed_value_maps(
     df: pd.DataFrame,
-    fixed_value_maps: list[px.model.map.FixedValueMap],
+    fixed_value_maps: list[FixedValueMap],
 ) -> pd.DataFrame:
     """Apply FixedValueMap rules to a DataFrame.
 
@@ -116,7 +122,7 @@ def apply_fixed_value_maps(
     Returns:
         DataFrame with fixed value columns added.
     """
-    if not all(isinstance(m, px.model.map.FixedValueMap) for m in fixed_value_maps):
+    if not all(isinstance(m, FixedValueMap) for m in fixed_value_maps):
         raise TypeError(
             "All elements in fixed_value_maps must be FixedValueMap instances."
         )
@@ -132,7 +138,7 @@ def apply_fixed_value_maps(
 @typechecked
 def apply_implicit_component_maps(
     df: pd.DataFrame,
-    implicit_maps: list[px.model.map.ImplicitComponentMap],
+    implicit_maps: list[ImplicitComponentMap],
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Apply ImplicitComponentMap rules to a DataFrame.
@@ -149,7 +155,7 @@ def apply_implicit_component_maps(
     Returns:
         DataFrame with implicit component mappings applied.
     """
-    if not all(isinstance(m, px.model.map.ImplicitComponentMap) for m in implicit_maps):
+    if not all(isinstance(m, ImplicitComponentMap) for m in implicit_maps):
         raise TypeError(
             "All elements in implicit_maps must be ImplicitComponentMap instances."
         )
@@ -180,7 +186,7 @@ def apply_implicit_component_maps(
 @typechecked
 def apply_component_map(
     df: pd.DataFrame,
-    component_map: px.model.map.ComponentMap,
+    component_map: ComponentMap,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Apply a single ComponentMap with a RepresentationMap to a DataFrame.
@@ -260,7 +266,7 @@ def apply_component_map(
 @typechecked
 def apply_multi_component_map(
     df: pd.DataFrame,
-    multi_component_map: px.model.map.MultiComponentMap,
+    multi_component_map: MultiComponentMap,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Apply a single MultiComponentMap with regex and catch-all support.

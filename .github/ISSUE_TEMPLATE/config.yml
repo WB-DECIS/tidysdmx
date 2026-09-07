@@ -1,0 +1,10 @@
+# Blank issues are disabled so every report arrives with the fields we need to
+# act on it. Remove this line if that proves too rigid for your contributors.
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/WB-DECIS/tidysdmx/discussions
+    about: Ask how to use tidysdmx, or propose an idea before filing an issue.
+  - name: Documentation
+    url: https://wb-decis.github.io/tidysdmx/
+    about: Read the user guide and API reference first — it may already be answered.

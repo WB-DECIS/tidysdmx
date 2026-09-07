@@ -1,0 +1,56 @@
+version: 2
+
+updates:
+  # Dependabot has understood pyproject.toml + uv.lock natively since the uv
+  # ecosystem reached GA in March 2025, so it keeps the lockfile in sync rather
+  # than only bumping constraints.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait for a release to settle before proposing it. The implicit default is
+    # 3 days, which zizmor's dependabot-cooldown audit rejects — and the
+    # generated project runs zizmor on its own workflows.
+    cooldown:
+      default-days: 7
+    # Version-update PRs target the integration branch and reach main with the
+    # next release train. Dependabot *security* updates ignore this key — and
+    # every other setting in this block, the commit-message prefix included —
+    # and always target the default branch, so retitle those before merging.
+    target-branch: dev
+    commit-message:
+      # Conventional Commits, so semantic-release classifies these correctly.
+      # Two separate facts: `build:` is not a releasing type (only feat, fix
+      # and perf are), and it is also in exclude_commit_patterns, so it stays
+      # out of the changelog. That is the right default for a library — the
+      # lockfile only affects development and CI. When a bump must reach users
+      # (a CVE forces a floor raise on a runtime dependency), retitle the
+      # squash-merge to `fix(deps): ...` so a patch release ships — see
+      # SECURITY.md.
+      prefix: build
+      prefix-development: chore
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Actions are pinned to commit SHAs, which only stay current if something
+  # bumps them. This is that something.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait for a release to settle before proposing it. The implicit default is
+    # 3 days, which zizmor's dependabot-cooldown audit rejects — and the
+    # generated project runs zizmor on its own workflows.
+    cooldown:
+      default-days: 7
+    target-branch: dev # same routing as the uv ecosystem above
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

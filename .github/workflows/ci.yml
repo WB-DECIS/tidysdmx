@@ -2,56 +2,190 @@ name: CI
 
 on:
   push:
-    branches: [master, dev]
+  # `branching_model: main_dev` in .copier-answers.yml — the template renders
+  # these triggers itself since v0.3.0. `dev` is integration, `main` releases.
+    branches: [main, dev]
   pull_request:
-    branches: [master, dev]
+    branches: [main, dev]
+    # `edited` so a retitled PR re-runs the title gate below. The default
+    # activity types are opened/synchronize/reopened only, which leaves a red
+    # pr-title check — and therefore a red "All checks" — stuck until someone
+    # pushes a commit, even after the title has been fixed. GitHub generates
+    # the initial title from the branch name, so this is the common case, not
+    # an edge case. The cost is re-running the rest of CI on a title or body
+    # edit; the concurrency group below cancels the superseded run.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Every job here syncs explicitly and then runs the Makefile target a
+      # contributor runs. Without this, each `uv run` inside the target would
+      # re-sync on its own — inexactly, and without --locked — quietly
+      # installing whatever the explicit sync left out (the project itself,
+      # for this job). The git hooks pass --no-sync for the same reason.
+      UV_NO_SYNC: "1"
+      # Same `make lint`, but ruff annotates its findings inline on the PR.
+      RUFF_OUTPUT_FORMAT: github
     steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install --only dev
-      - name: Ruff check
-        run: poetry run ruff check .
-      - name: Ruff format check
-        run: poetry run ruff format --check .
+      - run: uv sync --locked --only-group dev
+      - name: Lint and format check
+        run: make lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_NO_SYNC: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # mypy needs the package's own dependencies installed to resolve imports.
+      - run: uv sync --locked
+      - name: mypy
+        run: make typecheck
 
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_NO_SYNC: "1"
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          pip install poetry
-          poetry install
-      - name: Run unit tests with coverage
-        run: |
-          poetry run pytest -m "not integration" --cov --cov-report=xml --cov-report=term-missing
-      - name: Upload coverage artifact
+      - run: uv sync --locked
+      - name: Unit tests with coverage
+        run: make cov
+      - name: Upload coverage
         if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: coverage.xml
+          if-no-files-found: error
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # twine (metadata check) lives in the release group. This job leaves
+      # UV_NO_SYNC unset on purpose: `make build`'s wheel-import step runs
+      # `uv run --no-project`, where the flag only produces a warning, and its
+      # twine step's implicit re-sync is a no-op right after the locked sync
+      # below.
+      - run: uv sync --locked --only-group release
+      - name: Build, check the metadata, and import the wheel
+        run: make build
+
+  pr-title:
+    name: PR title is a Conventional Commit
+    # Squash-merging makes the PR title the commit message that lands on the
+    # release branch, and nothing else validates it — the commit-msg hook only
+    # ever sees the individual commits. Push builds skip this job; the checks
+    # gate below counts that skip as a pass.
+    #
+    # This job checks out and syncs purely so it runs the checker resolved by
+    # uv.lock — the very build the commit-msg hook runs. A standalone pin here
+    # would be exact while the dev group's constraint floats, so the first
+    # dependency bump would leave titles and commit messages silently validated
+    # by different versions. There is nothing to keep in lockstep by hand.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      UV_NO_SYNC: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      # `--only-group dev` brings in the dev group and nothing else, the project
+      # included: validating a string needs the checker, not a built package.
+      - run: uv sync --locked --only-group dev
+      - name: Validate the title
+        env:
+          # The title is attacker-controlled input. It must reach the script
+          # through the environment — interpolating it into `run:` directly
+          # would be a template injection.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          uv run python -m conventional_pre_commit.hook "$RUNNER_TEMP/pr-title.txt"
+
+  # Branch protection should require THIS check and nothing else from this
+  # workflow: the matrix job names ("Test (Python 3.12)") change whenever
+  # python_min moves, and a renamed required check blocks every merge until
+  # someone edits the ruleset by hand. See TEMPLATE-NEXT-STEPS.md.
+  checks:
+    name: All checks
+    needs: [lint, typecheck, test, build, pr-title]
+    # always(): without it a failed dependency SKIPS this job, and a skipped
+    # required check shows as eternally "pending" to branch protection.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {} # reads only the needs context; no token scope required
+    steps:
+      - name: Decide from the needed jobs' results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          # `skipped` is deliberately a pass: pr-title does not run on push
+          # builds. `failure` and `cancelled` are not.
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "$RESULTS"
+          test "$FAILED" = "false"
