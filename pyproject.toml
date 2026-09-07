@@ -54,7 +54,9 @@ build-backend = "hatchling.build"
 packages = ["src/tidysdmx"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "README.md", "CHANGELOG.md"]
+# Anchored to the project root: hatchling patterns follow gitignore rules, so an
+# unanchored "README.md" also matches .claude/README.md and ships it.
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md"]
 
 # ----------------------------------------------------------------------
 # Dependency groups (PEP 735). `uv sync` installs `dev` by default;
