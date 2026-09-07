@@ -11,7 +11,7 @@ allowed-tools:
 Run the project tests:
 
 ```bash
-uv run pytest $ARGUMENTS
+uv run python -m pytest $ARGUMENTS
 ```
 
 If no arguments were given, run the default lane (excludes anything needing

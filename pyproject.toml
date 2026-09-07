@@ -65,12 +65,15 @@ dev = [
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "mypy>=2.3",
-    # This is a floor, not a pin; uv.lock is what actually fixes the version
-    # (0.16.4 today). Keep that resolved version and the ruff-pre-commit rev in
-    # .pre-commit-config.yaml moving together, or a commit passes the hook and
-    # then fails CI.
     "ruff>=0.16.3",
     "pre-commit>=4.6",
+    # The pre-commit hooks resolve against this environment rather than
+    # downloading their own, so the hook implementations are dev dependencies
+    # like any other. This is where their version pins live now — they used to
+    # be `rev:` fields in .pre-commit-config.yaml, kept in lockstep with the
+    # `ruff` pin above by hand. Captured in uv.lock, Dependabot updates them.
+    "pre-commit-hooks>=6.0",
+    "conventional-pre-commit>=4.4",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool
@@ -79,7 +82,10 @@ dev = [
 # quarto-cli is the official Posit-published Quarto binary, so the Quarto
 # version lives in uv.lock and `make docs` matches the CI docs job.
 docs = ["great-docs==0.17.0", "quarto-cli==1.10.18"]
-release = ["python-semantic-release>=10.2.0,<11"]
+# twine is here rather than run through `uvx`: it checks the distributions
+# on the release path, so it should be a locked, Dependabot-managed version
+# like everything else — and it has a `python -m` entry point.
+release = ["python-semantic-release>=10.6,<11", "twine>=7.0"]
 security = ["pip-audit>=2.10"]
 # Documented deviation from pypackage-template, which has no notebooks. Kept out
 # of `dev` so CI does not install the Jupyter stack merely to run ruff — most of

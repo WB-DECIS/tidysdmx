@@ -32,7 +32,7 @@ git diff "$base...HEAD" --name-only -- 'src/**/*.py'
    duplicates), and the error paths with
    `pytest.raises(SomeError, match="...")` — always with `match=`, or the test
    passes even when the error is raised for the wrong reason.
-4. **Run them**: `uv run pytest tests/test_<module>.py -v`, then `make cov` to
+4. **Run them**: `uv run python -m pytest tests/test_<module>.py -v`, then `make cov` to
    confirm the gate still passes.
 
 A test that cannot fail is worse than no test. If you cannot construct a case

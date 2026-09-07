@@ -1,74 +1,173 @@
-# Install with `make install` (or `uv run pre-commit install --install-hooks`).
+# Install with `make install` (or `uv run python -m pre_commit install --install-hooks`).
 #
 # default_install_hook_types is what makes the commit-msg and pre-push hooks
 # actually get installed — without it `pre-commit install` wires up pre-commit
-# only, and the Conventional Commits gate below silently never runs. That gate
-# matters here because the release pipeline computes versions from commit
-# messages, and previously nothing validated them.
+# only, and the Conventional Commits gate below silently never runs.
 default_install_hook_types: [pre-commit, commit-msg, pre-push]
 
-default_language_version:
-  python: python3.11
-
+# Every hook is local, and every entry runs `python -m`. That is deliberate and
+# should not be "simplified" back to remote `repo:` entries — see
+# CONTRIBUTING.md. In short: pip generates a `.exe` launcher for each hook entry
+# point, embedding the local interpreter path, so its hash is unique to one
+# machine. Managed Windows fleets running Microsoft Defender Attack Surface
+# Reduction block exactly that — and they deny *read*, so pre-commit dies with a
+# PermissionError traceback while resolving the hook rather than reporting a
+# failing hook. `python -m` launches only the interpreter, which is signed.
+#
+# It is not a Windows branch: the behaviour is identical everywhere, and running
+# hooks out of the project environment means the hook and `make lint` can never
+# disagree about a tool's version. That also removes the `rev:` pins that used to
+# be kept in lockstep by hand — the versions now live in uv.lock, where
+# Dependabot updates them like any other dependency — and leaves nothing for
+# `pre-commit install --install-hooks` to download.
+#
+# `--no-sync` skips a lockfile re-resolution per hook, and there are a dozen of
+# them per commit. It is safe by construction: git hooks are not cloned, so they
+# only exist after `pre-commit install`, which only runs from `make install`
+# after `uv sync`. A hook can never be the first thing to touch a checkout.
+#
+# `stages:` must be pinned on every hook, and this is the easiest thing here to
+# get wrong. A remote hook inherits its upstream manifest's stages; a local hook
+# has no manifest and so defaults to *every* stage. With commit-msg installed
+# above, an unpinned `types: [text]` hook runs at the commit-msg stage, where
+# pre-commit hands it .git/COMMIT_EDITMSG — and trailing-whitespace and
+# end-of-file-fixer would rewrite the commit message. `[pre-commit, pre-push,
+# manual]` is what pre-commit-hooks v6.0.0 pins on the hooks it protects.
+#
+# Hook order is load-bearing: pre-commit runs hooks in file order, so the fixers
+# run before ruff, exactly as they did when these were remote repos.
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+  - repo: local
     hooks:
+      # `types:` mirror pre-commit-hooks v6.0.0's .pre-commit-hooks.yaml.
+      # check-added-large-files and check-case-conflict genuinely have no
+      # `types:` upstream; both fall through to pre-commit's `[file]` default.
       - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-toml
-      - id: check-merge-conflict
-      - id: check-added-large-files
-      - id: check-case-conflict
-      - id: detect-private-key
+        name: trim trailing whitespace
+        entry: uv run --no-sync python -m pre_commit_hooks.trailing_whitespace_fixer
+        language: system
+        # Two trailing spaces are a hard line break in Markdown; .editorconfig
+        # preserves them, so the hook must too.
+        args: [--markdown-linebreak-ext=md]
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
 
-  # rev is kept in lockstep with the `ruff` pin in pyproject.toml's dev group so
-  # that the hook and `make lint` can never disagree.
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.4
-    hooks:
+      - id: end-of-file-fixer
+        name: fix end of files
+        entry: uv run --no-sync python -m pre_commit_hooks.end_of_file_fixer
+        language: system
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
+
+      - id: check-yaml
+        name: check yaml
+        entry: uv run --no-sync python -m pre_commit_hooks.check_yaml
+        language: system
+        types: [yaml]
+        stages: [pre-commit, pre-push, manual]
+
+      - id: check-toml
+        name: check toml
+        entry: uv run --no-sync python -m pre_commit_hooks.check_toml
+        language: system
+        types: [toml]
+        stages: [pre-commit, pre-push, manual]
+
+      - id: check-merge-conflict
+        name: check for merge conflicts
+        entry: uv run --no-sync python -m pre_commit_hooks.check_merge_conflict
+        language: system
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
+
+      - id: check-added-large-files
+        name: check for added large files
+        entry: uv run --no-sync python -m pre_commit_hooks.check_added_large_files
+        language: system
+        stages: [pre-commit, pre-push, manual]
+
+      - id: check-case-conflict
+        name: check for case conflicts
+        entry: uv run --no-sync python -m pre_commit_hooks.check_case_conflict
+        language: system
+        stages: [pre-commit, pre-push, manual]
+
+      - id: detect-private-key
+        name: detect private key
+        entry: uv run --no-sync python -m pre_commit_hooks.detect_private_key
+        language: system
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
+
+      # `--force-exclude` is what ruff-pre-commit passes upstream, and it is what
+      # makes ruff honour [tool.ruff] exclusions when pre-commit hands it an
+      # explicit file list. `require_serial` likewise mirrors upstream: parallel
+      # `--fix` invocations would race each other.
       - id: ruff-check
+        name: ruff check
+        entry: uv run --no-sync python -m ruff check --force-exclude
+        language: system
         args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+        stages: [pre-commit, pre-push, manual]
+
       # `types_or` includes markdown because ruff formats Python code blocks
       # inside .md files. Without it the hook passes on files that `make lint`
       # (and therefore CI) then rejects — a commit that succeeds locally and
       # fails in CI is exactly the drift this config exists to prevent.
+      # (ruff 0.16 discovers .md files natively when handed a directory, so
+      # `ruff format --check .` needs no extend-include for the CI side.)
       - id: ruff-format
+        name: ruff format
+        entry: uv run --no-sync python -m ruff format --force-exclude
+        language: system
         types_or: [python, pyi, jupyter, markdown]
+        require_serial: true
+        stages: [pre-commit, pre-push, manual]
 
-  # The release pipeline computes versions from commit messages, so a malformed
-  # message is a real defect. This is the gate that catches it. rev is kept in
-  # lockstep with the `uvx conventional-pre-commit@...` pin in ci.yml's
-  # pr-title job, which guards the squash-merge path this hook cannot see.
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-
-  - repo: local
-    hooks:
-      # Notebooks are excluded from ruff (see pyproject.toml) and managed here
-      # instead. tidysdmx-specific: the template ships no notebooks.
+      # Notebooks are excluded from ruff (see pyproject.toml) and stripped of
+      # their outputs here instead. tidysdmx-specific: the template ships no
+      # notebooks. `--no-sync` is deliberately absent: `notebooks` is not a
+      # default group, so a checkout synced with plain `uv sync` would not have
+      # nbstripout, and this lets uv install it on first use. The hook only runs
+      # when a notebook is staged, so the cost is paid rarely.
       - id: nbstripout-local
-        name: Strip Jupyter notebook outputs (local)
+        name: strip Jupyter notebook outputs
         entry: uv run --group notebooks python -m nbstripout
         language: system
         files: "\\.ipynb$"
+        stages: [pre-commit, pre-push, manual]
+
+      # The release pipeline computes versions from commit messages, so a
+      # malformed message is a real defect. This is the gate that catches it.
+      #
+      # Two traps, both of which fail silently rather than loudly. The module is
+      # `conventional_pre_commit.hook`, not `conventional_pre_commit`: the
+      # package ships no __main__.py, and hook.py is what carries the
+      # `if __name__ == "__main__"` guard. And `pass_filenames` must stay at its
+      # default of true — at the commit-msg stage pre-commit passes the message
+      # file, which is the hook's required `input` argument.
+      - id: conventional-pre-commit
+        name: Conventional Commit
+        entry: uv run --no-sync python -m conventional_pre_commit.hook
+        language: system
+        always_run: true
+        stages: [commit-msg]
 
       # mypy needs whole-project context, so it ignores the changed-file list and
       # checks the paths configured in [tool.mypy].
       - id: mypy
         name: mypy
-        entry: uv run mypy
+        entry: uv run --no-sync python -m mypy
         language: system
         types: [python]
         pass_filenames: false
+        stages: [pre-commit, pre-push, manual]
 
       - id: pytest
         name: pytest (unit)
-        entry: uv run pytest -m "not integration" -q
+        entry: uv run --no-sync python -m pytest -m "not integration" -q
         language: system
         pass_filenames: false
         always_run: true

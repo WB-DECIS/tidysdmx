@@ -1,69 +1,90 @@
 # Single source of truth for project commands.
 #
-# CI, CLAUDE.md and the .claude/commands/* slash commands all call these targets,
-# so each command is defined once instead of drifting across four places.
+# CI (ci.yml, docs.yml, security.yml), CLAUDE.md and the .claude/commands/*
+# slash commands all call these targets, so each command is defined once
+# instead of drifting across four places. `check` is what a contributor runs;
+# CI runs the same targets one job each, plus `build`.
 # Windows contributors without `make` can read the recipes below and run the
-# `$(UV) run ...` line directly; CONTRIBUTING.md lists the equivalents.
+# `uv run ...` line directly; CONTRIBUTING.md lists the equivalents.
 #
-# UV is overridable for anyone whose uv is not on PATH:
-#     make install UV=C:/WBG/uv.exe
-# `?=` defers to the environment too, so `export UV=...` works for a whole shell
-# session. Deliberately not baked in at generation time — this file is committed,
-# and one contributor's path must not become everyone's.
-#
-# `$(UV)` is quoted in every recipe because make expands variables without
-# quoting, so an unquoted path containing a space would split into two words.
-# UV is therefore a path, not a command line: it cannot carry its own arguments.
-UV ?= uv
+# `uv` must be on PATH — see CONTRIBUTING.md. Every tool that lives in the
+# project environment is invoked as `python -m`, so no pip-generated `.exe`
+# launcher is ever executed; .pre-commit-config.yaml explains why that matters.
+# The exceptions are the docs tools: neither `great-docs` nor `quarto` ships a
+# module entry point, so those two keep their console scripts.
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test cov docs docs-preview audit release-dry check
+.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 install: ## Install all dependency groups and the pre-commit hooks
-	"$(UV)" sync --all-groups
-	"$(UV)" run pre-commit install --install-hooks
+	uv sync --all-groups
+	uv run python -m pre_commit install --install-hooks
 
 lint: ## Check lint rules and formatting (no changes)
-	"$(UV)" run ruff check .
-	"$(UV)" run ruff format --check .
+	uv run python -m ruff check .
+	uv run python -m ruff format --check .
 
 fmt: ## Auto-fix lint violations and format
-	"$(UV)" run ruff check --fix .
-	"$(UV)" run ruff format .
+	uv run python -m ruff check --fix .
+	uv run python -m ruff format .
 
 typecheck: ## Run mypy (not strict yet — see the burn-down in pyproject.toml)
-	"$(UV)" run mypy
+	uv run python -m mypy
 
 test: ## Run unit tests (no coverage gate, so -k works as expected)
-	"$(UV)" run pytest -m "not integration"
+	uv run python -m pytest -m "not integration"
 
 cov: ## Run unit tests with coverage and enforce the gate
-	"$(UV)" run pytest -m "not integration" --cov --cov-report=term-missing --cov-report=xml
+	uv run python -m pytest -m "not integration" --cov --cov-report=term-missing --cov-report=xml
 
+# `dist/` is cleared first so the wheel-import step below cannot pick up a
+# stale build. twine lives in the `release` group and runs as `python -m` like
+# every other tool. The import check installs the wheel into an isolated
+# environment: it is the only way to catch a src-layout wheel that builds fine
+# and ships nothing importable — an editable install always "works".
+build: ## Build the sdist and wheel, check their metadata, and import the wheel
+	rm -rf dist
+	uv build
+	uv run --group release python -m twine check dist/*
+	uv run --isolated --no-project --with dist/*.whl \
+		python -c "import tidysdmx; print(tidysdmx.__version__)"
+
+# great-docs has no `python -m` entry point (its CLI is a bare click group with
+# no __main__), and neither has quarto, which great-docs shells out to. Both
+# therefore stay console scripts. This is a docs-only path — it never runs on
+# the commit or push path, so it cannot block a commit.
 docs: ## Build the documentation site
-	"$(UV)" run --group docs great-docs build
+	uv run --group docs great-docs build
 
 docs-preview: ## Serve the documentation site locally with live reload
-	"$(UV)" run --group docs great-docs preview
+	uv run --group docs great-docs preview
+
+# Advisory IDs the audit may skip, space-separated (PYSEC-... or GHSA-...).
+# Only for a vulnerability this project cannot fix: typically a tool in a
+# dependency group that caps the vulnerable package below the patched version,
+# so no bump here can resolve it. Committed on purpose so CI honours it — but
+# record why and when next to each entry, and re-check on every release
+# whether the cap upstream has moved. See "Suppressing an advisory" in
+# SECURITY.md.
+PIP_AUDIT_IGNORE ?=
 
 # --locked so this audits the committed uv.lock rather than a fresh resolution.
-# The export goes to a real file rather than a pipe for two reasons: /dev/stdin
-# does not exist on native Windows, and make runs recipes without pipefail, so a
-# pipeline would report only pip-audit's exit status and hide a failed export.
-# --no-hashes because pip-audit rejects a requirements set mixing hashed and
-# unhashed entries, and --strict so a dependency that cannot be audited fails
-# instead of being skipped silently. security.yml runs this same target, so the
-# local and CI audits cannot drift.
+# The export goes to a real file rather than a pipe: /dev/stdin does not exist
+# on native Windows. --no-hashes because pip-audit rejects a requirements set
+# that mixes hashed and unhashed entries, and --strict so a dependency that
+# cannot be audited fails instead of being skipped silently. security.yml runs
+# this same target, so the local and CI audits cannot drift.
 audit: ## Audit locked dependencies for known vulnerabilities
-	"$(UV)" export --locked --format requirements-txt --no-emit-project \
-		--all-groups --no-hashes --output-file requirements-audit.txt
-	"$(UV)" run --group security pip-audit --requirement requirements-audit.txt --strict
+	uv export --locked --format requirements-txt --no-emit-project --all-groups \
+		--no-hashes --output-file requirements-audit.txt
+	uv run --group security python -m pip_audit --requirement requirements-audit.txt \
+		--strict $(foreach id,$(PIP_AUDIT_IGNORE),--ignore-vuln $(id))
 
 release-dry: ## Show the version the next release would produce, changing nothing
-	"$(UV)" run --group release semantic-release -v --noop version
+	uv run --group release python -m semantic_release -v --noop version
 
-check: lint typecheck cov ## Everything CI runs, in one command
+check: lint typecheck cov ## Lint, typecheck and gated tests — CI runs these plus `build`

@@ -44,23 +44,29 @@ cite its IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn).
 - Core runtime dependencies: `pysdmx`, `pandas`, `numpy`, `openpyxl`, `typeguard`
 
 Always run project commands through `uv run` so they use the locked environment,
-never a system Python. `poetry` is gone — do not reintroduce it.
+never a system Python — and as `uv run python -m <module>` wherever the tool
+provides a module entry point, rather than by its console-script name. The docs
+tools are the exception: `great-docs` and `quarto` have no module form, so the
+`Makefile` calls them as scripts on purpose. `uv` itself must be on `PATH`;
+there is no path override. See `CONTRIBUTING.md` for why. `poetry` is gone — do
+not reintroduce it.
 
 ## Key Commands
 
 Defined once in the `Makefile` — prefer these over retyping the underlying
 commands, and update the `Makefile` rather than inventing new invocations.
 
-- `make check` — lint + typecheck + tests with the coverage gate (what CI runs)
+- `make check` — lint + typecheck + tests with the coverage gate (CI runs these plus `make build`)
 - `make lint` / `make fmt` — ruff check + format check / auto-fix both
 - `make typecheck` — mypy
 - `make test` — unit tests, no coverage gate (so `-k` works)
 - `make cov` — unit tests with coverage, gate enforced
+- `make build` — sdist + wheel, metadata check, and an isolated wheel import
 - `make docs` / `make docs-preview` — build / live-preview the docs site
 - `make audit` — pip-audit over the locked dependencies
 - `make release-dry` — show what the next release would be, changing nothing
 
-Single test: `uv run pytest -k test_name -v`
+Single test: `uv run python -m pytest -k test_name -v`
 
 ## Claude Code Commands
 
@@ -240,3 +246,8 @@ same way and add the `# vX.Y.Z` comment.
 - Do not add `--cov` to pytest's `addopts`; it would make focused `-k` runs trip the
   coverage gate. Use `make cov`
 - Do not reintroduce Poetry, Sphinx, or Read the Docs — all three were removed
+- Do not replace the local hooks in `.pre-commit-config.yaml` with remote `repo:`
+  entries, and do not call a tool by its console-script name where a module entry
+  point exists. Both reintroduce pip-generated `.exe` launchers, which managed
+  Windows fleets block outright. `great-docs`, `quarto` and the `nbstripout`
+  hook's `--group notebooks` form are the documented exceptions

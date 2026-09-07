@@ -2,11 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(make:*)",
-      "Bash(uv run pytest:*)",
-      "Bash(uv run ruff:*)",
-      "Bash(uv run mypy:*)",
       "Bash(uv run python:*)",
-      "Bash(uv run pre-commit:*)",
+      "Bash(uv run --no-sync python:*)",
+      "Bash(uv run --group:*)",
       "Bash(uv sync:*)",
       "Bash(uv lock:*)",
       "Bash(uv build)",
@@ -27,6 +25,10 @@
     "deny": [
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(uv run --group release:*)",
       "Bash(git reset --hard:*)",
       "Bash(uv publish:*)",
       "Bash(twine upload:*)",
