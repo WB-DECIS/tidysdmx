@@ -7,19 +7,39 @@ on:
 permissions:
   contents: read
 
+# One review per pull request at a time: a new push cancels the review still
+# running on the superseded head instead of paying for both and posting both.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: Claude code review
-    if: github.event.pull_request.draft == false
+    # Fork pull requests carry no secrets, so ANTHROPIC_API_KEY is empty there
+    # and the action fails at startup — skip cleanly instead. Reviewing outside
+    # contributions with the maintainers' key would need a pull_request_target
+    # design and a much more careful trust model than this workflow has.
+    if: >-
+      github.event.pull_request.draft == false
+      && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      contents: read
-      pull-requests: write
+      contents: read # read the diff
+      pull-requests: write # post the review comments
       # claude-code-action exchanges an OIDC token for a GitHub App token, so it
       # fails at startup without this ("Unable to get ACTIONS_ID_TOKEN_REQUEST_URL").
-      # docs.yml and release.yml already grant it; this job was the omission.
+      # The exchange also needs the Claude GitHub App
+      # (https://github.com/apps/claude) installed on the repository, and the
+      # action refuses to run a workflow file that differs from the copy on the
+      # repository's default branch — so this file only starts working once it
+      # has reached that branch.
       id-token: write
     steps:
+      # fetch-depth: 0 already brings every branch of origin, so the base ref is
+      # present without a separate fetch — which persist-credentials: false
+      # would make fail on a private repository anyway.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -30,7 +50,6 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          git fetch --quiet origin "$BASE_REF"
           if git diff --quiet "origin/$BASE_REF...HEAD" -- '*.py'; then
             echo "has_python_changes=false" >> "$GITHUB_OUTPUT"
           else
@@ -39,14 +58,24 @@ jobs:
 
       - name: Run Claude review
         if: steps.diff.outputs.has_python_changes == 'true'
-        # No `model:` is set on purpose — the action's default tracks a current
-        # model, so this workflow cannot rot the way a hardcoded dated model id
-        # does.
+        # No `--model` in claude_args on purpose — the action's default tracks a
+        # current model, so this workflow cannot rot the way a hardcoded dated
+        # model id does.
         uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # In the action's automation mode the review reaches the pull request
+          # only through tools Claude is explicitly allowed to call. The prompt
+          # therefore says where to post, and claude_args grants exactly those
+          # tools — the shape the action documents for automatic PR review
+          # (docs/solutions.md at the pinned version). Without either, the
+          # review ends up in the job log and nowhere else.
           prompt: |
-            Review this pull request. Focus on:
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Its branch is checked out in the current
+            working directory. Focus on:
 
             1. Correctness — logic errors, unhandled edge cases, off-by-one and
                boundary conditions, incorrect error handling.
@@ -65,3 +94,11 @@ jobs:
             Do not comment on formatting or lint rules: ruff already enforces
             those and its findings appear separately. Be concise, and only raise
             things that actually matter.
+
+            Post your findings on the pull request and nowhere else: use
+            `gh pr comment` for overall feedback, and
+            `mcp__github_inline_comment__create_inline_comment` (with
+            `confirmed: true`) to flag a specific line. Do not submit review
+            text as messages.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
