@@ -47,16 +47,28 @@ Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/main/CHANGELOG.md"
 Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
 
 [build-system]
-requires = ["hatchling>=1.32"]
+# >=1.27 rather than the template's >=1.32. Consumers install this package from
+# git with pip (Databricks task libraries), and pip resolves the backend from
+# whatever index the cluster uses, which can lag PyPI by weeks. A floor of 1.32
+# admits exactly one release (1.32.0, 2026-08-11) and broke those installs; 1.27
+# (2024-11) is the first release with PEP 639 metadata, which is all this file
+# needs. Documented deviation — see CLAUDE.md, "Branching and Releases".
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+# core-metadata-version is pinned on both targets so the artefacts do not depend
+# on which hatchling the installer picked: 1.27–1.31 default to 2.4, 1.32 to 2.5,
+# and older packaging-based tools (twine 6.2 and earlier) reject 2.5. 2.4 carries
+# everything this metadata uses (PEP 639 License-Expression / License-File).
 [tool.hatch.build.targets.wheel]
 packages = ["src/tidysdmx"]
+core-metadata-version = "2.4"
 
 [tool.hatch.build.targets.sdist]
 # Anchored to the project root: hatchling patterns follow gitignore rules, so an
 # unanchored "README.md" also matches .claude/README.md and ships it.
 include = ["/src", "/tests", "/README.md", "/CHANGELOG.md"]
+core-metadata-version = "2.4"
 
 # ----------------------------------------------------------------------
 # Dependency groups (PEP 735). `uv sync` installs `dev` by default;
