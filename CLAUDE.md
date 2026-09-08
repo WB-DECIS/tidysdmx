@@ -198,11 +198,13 @@ Two deviations remain, and both are deliberate. Re-apply them after
   complexity without a consumer. There is no
   `[tool.semantic_release.branches.dev]` group and `release.yml` triggers on
   `main` only.
-- `[build-system]` requires `hatchling>=1.27`, not the template's `>=1.32`, and
-  both build targets pin `core-metadata-version = "2.4"`. Consumers install
-  this package from git with pip (Databricks task libraries) against indexes
-  that lag PyPI, so the backend requirement must be satisfiable by more than
-  one recent release, and the metadata must not change with the release picked.
+- The build backend is `flit_core`, not the template's hatchling. Consumers
+  install this package from git with pip (Databricks task libraries), where
+  pip's isolated build environment must resolve the backend and its
+  dependencies on the cluster's index, under the cluster's pip constraints.
+  hatchling needs `packaging>=24.2`, `pathspec`, `pluggy` and
+  `trove-classifiers`, and that resolution fails there; `flit_core` needs
+  nothing. Keep `[build-system]` and `[tool.flit.sdist]` as they are.
 
 ## Staying in Sync With the Template
 
