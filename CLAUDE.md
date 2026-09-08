@@ -189,13 +189,20 @@ Since template v0.3.0 this is a first-class option rather than a deviation:
 renders the `dev` triggers, the Dependabot routing and the main-only Pages
 deploy for us.
 
-One deviation remains, and it is deliberate: the template's `main_dev` also
-makes `dev` a semantic-release branch group cutting `vX.Y.Z-rc.N` prereleases.
-`dev` here is internal integration that nobody installs from, so the rc
-machinery would be complexity without a consumer. There is no
-`[tool.semantic_release.branches.dev]` group and `release.yml` triggers on
-`main` only. Re-apply that after `copier update` until upstream stops coupling
-the two.
+Two deviations remain, and both are deliberate. Re-apply them after
+`copier update`:
+
+- The template's `main_dev` also makes `dev` a semantic-release branch group
+  cutting `vX.Y.Z-rc.N` prereleases. `dev` here is internal integration whose
+  only consumers install the branch head from git, so rc prereleases would be
+  complexity without a consumer. There is no
+  `[tool.semantic_release.branches.dev]` group and `release.yml` triggers on
+  `main` only.
+- `[build-system]` requires `hatchling>=1.27`, not the template's `>=1.32`, and
+  both build targets pin `core-metadata-version = "2.4"`. Consumers install
+  this package from git with pip (Databricks task libraries) against indexes
+  that lag PyPI, so the backend requirement must be satisfiable by more than
+  one recent release, and the metadata must not change with the release picked.
 
 ## Staying in Sync With the Template
 
