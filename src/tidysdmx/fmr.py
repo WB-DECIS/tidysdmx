@@ -101,6 +101,8 @@ class BearerToken:
             cache internally.
 
     Raises:
+        TypeError: If ``token`` is not a string or ``expires_at`` is not a
+            datetime.
         ValueError: If ``token`` is blank or ``expires_at`` is naive.
     """
 
@@ -108,12 +110,23 @@ class BearerToken:
     expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        if not self.token.strip():
+        # Tokens are built by user-written providers, so the fields are a
+        # boundary: narrow them before calling anything on them.
+        token: object = self.token
+        expires_at: object = self.expires_at
+        if not isinstance(token, str):
+            raise TypeError(f"token must be a str; got {type(token).__name__}")
+        if not token.strip():
             raise ValueError("token must be a non-empty string")
-        if self.expires_at is not None and self.expires_at.utcoffset() is None:
+        if expires_at is not None and not isinstance(expires_at, datetime):
+            raise TypeError(
+                "expires_at must be a datetime or None; "
+                f"got {type(expires_at).__name__}"
+            )
+        if expires_at is not None and expires_at.utcoffset() is None:
             raise ValueError(
                 "expires_at must be timezone-aware, e.g. datetime.now(UTC); "
-                f"got naive {self.expires_at!r}"
+                f"got naive {expires_at!r}"
             )
 
 
@@ -123,9 +136,11 @@ class TokenProvider(Protocol):
 
     This is the single extension point for authentication backends: implement
     it to plug an identity provider other than Azure into :class:`FmrClient`.
-    Implementations must define exactly ``get_token(self) -> BearerToken``;
-    typeguard compares the signature structurally when a provider is passed
-    to :class:`FmrClient`.
+    Implementations must define ``get_token(self) -> BearerToken``. When a
+    provider is passed to :class:`FmrClient`, typeguard checks that the method
+    exists and can be called without arguments; the returned value is checked
+    on first use, so a provider that returns anything but a
+    :class:`BearerToken` fails at the first request with a ``TypeError``.
     """
 
     def get_token(self) -> BearerToken:
@@ -201,7 +216,7 @@ class AzureTokenProvider:
             )
         self._credential = credential
         self._get_token: Callable[..., object] = get_token
-        self._scope = scope
+        self._scope = scope.strip()
 
     @property
     def scope(self) -> str:
@@ -498,6 +513,12 @@ def _normalise_root(base_url: str) -> str:
     than silently mangled.
     """
     parts = urlsplit(base_url.strip())
+    if parts.username is not None or parts.password is not None:
+        # Deliberately does not echo the URL: it contains the secret.
+        raise ValueError(
+            "base_url must not embed credentials (user:password@host); "
+            "authenticate with token_provider= instead"
+        )
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise ValueError(
             "base_url must be an absolute http(s) URL such as "
@@ -536,8 +557,11 @@ class FmrClient:
     every request — reads included.
 
     This is the package's first stateful object: hold one instance per
-    registry and reuse it; the token cache lives on it. Nothing touches the
-    network, or asks the provider for a token, until the first request.
+    registry and reuse it; the token cache lives on it. When a token provider
+    is given, both pysdmx clients are built immediately, so a pysdmx release
+    that no longer offers the hooks this module relies on fails here rather
+    than on the first request of a pipeline. Nothing touches the network, or
+    asks the provider for a token, until the first request.
 
     Args:
         base_url: The registry root, e.g. ``https://fmrqa.worldbank.org/FMR``.
@@ -560,10 +584,12 @@ class FmrClient:
             not trigger an interactive sign-in for a read.
 
     Raises:
-        ValueError: If ``base_url`` is not an absolute http(s) URL, carries a
-            query string or fragment, or has an API path fragment before the
-            root; or if ``structure_format`` is not one pysdmx's registry
-            client supports.
+        ValueError: If ``base_url`` is not an absolute http(s) URL, embeds
+            credentials, carries a query string or fragment, or has an API
+            path fragment before the root; or if ``structure_format`` is not
+            one pysdmx's registry client supports.
+        RuntimeError: If a token provider is given and the installed pysdmx no
+            longer exposes the hooks this module relies on (PYSDMX-AUTH-01/02).
     """
 
     def __init__(
@@ -597,6 +623,11 @@ class FmrClient:
         )
         self._registry: RegistryClient | None = None
         self._maintenance: RegistryMaintenanceClient | None = None
+        if self._cache is not None:
+            # Fail fast on an incompatible pysdmx (docs/pysdmx-shortcomings.md):
+            # neither constructor touches the network or asks for a token.
+            self._registry = self._build_registry()
+            self._maintenance = self._build_maintenance()
 
     @property
     def base_url(self) -> str:
@@ -649,12 +680,7 @@ class FmrClient:
                 "(basic auth is not supported yet)"
             )
         if self._maintenance is None:
-            self._maintenance = _RefreshingMaintenanceClient(
-                self._base_url,
-                self._cache.token,
-                pem=self._pem,
-                timeout=self._write_timeout,
-            )
+            self._maintenance = self._build_maintenance()
         return self._maintenance
 
     def get_schema(
@@ -702,6 +728,19 @@ class FmrClient:
             ValueError: If the client was created without a token provider.
         """
         self.maintenance.put_structures(artefacts, action=action)
+
+    def _build_maintenance(self) -> RegistryMaintenanceClient:
+        if self._cache is None:
+            raise ValueError(
+                "FMR uploads require authentication, but this FmrClient was "
+                "created without a token_provider"
+            )
+        return _RefreshingMaintenanceClient(
+            self._base_url,
+            self._cache.token,
+            pem=self._pem,
+            timeout=self._write_timeout,
+        )
 
     def _build_registry(self) -> RegistryClient:
         if self._cache is not None and self._authenticate_reads:

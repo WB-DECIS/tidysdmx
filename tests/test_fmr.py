@@ -71,6 +71,14 @@ class TestBearerToken:
     def test_bearer_token_repr_hides_token(self):
         assert "very-secret" not in repr(BearerToken("very-secret"))
 
+    def test_bearer_token_rejects_non_string_token(self):
+        with pytest.raises(TypeError, match="token must be a str; got int"):
+            BearerToken(123)
+
+    def test_bearer_token_rejects_non_datetime_expires_at(self):
+        with pytest.raises(TypeError, match="expires_at must be a datetime"):
+            BearerToken("t", expires_at="2026-09-11")
+
     def test_bearer_token_is_frozen(self):
         with pytest.raises(dataclasses.FrozenInstanceError):
             BearerToken("t").token = "other"
@@ -92,6 +100,14 @@ class TestTokenProvider:
     def test_typechecked_rejects_object_without_get_token(self):
         with pytest.raises(TypeCheckError, match="TokenProvider"):
             FmrClient(FMR_ROOT, token_provider=object())
+
+    def test_typechecked_rejects_get_token_requiring_arguments(self):
+        class NeedsAScope:
+            def get_token(self, scope: str) -> BearerToken:
+                return BearerToken("never")
+
+        with pytest.raises(TypeCheckError, match="TokenProvider"):
+            FmrClient(FMR_ROOT, token_provider=NeedsAScope())
 
 
 class TestStaticTokenProvider:
@@ -134,6 +150,15 @@ class TestAzureTokenProvider:
     def test_azure_token_provider_rejects_credential_without_get_token(self):
         with pytest.raises(TypeError, match="CredentialWithoutGetToken"):
             AzureTokenProvider(CredentialWithoutGetToken(), FMR_SCOPE)
+
+    def test_azure_token_provider_strips_scope(self):
+        credential = FakeAzureCredential()
+
+        provider = AzureTokenProvider(credential, f"  {FMR_SCOPE}  ")
+        provider.get_token()
+
+        assert provider.scope == FMR_SCOPE
+        assert credential.scopes == [(FMR_SCOPE,)]
 
     def test_azure_token_provider_rejects_blank_scope(self):
         with pytest.raises(ValueError, match="scope must be a non-empty string"):
@@ -337,6 +362,19 @@ class TestFmrClientInit:
         with pytest.raises(ValueError, match="query string or fragment"):
             FmrClient(base_url)
 
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "https://user:hunter2@fmr.example.org/FMR",
+            "https://user@fmr.example.org/FMR",
+        ],
+    )
+    def test_fmr_client_rejects_credentials_in_url(self, base_url):
+        with pytest.raises(ValueError, match="must not embed credentials") as excinfo:
+            FmrClient(base_url)
+
+        assert "hunter2" not in str(excinfo.value)
+
     def test_fmr_client_rejects_api_path_before_root(self):
         with pytest.raises(ValueError, match="PYSDMX-AUTH-06"):
             FmrClient("https://fmr.example.org/sdmx/v2/FMR")
@@ -436,8 +474,8 @@ class TestFmrClientRegistry:
         assert request.headers["Accept"] == StructureFormat.SDMX_JSON_2_0_0.value
         assert request.headers["Authorization"] == "Bearer t1"
 
-    def test_registry_raises_when_pysdmx_service_seam_is_missing(
-        self, monkeypatch, fmr_client
+    def test_registry_raises_at_construction_when_pysdmx_service_seam_is_missing(
+        self, monkeypatch, rotating_provider
     ):
         def init_without_service(
             self, api_endpoint, format=None, pem=None, timeout=10.0
@@ -446,8 +484,9 @@ class TestFmrClientRegistry:
 
         monkeypatch.setattr(RegistryClient, "__init__", init_without_service)
 
+        # Fails fast: the authenticated client is built by FmrClient.__init__.
         with pytest.raises(RuntimeError, match="PYSDMX-AUTH-01"):
-            fmr_client.registry  # noqa: B018 - the property builds the client
+            FmrClient(FMR_ROOT, token_provider=rotating_provider)
 
 
 class TestFmrClientMaintenance:
@@ -513,15 +552,16 @@ class TestFmrClientMaintenance:
         with pytest.raises(Invalid, match="Client error 401"):
             fmr_client.maintenance.put_structures([codelist])
 
-    def test_maintenance_raises_when_pysdmx_auth_seam_is_missing(
-        self, monkeypatch, fmr_client
+    def test_maintenance_raises_at_construction_when_pysdmx_auth_seam_is_missing(
+        self, monkeypatch, rotating_provider
     ):
         monkeypatch.delattr(
             RegistryMaintenanceClient, "_RegistryMaintenanceClient__build_auth"
         )
 
+        # Fails fast: the maintenance client is built by FmrClient.__init__.
         with pytest.raises(RuntimeError, match="PYSDMX-AUTH-02"):
-            fmr_client.maintenance  # noqa: B018 - the property builds the client
+            FmrClient(FMR_ROOT, token_provider=rotating_provider)
 
 
 class TestFmrClientGetSchema:
