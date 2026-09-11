@@ -29,7 +29,13 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "pysdmx>=1.13.0,<2",
+    # 1.19.0 is the version tidysdmx.fmr's authentication seams were verified
+    # against (docs/pysdmx-shortcomings.md); access_token support itself
+    # arrived in 1.16.0.
+    "pysdmx>=1.19.0,<2",
+    # pysdmx's own HTTP layer, imported directly by tidysdmx.fmr for the
+    # httpx.Auth hook that rotates bearer tokens on uploads.
+    "httpx>=0.27",
     "pandas>=2.2.3,<3",
     "numpy>=1.26",
     "openpyxl>=3.1.5,<4",
@@ -45,6 +51,12 @@ Repository = "https://github.com/WB-DECIS/tidysdmx"
 Documentation = "https://wb-decis.github.io/tidysdmx/"
 Changelog = "https://github.com/WB-DECIS/tidysdmx/blob/main/CHANGELOG.md"
 Issues = "https://github.com/WB-DECIS/tidysdmx/issues"
+
+# Optional extras. `azure` is what `AzureTokenProvider.from_default_credential`
+# needs; the core package never imports the Azure SDK, so Databricks task
+# libraries that pass their own credential object stay lean.
+[project.optional-dependencies]
+azure = ["azure-identity>=1.17,<2"]
 
 [build-system]
 # flit_core, not the template's hatchling: it has no dependencies of its own.
@@ -83,6 +95,9 @@ dev = [
     # `ruff` pin above by hand. Captured in uv.lock, Dependabot updates them.
     "pre-commit-hooks>=6.0",
     "conventional-pre-commit>=4.4",
+    # httpx mocking for the FMR client tests: pysdmx builds an httpx.Client
+    # inside every request, so only a transport-level mock can see the wire.
+    "respx>=0.23",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool
@@ -227,6 +242,11 @@ max-complexity = 10
 # blocks; their print() calls are progress output for a human running them, not
 # stray debugging left in library code.
 "tests/fixtures/fxtr_*.py" = ["T20"]
+# The FMR client tests pass dummy bearer strings ("t1", "azure-access-token")
+# around; bandit's hardcoded-password heuristics match any name containing
+# "token". Nothing here is a credential.
+"tests/test_fmr.py" = ["S105", "S106", "S107"]
+"tests/fixtures/fxtr_fmr.py" = ["S105", "S106", "S107"]
 
 # ----------------------------------------------------------------------
 # Static typing

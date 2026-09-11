@@ -1,0 +1,158 @@
+---
+title: "FMR client"
+description: "Talk to a Fusion Metadata Registry with authentication and token refresh handled for you."
+tags: [FMR, Setup]
+---
+
+# FMR client
+
+A Fusion Metadata Registry behind single sign-on expects a bearer token on its requests. pysdmx accepts one only as a fixed string, and only for uploads: it does not acquire the token, refresh it when it expires an hour later, or send it on reads at all. `FmrClient` closes that gap without hiding pysdmx — it hands you pysdmx's own clients, with a token that is acquired lazily, cached, refreshed before it expires, and sent on every request.
+
+The workarounds this needs inside pysdmx are documented, one by one, in `docs/pysdmx-shortcomings.md` in the repository.
+
+## 1. Anonymous reads
+
+For a registry whose reads are public, no credentials are needed:
+
+```python
+from tidysdmx import FmrClient
+
+client = FmrClient("https://fmrqa.worldbank.org/FMR")
+
+schema = client.get_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
+codelist = client.registry.get_codes("WB", "CL_REF_AREA", "1.0")
+```
+
+`client.registry` **is** a `pysdmx.api.fmr.RegistryClient`, so every method pysdmx offers is available on it. Pass the registry root — the part before `/sdmx/v2` — and `FmrClient` derives the read and write endpoints itself. A pasted `.../sdmx/v2` URL is accepted and trimmed.
+
+## 2. Sign in with Azure (Entra ID)
+
+Install the optional extra once:
+
+```bash
+pip install "tidysdmx[azure]"
+```
+
+Then let `DefaultAzureCredential` pick the sign-in that fits where the code runs — environment variables and managed identity in a pipeline, `az login` on a laptop:
+
+```python
+from tidysdmx import AzureTokenProvider, FmrClient
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
+```
+
+The scope is the FMR application's, never a Microsoft Graph scope: the registry validates the token's audience. Nothing is acquired until the first request.
+
+For a browser sign-in on a machine without the Azure CLI, let the default chain fall through to it:
+
+```python
+provider = AzureTokenProvider.from_default_credential(
+    "api://<fmr-app-id>/.default",
+    exclude_interactive_browser_credential=False,
+)
+```
+
+Any azure-identity credential works — `AzureTokenProvider` wraps the object you give it and never imports the SDK itself. A device-code flow for a headless terminal is two lines:
+
+```python
+from azure.identity import DeviceCodeCredential
+from tidysdmx import AzureTokenProvider
+
+credential = DeviceCodeCredential(tenant_id="<tenant-id>", client_id="<client-id>")
+provider = AzureTokenProvider(credential, "api://<fmr-app-id>/.default")
+```
+
+## 3. A token you already have
+
+If the token comes from elsewhere — `az account get-access-token --resource api://<fmr-app-id>`, a CI secret, a pipeline parameter — wrap it in a `StaticTokenProvider`. It never refreshes: when it expires, build a new client.
+
+```python
+from datetime import UTC, datetime, timedelta
+from tidysdmx import FmrClient, StaticTokenProvider
+
+provider = StaticTokenProvider(token, expires_at=datetime.now(UTC) + timedelta(minutes=55))
+client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
+```
+
+## 4. Another identity provider
+
+`TokenProvider` is the only extension point. Implement `get_token(self) -> BearerToken` — with exactly that signature, since typeguard checks it structurally — and pass an instance as `token_provider`:
+
+```python
+from datetime import UTC, datetime
+from tidysdmx import BearerToken, FmrClient
+
+
+class KeycloakTokenProvider:
+    def __init__(self, session):
+        self._session = session
+
+    def get_token(self) -> BearerToken:
+        response = self._session.fetch_token()
+        expires_at = datetime.fromtimestamp(response["expires_at"], tz=UTC)
+        return BearerToken(response["access_token"], expires_at)
+
+
+client = FmrClient("https://fmr.example.org/FMR", token_provider=KeycloakTokenProvider(session))
+```
+
+Return the expiry when you know it: `FmrClient` reuses a token until it is within `refresh_margin` (five minutes by default) of expiring. A token without an expiry is requested again before every request, which is fine for providers that cache internally.
+
+## 5. Upload artefacts
+
+`client.maintenance` **is** a `pysdmx.api.fmr.maintenance.RegistryMaintenanceClient`; `put_structures` is the one-line version with the token supplied for you. It pairs with `prepare_structure_map_for_upload`:
+
+```python
+from pysdmx.api.fmr.maintenance import StructureAction
+from tidysdmx import prepare_structure_map_for_upload
+
+artefacts = prepare_structure_map_for_upload(structure_map)
+client.put_structures(artefacts, action=StructureAction.Append)
+```
+
+`Replace` is the default, as in pysdmx. Uploads always need a token provider; without one, `client.maintenance` raises `ValueError`.
+
+## 6. How refresh works
+
+- The token is acquired on the first request, not when the client is built, so constructing a client or reading `client.maintenance` never triggers a sign-in.
+- Both pysdmx clients are built once and reused. They evaluate the token when each request goes out, so a reference you hold for hours keeps working across rotation.
+- Reads carry the token too whenever a provider is set. For a registry whose reads are public, `authenticate_reads=False` keeps a read from prompting an interactive sign-in.
+- The token itself never appears in `repr()` output, logs or tracebacks.
+
+## 7. Troubleshooting
+
+`pysdmx.errors.Invalid: Client error 401`
+: The registry rejected the token. pysdmx reports every 4xx except 404 as `Invalid`, so this is an authentication failure, not a bad request. Decode the token and compare its `aud` with the scope the FMR expects — a Graph scope is the usual culprit.
+
+`pysdmx.errors.Invalid: Client error 403`
+: The token is valid but the identity lacks write permissions in the registry.
+
+`ImportError: azure-identity is not installed`
+: `from_default_credential` needs the extra: `pip install "tidysdmx[azure]"`.
+
+`ValueError: base_url must not embed credentials`
+: A `user:password@` component in the registry URL is rejected, so a password can never end up in a `repr()` or a traceback. Authenticate with a token provider instead.
+
+`ValueError: base_url must be an absolute http(s) URL`
+: Pass the scheme and host, e.g. `https://fmrqa.worldbank.org/FMR`. An `http` root that redirects to `https` would make uploads look successful without storing anything, because pysdmx does not follow redirects on POST.
+
+## 8. Smoke test against your registry
+
+The test suite runs entirely offline. To prove the wiring against a real registry, read something small, upload a codelist with `Append`, and read it back:
+
+```python
+from pysdmx.api.fmr.maintenance import StructureAction
+from pysdmx.model import Code
+from tidysdmx import AzureTokenProvider, FmrClient, build_codelist
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
+
+client.registry.get_agencies("WB")
+codelist = build_codelist(
+    "CL_SMOKE_TEST", "WB", "Smoke test", codes=[Code(id="OK", name="Smoke test")]
+)
+client.put_structures([codelist], action=StructureAction.Append)
+client.registry.get_codes("WB", "CL_SMOKE_TEST", "1.0")
+```

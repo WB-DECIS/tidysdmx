@@ -1,6 +1,6 @@
 # pysdmx Overview for tidysdmx Developers
 
-**Purpose:** This document describes the `pysdmx` library (v1.8.1+), explains how its objects map to the SDMX Information Model, and documents the subset of the API used by `tidysdmx`. It is intended to orient AI agents and developers so they can leverage existing pysdmx functionality rather than reimplementing it.
+**Purpose:** This document describes the `pysdmx` library (v1.19.0+), explains how its objects map to the SDMX Information Model, and documents the subset of the API used by `tidysdmx`. It is intended to orient AI agents and developers so they can leverage existing pysdmx functionality rather than reimplementing it.
 
 ---
 
@@ -15,7 +15,7 @@
 The library is format-neutral at the model layer: all formats parse into the same Python objects.
 
 **Key dependency versions used by tidysdmx:**
-- `pysdmx >= 1.13.0, < 2`
+- `pysdmx >= 1.19.0, < 2`
 - Internally uses `httpx` (HTTP/2), `msgspec` (fast serialisation), `parsy` (parsing)
 
 ---
@@ -34,7 +34,9 @@ pysdmx
 ├── io/
 │   └── format.py              # StructureFormat enum (e.g. FUSION_JSON)
 └── api/
-    └── fmr.py                 # RegistryClient — HTTP client for FMR
+    └── fmr/
+        ├── __init__.py        # RegistryClient — read metadata from FMR
+        └── maintenance.py     # RegistryMaintenanceClient — upload metadata (EXPERIMENTAL)
 ```
 
 All public model symbols can be imported from `pysdmx.model` directly:
@@ -378,10 +380,12 @@ from pysdmx.api import fmr
 from pysdmx.io.format import StructureFormat
 
 client = fmr.RegistryClient(
-    base_url="https://your-fmr-host/FMR/sdmx/v2/",
+    api_endpoint="https://your-fmr-host/FMR/sdmx/v2/",  # must include /sdmx/v2
     format=StructureFormat.FUSION_JSON,  # recommended format
 )
 ```
+
+The client has **no authentication hook** — it cannot send an `Authorization` header. See §5.3 and `docs/pysdmx-shortcomings.md` (PYSDMX-AUTH-01).
 
 **Key method — `get_schema()`:**
 
@@ -410,6 +414,22 @@ An enum specifying the wire format for FMR communication.
 | `StructureFormat.FUSION_JSON` | Fusion Metadata Registry's extended JSON format (recommended for tidysdmx) |
 | `StructureFormat.SDMX_JSON_2_0` | Standard SDMX-JSON 2.0 |
 | `StructureFormat.SDMX_ML_3_0` | Standard SDMX-ML (XML) 3.0 |
+
+`RegistryClient` accepts only `FUSION_JSON` and `SDMX_JSON_2_0_0`; anything else raises `pysdmx.errors.NotImplemented`.
+
+### 5.3 `RegistryMaintenanceClient` (EXPERIMENTAL)
+
+Uploads maintainable artefacts to an FMR. Lives in `pysdmx.api.fmr.maintenance`, takes the registry **root** (it strips `/sdmx/v2` itself), and authenticates with either basic auth or a static bearer token:
+
+```python
+from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
+
+client = RegistryMaintenanceClient("https://your-fmr-host/FMR", access_token=token)
+# POSTs to {root}/ws/secure/sdmxapi/rest
+client.put_structures([codelist], action=StructureAction.Replace)
+```
+
+`StructureAction` is `Append`, `Merge` or `Replace`. The class is marked experimental by pysdmx, so its API may change between minor releases; it does not acquire or refresh tokens, and a rejected token surfaces as `pysdmx.errors.Invalid("Client error 401")`, never as `Unauthorized`. `tidysdmx.fmr.FmrClient` wraps both clients, adds token acquisition and refresh, and authenticates reads; the pysdmx gaps it works around are catalogued in `docs/pysdmx-shortcomings.md`.
 
 ---
 
@@ -443,6 +463,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
 | **Fetch schema** | `fmr.RegistryClient.get_schema()` | `fetch_schema()` — simplified wrapper with URL building and ID parsing |
+| **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Schema`, `Components`, `Component`, `Role`, `Codelist` | `extract_validation_info()` — extracts validation dict from schema; `extract_component_ids()` — list of component IDs |
 | **Column validation** | Component `required` flag, `local_codes` | `validate_dataset_local()` — full validation pipeline; `validate_columns()`, `validate_mandatory_columns()`, `validate_codelist_ids()`, `validate_duplicates()`, `validate_no_missing_values()` |
 | **Apply structure maps** | `StructureMap`, `FixedValueMap`, `ImplicitComponentMap`, `ComponentMap`, `MultiComponentMap` | `map_structures()` — applies a StructureMap to a DataFrame; individual `apply_*` functions |
@@ -564,7 +585,8 @@ The following capabilities already exist in pysdmx and should be used directly r
 | Don't reimplement | Use instead |
 |---|---|
 | SDMX artefact identity parsing | `parse_artefact_id()` (tidysdmx thin wrapper over standard parsing) |
-| HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` |
+| HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.get_schema()` |
+| Artefact upload | `RegistryMaintenanceClient.put_structures()` via `FmrClient.put_structures()` |
 | Component role checking | `component.role == Role.DIMENSION` etc. |
 | Codelist access | `component.local_codes.items` |
 | Mandatory field checking | `component.required` |
@@ -597,5 +619,6 @@ The following capabilities already exist in pysdmx and should be used directly r
 | `ComponentMap` | Component mapping with value translation | Applied to recode column values |
 | `RepresentationMap` | Code-level lookup table | Attached to `ComponentMap`; built from DataFrames |
 | `ValueMap` | Single source→target code pair | Items in `RepresentationMap.maps` |
-| `fmr.RegistryClient` | SDMX REST API client | Used in `fetch_schema()` |
+| `fmr.RegistryClient` | SDMX REST API client | Used in `fetch_schema()` and `FmrClient.registry` |
+| `fmr.maintenance.RegistryMaintenanceClient` | SDMX REST maintenance client (uploads) | Used in `FmrClient.maintenance` / `put_structures()` |
 | `StructureFormat.FUSION_JSON` | Wire format for FMR | Default format in all tidysdmx registry calls |

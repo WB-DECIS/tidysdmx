@@ -19,6 +19,10 @@ from .utils import extract_component_ids, sdmx_reference_cols_for
 
 logger = logging.getLogger(__name__)
 
+_INVALID_ARTEFACT_ID_MSG: str = (
+    "Invalid artefact_id format. Expected format: 'agency:id(version)'"
+)
+
 
 # NOTE: The following helpers are not part of the public API and are
 # candidates for removal once confirmed unused by downstream consumers.
@@ -164,12 +168,17 @@ def parse_artefact_id(artefact_id: str) -> tuple[str, str, str]:
     try:
         agency, rest = artefact_id.split(":", 1)
         id_part, version_part = rest.split("(", 1)
-        version = version_part.rstrip(")")
-        return agency, id_part, version
     except (ValueError, AttributeError) as err:
-        raise ValueError(
-            "Invalid artefact_id format. Expected format: 'agency:id(version)'"
-        ) from err
+        raise ValueError(_INVALID_ARTEFACT_ID_MSG) from err
+    version = version_part[:-1]
+    if (
+        not version_part.endswith(")")
+        or "(" in version
+        or ")" in version
+        or not (agency and id_part and version)
+    ):
+        raise ValueError(_INVALID_ARTEFACT_ID_MSG)
+    return agency, id_part, version
 
 
 @typechecked
