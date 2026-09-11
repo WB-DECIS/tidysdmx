@@ -74,7 +74,7 @@ introduced this register.
 | **Symptom** | `RegistryMaintenanceClient` is marked *EXPERIMENTAL*; pysdmx's changelog states experimental classes "may change, break, or be removed at any time without prior notice" and without a major version bump. There is no `AsyncRegistryMaintenanceClient`. |
 | **pysdmx location** | `api/fmr/maintenance.py:45-59`; `CHANGELOG.rst`; `docs/api/fmr/maintenance.rst`. |
 | **Impact** | Any minor release may change the constructor or the hook AUTH-02 relies on. No async write path for tidysdmx to build on. |
-| **tidysdmx workaround** | `pyproject.toml` pins `pysdmx>=1.19.0,<2` (the seams were verified at 1.19.0 only) and the wire tests fail loudly on a bump that moves them. Async support is deferred. |
+| **tidysdmx workaround** | `pyproject.toml` pins `pysdmx>=1.19.0,<2`. The upper bound is deliberately not the verified minor: pysdmx ships a minor roughly monthly and only the authenticated path touches these hooks, so a `<1.20` cap would force a tidysdmx release per pysdmx minor on every consumer. Instead, `FmrClient.__init__` builds both pysdmx clients as soon as a token provider is given, so an incompatible pysdmx fails at construction with the register entry named, and the wire tests in `tests/test_fmr.py` fail on any bump that changes the behaviour. Async support is deferred. |
 | **Proposed upstream change** | Graduate the client from experimental; add an async twin. |
 | **Remove when** | Graduated — the floor can then follow the normal cadence. |
 

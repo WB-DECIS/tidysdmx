@@ -68,10 +68,10 @@ provider = AzureTokenProvider(credential, "api://<fmr-app-id>/.default")
 If the token comes from elsewhere — `az account get-access-token --resource api://<fmr-app-id>`, a CI secret, a pipeline parameter — wrap it in a `StaticTokenProvider`. It never refreshes: when it expires, build a new client.
 
 ```python
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from tidysdmx import FmrClient, StaticTokenProvider
 
-provider = StaticTokenProvider(token, expires_at=datetime(2026, 9, 11, 15, 0, tzinfo=UTC))
+provider = StaticTokenProvider(token, expires_at=datetime.now(UTC) + timedelta(minutes=55))
 client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
 ```
 
@@ -131,6 +131,9 @@ client.put_structures(artefacts, action=StructureAction.Append)
 `ImportError: azure-identity is not installed`
 : `from_default_credential` needs the extra: `pip install "tidysdmx[azure]"`.
 
+`ValueError: base_url must not embed credentials`
+: A `user:password@` component in the registry URL is rejected, so a password can never end up in a `repr()` or a traceback. Authenticate with a token provider instead.
+
 `ValueError: base_url must be an absolute http(s) URL`
 : Pass the scheme and host, e.g. `https://fmrqa.worldbank.org/FMR`. An `http` root that redirects to `https` would make uploads look successful without storing anything, because pysdmx does not follow redirects on POST.
 
@@ -140,15 +143,16 @@ The test suite runs entirely offline. To prove the wiring against a real registr
 
 ```python
 from pysdmx.api.fmr.maintenance import StructureAction
+from pysdmx.model import Code
 from tidysdmx import AzureTokenProvider, FmrClient, build_codelist
 
 provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
 client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
 
 client.registry.get_agencies("WB")
-client.put_structures(
-    [build_codelist("CL_SMOKE_TEST", "WB", "Smoke test")],
-    action=StructureAction.Append,
+codelist = build_codelist(
+    "CL_SMOKE_TEST", "WB", "Smoke test", codes=[Code(id="OK", name="Smoke test")]
 )
+client.put_structures([codelist], action=StructureAction.Append)
 client.registry.get_codes("WB", "CL_SMOKE_TEST", "1.0")
 ```

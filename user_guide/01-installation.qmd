@@ -55,7 +55,7 @@ The git hooks run every tool out of the project environment with `uv run`, so
 tidysdmx depends on:
 
 - [`pysdmx`](https://py.sdmx.io) — the underlying SDMX information-model library.
-- [`httpx`](https://www.python-httpx.org) — pysdmx's HTTP layer; tidysdmx uses it to attach bearer tokens to uploads.
+- [`httpx`](https://www.python-httpx.org) — pysdmx's HTTP layer, which the FMR client extends so reads and uploads carry a bearer token.
 - [`pandas`](https://pandas.pydata.org) — the tabular workhorse.
 - [`numpy`](https://numpy.org) — vectorised lookups behind the mapping helpers.
 - [`typeguard`](https://typeguard.readthedocs.io) — runtime type checking.
