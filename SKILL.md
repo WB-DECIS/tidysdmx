@@ -2,8 +2,10 @@
 name: tidysdmx
 description: >-
   A toolbox to work with SDMX data, built on pysdmx. Use when fetching SDMX
-  schemas from an FMR registry, building or applying structure maps, validating
-  datasets against codelists, or preparing data for SDMX dissemination.
+  schemas from an FMR registry, connecting to an FMR behind single sign-on
+  (bearer tokens, refresh), uploading artefacts, building or applying structure
+  maps, validating datasets against codelists, or preparing data for SDMX
+  dissemination.
 ---
 
 # tidysdmx
@@ -70,6 +72,7 @@ final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
 | Task | Functions |
 |---|---|
 | Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id`, `create_schema_from_table` |
+| Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Read Excel mapping templates | `parse_mapping_template_wb`, `build_structure_map_from_template_wb` |
 | Build map rules by hand | `build_fixed_map`, `build_implicit_component_map`, `build_date_pattern_map`, `build_value_map`, `build_single_component_map`, `build_multi_component_map` |
 | Apply maps to DataFrames | `map_structures`, `apply_fixed_value_maps`, `apply_implicit_component_maps`, `apply_multi_component_map` |
@@ -88,6 +91,10 @@ final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
 - **Two validation vocabularies.** `validate_dataset_local` checks *data* against
   a schema and returns an error DataFrame. `validate` / `raise_if_invalid` check
   *artefacts* for publish-readiness and raise `ValidationError`.
+- **`FmrClient` is the only stateful object.** Build one per registry and reuse it:
+  `client.registry` is pysdmx's `RegistryClient`, `client.maintenance` its
+  `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
+  Anything with `get_token() -> BearerToken` works as a `token_provider`.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
   `parse_dsd_id`, `standardize_data_for_upload` and `add_sdmx_reference_cols`
   are retained for compatibility only; each names its replacement in its

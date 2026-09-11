@@ -34,8 +34,10 @@ The table below captures the philosophical gap at each stage of the workflow:
 │  create_schema_from_table()                                             │
 │  write_excel_mapping_template()                                         │
 │  build_structure_map_from_template_wb()                                 │
+│  FmrClient  — authenticated registry access (reads and uploads)         │
 │                                                                         │
-│  Primary types: pd.DataFrame, dict, str, list                           │
+│  Primary types: pd.DataFrame, dict, str, list (FmrClient is the one     │
+│  stateful object)                                                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                   Thin translation layer                                │
 │                                                                         │
@@ -53,7 +55,7 @@ The table below captures the philosophical gap at each stage of the workflow:
 │  ComponentMap / RepresentationMap / ValueMap                            │
 │  MultiComponentMap / MultiRepresentationMap / MultiValueMap             │
 │  DatePatternMap                                                         │
-│  fmr.RegistryClient                                                     │
+│  fmr.RegistryClient / fmr.maintenance.RegistryMaintenanceClient         │
 │                                                                         │
 │  Primary types: pysdmx dataclasses                                      │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -371,6 +373,36 @@ kd_validate_datasets_local()→  calls kd_validate_dataset_local() for each part
 
 There is no new pysdmx usage in the Kedro layer. It is purely an orchestration adapter.
 
+### 10. Registry Access and Authentication
+
+**pysdmx view:** Two clients with two different URL conventions. `RegistryClient` reads and takes no credentials at all; `RegistryMaintenanceClient` writes and takes a *static* `access_token` string that it never refreshes. Against a registry behind single sign-on, the developer acquires the token (`azure-identity`), watches `expires_on`, and rebuilds the client when it expires.
+
+**tidysdmx view:** One `FmrClient` per registry, built from the registry root and a `TokenProvider`. It hands out pysdmx's own clients — `client.registry` *is* a `RegistryClient`, `client.maintenance` *is* a `RegistryMaintenanceClient` — with a bearer token that is acquired lazily, cached, refreshed before it expires, and sent on every request, reads included.
+
+```python
+# pysdmx — token wiring is the caller's problem
+from azure.identity import DefaultAzureCredential
+from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient
+
+token = DefaultAzureCredential().get_token("api://<fmr-app-id>/.default")
+client = RegistryMaintenanceClient(
+    "https://fmr.example.org/FMR", access_token=token.token
+)
+# ... and again in an hour, and reads stay anonymous
+
+# tidysdmx — one object, refresh included
+from tidysdmx import AzureTokenProvider, FmrClient
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
+schema = client.get_schema("WB:WDI(1.0.0)", "dataflow")
+client.put_structures(artefacts)
+```
+
+**What tidysdmx hides:** token acquisition and refresh, the `Authorization` header on reads (which pysdmx has no hook for), the two URL conventions, and client construction. `TokenProvider` is the only extension point: anything with `get_token() -> BearerToken` plugs in, so the design is not tied to Azure.
+
+**What it does not hide:** the pysdmx clients themselves. Every pysdmx method stays reachable, and the seams tidysdmx uses to get the token onto the wire are guarded, wire-tested and registered in `docs/pysdmx-shortcomings.md` so they can be deleted when upstream adds an auth hook.
+
 ---
 
 ## Key Design Decisions
@@ -390,6 +422,14 @@ The JSON mapping dict (`read_mapping` → `map_to_sdmx`) and the Excel mapping t
 ### Validation pre-computation
 
 `extract_validation_info(schema)` is designed to be called **once** per run and reused. The `valid` dict is passed as an argument to all validation functions, allowing batch validation of hundreds of partitions without re-parsing the schema on each call. This is the pattern used in `kd_validate_datasets_local()`.
+
+### A stateful client object
+
+Every other public name in the package is a function. `FmrClient` is a class because a token cache has a lifetime: it must outlive a single call and be shared by every request against the same registry. Hold one instance per registry. Everything it returns is still a pysdmx object.
+
+### Guarded pysdmx seams
+
+pysdmx 1.19.0 offers no way to put an `Authorization` header on reads and no way to refresh the token on writes. `tidysdmx.fmr` reaches into two private hooks to do both. Each seam is (1) isolated in one private class, (2) guarded by a runtime check that raises `RuntimeError` naming the register entry if the hook is gone, (3) covered by a wire-level test that fails on any pysdmx bump that changes the behaviour, and (4) recorded in `docs/pysdmx-shortcomings.md` with the upstream fix and the trigger for deleting the workaround. Adding a third seam means adding all four.
 
 ### Deprecation pattern
 
@@ -420,6 +460,11 @@ tidysdmx/
 ├── utils.py        ← Schema introspection and Excel tooling
 │                     extract_validation_info() — the pysdmx → dict bridge
 │                     Excel template generation and parsing
+│
+├── fmr.py          ← Registry access with authentication
+│                     FmrClient wraps RegistryClient + RegistryMaintenanceClient
+│                     TokenProvider / AzureTokenProvider / StaticTokenProvider
+│                     Future home of fetch_schema (backlog B2)
 │
 ├── tidy_raw.py     ← Codelist-based row filtering
 │                     filter_tidy_raw(df, schema) — pre-processing before mapping

@@ -225,6 +225,9 @@ independently shippable.
   PR, `__init__.py` re-exports keep the API stable (ARCH-02/03). *L*
 - **B2** Split `tidysdmx.py` → `registry.py` / `standardize.py` /
   `json_mapping.py`; retire the package-shadowing module name. *M*
+  *Update (2026-09): `tidysdmx/fmr.py` now exists and is the natural home for
+  the registry slice — move `fetch_schema` there instead of creating
+  `registry.py`.*
 - **B3** Dissolve `utils.py` → `introspection.py` + (Excel→B1) +
   `pysdmx_workarounds.py` (deleted entirely after A1). *S*
 - **B4** Unit-test kedro.py with plain fakes; remove the coverage `omit`
@@ -274,6 +277,9 @@ independently shippable.
 - **C5** `fetch_schema` path flexibility (PYSDMX-04); document the pre-push
   hook installation (PROD-12); file the upstream `build_urn` feature request
   (PYSDMX-02).
+  *Update (2026-09): `FmrClient` takes the registry root and derives both
+  endpoints itself (see `docs/pysdmx-shortcomings.md`, PYSDMX-AUTH-08); fix
+  PYSDMX-04 by delegating `fetch_schema` to it.*
 
 ## 8. Out of scope / deferred
 

@@ -26,6 +26,16 @@ uv add tidysdmx
 poetry add tidysdmx
 ```
 
+## Optional extras
+
+Signing in to an FMR with Azure (Entra ID) through `AzureTokenProvider.from_default_credential` needs the `azure` extra:
+
+```bash
+pip install "tidysdmx[azure]"
+```
+
+The core package never imports the Azure SDK, so you can also pass any `azure-identity` credential you build yourself without the extra installed.
+
 ## From source (development)
 
 tidysdmx is developed with [uv](https://docs.astral.sh/uv/).
@@ -33,7 +43,7 @@ tidysdmx is developed with [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/WB-DECIS/tidysdmx.git
 cd tidysdmx
-make install          # uv sync --all-groups, plus the pre-commit hooks
+make install          # uv sync --all-groups --all-extras, plus the pre-commit hooks
 make check            # lint, typecheck, and unit tests with the coverage gate
 ```
 
@@ -45,6 +55,7 @@ The git hooks run every tool out of the project environment with `uv run`, so
 tidysdmx depends on:
 
 - [`pysdmx`](https://py.sdmx.io) — the underlying SDMX information-model library.
+- [`httpx`](https://www.python-httpx.org) — pysdmx's HTTP layer; tidysdmx uses it to attach bearer tokens to uploads.
 - [`pandas`](https://pandas.pydata.org) — the tabular workhorse.
 - [`numpy`](https://numpy.org) — vectorised lookups behind the mapping helpers.
 - [`typeguard`](https://typeguard.readthedocs.io) — runtime type checking.
@@ -70,10 +81,13 @@ If the imports succeed, you're ready to go. Continue to the [quick start](02-qui
 
 ## Optional: connect to FMR
 
-Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. The `pysdmx` FMR client is bundled with tidysdmx and can be instantiated directly:
+Most real-world workflows fetch a dissemination schema from a Fusion Metadata Registry. `FmrClient` wraps pysdmx's registry clients and takes care of authentication when the registry needs it:
 
 ```python
-from pysdmx.api.fmr import RegistryClient
+from tidysdmx import FmrClient
 
-client = RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+client = FmrClient("https://fmrqa.worldbank.org/FMR")
+schema = client.get_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
 ```
+
+See the [FMR client](03-fmr-client.qmd) chapter for signing in with Azure and uploading artefacts.
