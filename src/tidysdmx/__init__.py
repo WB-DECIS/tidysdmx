@@ -20,6 +20,13 @@ from .artefact_validation import (
     validate,
     validate_many,
 )
+from .fmr import (
+    AzureTokenProvider,
+    BearerToken,
+    FmrClient,
+    StaticTokenProvider,
+    TokenProvider,
+)
 from .kedro import (
     kd_read_mappings,
     kd_standardize_sdmx,
@@ -91,6 +98,11 @@ from .validation import (
 )
 
 __all__ = [
+    "AzureTokenProvider",
+    "BearerToken",
+    "FmrClient",
+    "StaticTokenProvider",
+    "TokenProvider",
     "ValidationError",
     "ValidationIssue",
     "add_sdmx_reference_cols",
