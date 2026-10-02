@@ -1912,10 +1912,12 @@ def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule 
                     rep_map_counter[base_id] = 0
                     rep_map_id = base_id
 
-                multi_comp_map = build_multi_component_map(
+                # multi_df's columns are S:/T:-prefixed, not component IDs, so
+                # a target sharing a source's ID stays distinct; that is why
+                # this wraps the MultiRepresentationMap itself rather than
+                # calling build_multi_component_map.
+                multi_rep_map = build_multi_representation_map(
                     df=multi_df,
-                    source_components=source_ids,
-                    target_components=[target_id],
                     agency=current_agency,
                     id=rep_map_id,  # Use unique ID
                     name=f"Mapping {'|'.join(source_ids)} to {target_id}",
@@ -1923,10 +1925,16 @@ def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule 
                     if parsed.get("target_cl")
                     else None,
                     version=current_version,
+                    source_cols=[f"S:{s}" for s in source_ids],
+                    target_cols=[f"T:{target_id}"],
                     generate_urn=generate_urns,  # Pass flag through
                     default_value=parsed.get("default_value"),
                 )
-                generated_maps.append(multi_comp_map)
+                generated_maps.append(
+                    MultiComponentMap(
+                        source=source_ids, target=[target_id], values=multi_rep_map
+                    )
+                )
 
             else:
                 # Defensive guard
@@ -2297,9 +2305,12 @@ def _extract_multi_representation_map(
     """Build the value-tuple mapping DataFrame for a multi-representation rule.
 
     Resolves each source component ID and the target component ID to columns in
-    the parsed REP_MAPPING data, then assembles a DataFrame whose columns are
-    named after the component IDs (so they line up with the ``source_cols`` /
-    ``target_cols`` consumed by :func:`build_multi_component_map`).
+    the parsed REP_MAPPING data, then assembles a DataFrame whose columns carry
+    the REP_MAPPING header prefixes: ``S:<source_id>`` per source and
+    ``T:<target_id>`` for the target. The prefixes keep a target that shares a
+    source's ID (``METRIC|UNIT`` → ``METRIC``) in its own column; those names
+    are the ``source_cols`` / ``target_cols`` passed to
+    :func:`build_multi_representation_map`.
 
     Args:
         rep_data: Dictionary containing 'source' and 'target' DataFrames
@@ -2310,8 +2321,9 @@ def _extract_multi_representation_map(
             ``rep_data['target']``.
 
     Returns:
-        A DataFrame with one column per ``source_ids`` entry followed by a
-        ``target_id`` column, NA rows dropped and duplicate tuples removed.
+        A DataFrame with one ``S:<source_id>`` column per ``source_ids`` entry
+        followed by a ``T:<target_id>`` column, NA rows dropped and duplicate
+        tuples removed.
 
     Raises:
         ValueError: If rep_data is missing/empty, a column cannot be resolved,
@@ -2335,13 +2347,14 @@ def _extract_multi_representation_map(
     source_df = rep_data["source"]
     target_df = rep_data["target"]
 
-    # 2) Resolve actual column names (can raise if not found), keyed by component ID
+    # 2) Resolve actual column names (can raise if not found). Keys are
+    # prefixed so a target sharing a source's ID cannot replace that source.
     columns: dict[str, pd.Series] = {}
     for source_id in source_ids:
         actual_col = _match_column_name(source_id, source_df.columns.tolist())
-        columns[source_id] = source_df[actual_col]
+        columns[f"S:{source_id}"] = source_df[actual_col]
     actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
-    columns[target_id] = target_df[actual_target_col]
+    columns[f"T:{target_id}"] = target_df[actual_target_col]
 
     # 3) Build, sanitize, and deduplicate tuples
     rep_mapping_df = pd.DataFrame(columns).dropna(how="any").drop_duplicates()
