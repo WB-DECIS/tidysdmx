@@ -20,8 +20,8 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install all dependency groups and the pre-commit hooks
-	uv sync --all-groups
+install: ## Install all dependency groups, the optional extras and the pre-commit hooks
+	uv sync --all-groups --all-extras
 	uv run python -m pre_commit install --install-hooks
 
 lint: ## Check lint rules and formatting (no changes)
@@ -79,7 +79,7 @@ PIP_AUDIT_IGNORE ?=
 # cannot be audited fails instead of being skipped silently. security.yml runs
 # this same target, so the local and CI audits cannot drift.
 audit: ## Audit locked dependencies for known vulnerabilities
-	uv export --locked --format requirements-txt --no-emit-project --all-groups \
+	uv export --locked --format requirements-txt --no-emit-project --all-groups --all-extras \
 		--no-hashes --output-file requirements-audit.txt
 	uv run --group security python -m pip_audit --requirement requirements-audit.txt \
 		--strict $(foreach id,$(PIP_AUDIT_IGNORE),--ignore-vuln $(id))

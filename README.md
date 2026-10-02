@@ -70,6 +70,24 @@ if not errors.empty:
 final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
 ```
 
+Behind single sign-on, `FmrClient` handles the bearer token — acquisition,
+refresh, and the header on every read and upload — on top of pysdmx's clients:
+
+```python
+from tidysdmx import AzureTokenProvider, FmrClient
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
+
+# client.registry is pysdmx's RegistryClient and client.maintenance its
+# RegistryMaintenanceClient; both send a bearer token that refreshes itself.
+schema = client.get_schema("WB:WDI(1.0.0)", "dataflow")
+client.put_structures(artefacts)
+```
+
+Azure support is an extra (`pip install "tidysdmx[azure]"`); any provider with a
+`get_token()` plugs in the same way.
+
 Everything public is re-exported from the top-level package; `SKILL.md` lists
 the functions by task.
 

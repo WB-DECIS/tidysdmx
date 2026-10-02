@@ -123,6 +123,16 @@ reference:
         - fetch_schema
         - parse_artefact_id
         - create_schema_from_table
+    - title: FMR Client
+      desc: >-
+        Connect to a Fusion Metadata Registry with automatic bearer-token
+        authentication, on top of pysdmx's clients.
+      contents:
+        - FmrClient
+        - TokenProvider
+        - BearerToken
+        - StaticTokenProvider
+        - AzureTokenProvider
     - title: Structure Maps
       desc: Build, parse, validate, and write SDMX structure maps.
       contents:

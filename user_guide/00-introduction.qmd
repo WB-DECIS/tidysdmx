@@ -31,8 +31,9 @@ If you already know pysdmx, you can think of tidysdmx as a set of opinionated co
 
 - [Installation](01-installation.qmd) — install with pip, uv or Poetry and verify your environment.
 - [Quick start](02-quick-start.qmd) — the smallest end-to-end example.
+- [FMR client](03-fmr-client.qmd) — talk to a registry behind single sign-on, with token refresh handled for you.
 
-More chapters — end-to-end workflow, SDMX concepts, FMR integration, mapping templates, validation, and LLM/agent artefacts — are in progress and will be linked here as they land.
+More chapters — end-to-end workflow, SDMX concepts, mapping templates, validation, and LLM/agent artefacts — are in progress and will be linked here as they land.
 
 ## Status
 

@@ -17,6 +17,13 @@ hence ``__all__``.
 """
 
 from tests.fixtures.fxtr_dummy_data import ifpri_asti_df, sample_df, sdmx_df
+from tests.fixtures.fxtr_fmr import (
+    codelist,
+    fake_clock,
+    fmr_client,
+    rotating_provider,
+    static_provider,
+)
 from tests.fixtures.fxtr_mapping import api_params_sm, ifpri_asti_sm
 from tests.fixtures.fxtr_schemas import (
     api_params_schema,
@@ -31,12 +38,17 @@ from tests.fixtures.fxtr_structures import (
 __all__ = [
     "api_params_schema",
     "api_params_sm",
+    "codelist",
+    "fake_clock",
+    "fmr_client",
     "ifpri_asti_df",
     "ifpri_asti_schema",
     "ifpri_asti_sm",
     "multi_value_map_df",
+    "rotating_provider",
     "sample_df",
     "sdmx_df",
     "sdmx_schema",
+    "static_provider",
     "value_map_df_mandatory_cols",
 ]
