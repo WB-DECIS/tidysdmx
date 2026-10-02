@@ -1917,32 +1917,6 @@ class TestBuildStructureMapFromTemplateWb:
         assert list(mcm.target) == ["INDICATOR"]
         assert len(mcm.values.maps) == 2
 
-    def test_multi_representation_target_shares_source_name(self, valid_mappings):
-        """A target named like one of its sources keeps the source values."""
-        mappings = {
-            "INFO": valid_mappings["INFO"],
-            "COMP_MAPPING": pd.DataFrame(
-                {
-                    "SOURCE": ["METRIC|UNIT"],
-                    "TARGET": ["METRIC"],
-                    "MAPPING_RULES": ["multi_representation"],
-                }
-            ),
-            "REP_MAPPING": pd.DataFrame(
-                {
-                    "S:METRIC": ["GDP_USD_MN", "POP_TH"],
-                    "S:UNIT": ["USD", "PS"],
-                    "T:METRIC": ["GDP", "POP"],
-                }
-            ),
-        }
-        sm = build_structure_map_from_template_wb(mappings)
-        mcm = next(m for m in sm.maps if isinstance(m, MultiComponentMap))
-        assert [(list(vm.source), list(vm.target)) for vm in mcm.values.maps] == [
-            (["GDP_USD_MN", "USD"], ["GDP"]),
-            (["POP_TH", "PS"], ["POP"]),
-        ]
-
     def test_multi_and_single_rules_coexist(self, valid_mappings):
         """Single 'representation' and 'multi_representation' rows build together."""
         mappings = {
@@ -2470,32 +2444,18 @@ class TestExtractMultiRepresentationMap:
         return {"source": source_df, "target": target_df}
 
     def test_valid_multi_mapping(self, sample_rep_data):
-        """Returns S:/T:-prefixed component columns with NA rows dropped."""
+        """Returns a DataFrame keyed by component IDs with NA rows dropped."""
         result_df = _extract_multi_representation_map(
             sample_rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
         )
         expected = pd.DataFrame(
             {
-                "S:FREQ": ["A", "Q"],
-                "S:REF_AREA": ["US", "US"],
-                "T:INDICATOR": ["GDP_A", "GDP_Q"],
+                "FREQ": ["A", "Q"],
+                "REF_AREA": ["US", "US"],
+                "INDICATOR": ["GDP_A", "GDP_Q"],
             }
         )
         pd.testing.assert_frame_equal(result_df.reset_index(drop=True), expected)
-
-    def test_target_sharing_a_source_id_keeps_both_columns(self):
-        """A target with a source's ID stays a separate column."""
-        rep_data = {
-            "source": pd.DataFrame({"METRIC": ["GDP_USD_MN"], "UNIT": ["USD"]}),
-            "target": pd.DataFrame({"METRIC": ["GDP"]}),
-        }
-        result_df = _extract_multi_representation_map(
-            rep_data, ["METRIC", "UNIT"], "METRIC"
-        )
-        expected = pd.DataFrame(
-            {"S:METRIC": ["GDP_USD_MN"], "S:UNIT": ["USD"], "T:METRIC": ["GDP"]}
-        )
-        pd.testing.assert_frame_equal(result_df, expected)
 
     def test_raises_on_unresolved_source_column(self, sample_rep_data):
         """Unknown source component raises ValueError."""

@@ -55,14 +55,8 @@ def map_structures(
 ) -> pd.DataFrame:
     """Apply all mapping components from a StructureMap to a DataFrame.
 
-    Every map reads its source column(s) from ``df`` as passed in, never from
-    another map's output: a StructureMap's sources belong to the source
-    structure. One source column can therefore feed several targets,
-    including a target of the same name (``METRIC`` → ``METRIC`` alongside
-    ``METRIC`` → ``UNIT_MEASURE``). Targets are written by map type —
-    FixedValueMap, ImplicitComponentMap, ComponentMap, MultiComponentMap —
-    and in stored order within a type, so when several maps write the same
-    target, the last one wins.
+    Separates the maps by type and applies them in order:
+    FixedValueMap, ImplicitComponentMap, ComponentMap, MultiComponentMap.
 
     Args:
         df: The source dataset.
@@ -71,62 +65,7 @@ def map_structures(
             Data-loss warnings are always logged at WARNING level.
 
     Returns:
-        A new DataFrame holding ``df``'s columns plus every target column,
-        added or overwritten.
-
-    Raises:
-        KeyError: If a ComponentMap or MultiComponentMap source column is not
-            in ``df``.
-        TypeError: If the StructureMap contains an unsupported map type.
-    """
-    fixed_value_maps, implicit_maps, component_maps, multi_component_maps = (
-        _split_maps_by_type(structure_map)
-    )
-
-    # Maps read from ``df`` and write only their target into ``result_df``, so
-    # no map sees another's output. Chaining them instead let METRIC → METRIC
-    # overwrite METRIC before METRIC → UNIT_MEASURE ran (issue #265).
-    result_df = df.copy()
-
-    if fixed_value_maps:
-        result_df = apply_fixed_value_maps(df, fixed_value_maps)
-        logger.log(
-            _progress_level(verbose),
-            "Applied %d FixedValueMap(s).",
-            len(fixed_value_maps),
-        )
-
-    if implicit_maps:
-        implicit_df = apply_implicit_component_maps(df, implicit_maps, verbose=verbose)
-        for imap in implicit_maps:
-            # A map with a missing source was skipped (and logged) above.
-            if imap.source in df.columns:
-                result_df[imap.target] = implicit_df[imap.target]
-
-    for cmap in component_maps:
-        mapped = apply_component_map(df, cmap, verbose=verbose)
-        result_df[cmap.target] = mapped[cmap.target]
-
-    for mcm in multi_component_maps:
-        target = mcm.target[0]
-        mapped = apply_multi_component_map(df, mcm, verbose=verbose)
-        result_df[target] = mapped[target]
-
-    return result_df
-
-
-def _split_maps_by_type(
-    structure_map: StructureMap,
-) -> tuple[
-    list[FixedValueMap],
-    list[ImplicitComponentMap],
-    list[ComponentMap],
-    list[MultiComponentMap],
-]:
-    """Group a StructureMap's maps by type, keeping their stored order.
-
-    Raises:
-        TypeError: If a map is not one of the four supported types.
+        Modified DataFrame with all mappings applied.
     """
     fixed_value_maps = []
     implicit_maps = []
@@ -145,7 +84,28 @@ def _split_maps_by_type(
         else:
             raise TypeError(f"Unknown map type: {type(m)}")
 
-    return fixed_value_maps, implicit_maps, component_maps, multi_component_maps
+    result_df = df
+
+    if fixed_value_maps:
+        result_df = apply_fixed_value_maps(result_df, fixed_value_maps)
+        logger.log(
+            _progress_level(verbose),
+            "Applied %d FixedValueMap(s).",
+            len(fixed_value_maps),
+        )
+
+    if implicit_maps:
+        result_df = apply_implicit_component_maps(
+            result_df, implicit_maps, verbose=verbose
+        )
+
+    for cmap in component_maps:
+        result_df = apply_component_map(result_df, cmap, verbose=verbose)
+
+    for mcm in multi_component_maps:
+        result_df = apply_multi_component_map(result_df, mcm, verbose=verbose)
+
+    return result_df
 
 
 @typechecked
@@ -184,8 +144,7 @@ def apply_implicit_component_maps(
     """Apply ImplicitComponentMap rules to a DataFrame.
 
     Copies values from source to target columns, supporting different
-    source/target names. Each map copies from ``df`` as passed in, so maps
-    never see each other's output (two maps can swap columns).
+    source/target names.
 
     Args:
         df: The source dataset.
@@ -207,11 +166,11 @@ def apply_implicit_component_maps(
         source_col = imap.source
         target_col = imap.target
 
-        if source_col not in df.columns:
+        if source_col not in result_df.columns:
             logger.warning("Source column '%s' not found. Skipping.", source_col)
             continue
 
-        result_df[target_col] = df[source_col]
+        result_df[target_col] = result_df[source_col]
         action = "Overwritten" if target_col in df.columns else "Added"
         logger.log(
             _progress_level(verbose),

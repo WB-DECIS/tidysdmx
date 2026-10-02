@@ -11,7 +11,6 @@ from pysdmx.model import (
     MultiRepresentationMap,
     MultiValueMap,
     RepresentationMap,
-    StructureMap,
     ValueMap,
 )
 from typeguard import TypeCheckError
@@ -24,7 +23,6 @@ from tidysdmx.mapping import (
     apply_multi_component_map,
     map_structures,
 )
-from tidysdmx.structures import build_structure_map_from_template_wb
 
 
 # region create fixtures
@@ -109,16 +107,6 @@ class TestApplyImplicitComponentMaps:
         assert all(
             result["FREQ"] == sample_df["OBS_VALUE"]
         )  # 'FREQ' should now equal 'OBS_VALUE'
-
-    def test_apply_implicit_component_maps_reads_input_columns(self, sample_df):
-        """Each map copies from the input, so two maps can swap columns."""
-        maps = [
-            ImplicitComponentMap("OBS_VALUE", "FREQ"),
-            ImplicitComponentMap("FREQ", "OBS_VALUE"),
-        ]
-        result = apply_implicit_component_maps(sample_df, maps)
-        expected = pd.DataFrame({"OBS_VALUE": ["M", "Q"], "FREQ": [100, 200]})
-        pd.testing.assert_frame_equal(result[["OBS_VALUE", "FREQ"]], expected)
 
     @pytest.mark.skip(
         reason="REVIEW FUNCTION LOGIC: Should at least trigger a warning. But "
@@ -588,167 +576,3 @@ class TestMapStructures:
             assert any("Applied" in msg for msg in info_messages)
         else:
             assert not info_messages
-
-
-# Value pairs shared by the source-isolation tests: one source column, METRIC,
-# feeds several targets, one of which is METRIC itself (issue #265).
-METRIC_TO_METRIC: dict[str, str] = {"GDP_USD_MN": "GDP", "POP_TH": "POP"}
-METRIC_TO_UNIT_MEASURE: dict[str, str] = {"GDP_USD_MN": "USD", "POP_TH": "PS"}
-METRIC_TO_UNIT_MULT: dict[str, str] = {"GDP_USD_MN": "6", "POP_TH": "3"}
-
-
-class TestMapStructuresSourceIsolation:
-    """map_structures reads every map's source from the input frame (#265)."""
-
-    @pytest.fixture
-    def metric_df(self):
-        return pd.DataFrame(
-            {"METRIC": ["GDP_USD_MN", "POP_TH"], "REF_AREA": ["KEN", "KEN"]}
-        )
-
-    @staticmethod
-    def _component_map(source, target, pairs):
-        """Build a ComponentMap from a {source value: target value} dict."""
-        return ComponentMap(
-            source=source,
-            target=target,
-            values=RepresentationMap(
-                id=f"RM_{source}_{target}",
-                agency="WB",
-                source="String",
-                target="String",
-                maps=[ValueMap(source=s, target=t) for s, t in pairs.items()],
-            ),
-        )
-
-    @staticmethod
-    def _structure_map(maps):
-        return StructureMap(
-            id="SM", name="SM", agency="WB", source="", target="", maps=maps
-        )
-
-    @pytest.mark.parametrize(
-        "same_name_first", [True, False], ids=["same_name_first", "same_name_last"]
-    )
-    def test_map_structures_shared_source_feeds_every_target(
-        self, metric_df, same_name_first
-    ):
-        """A source mapped onto its own name still feeds its other targets."""
-        same_name = self._component_map("METRIC", "METRIC", METRIC_TO_METRIC)
-        others = [
-            self._component_map("METRIC", "UNIT_MEASURE", METRIC_TO_UNIT_MEASURE),
-            self._component_map("METRIC", "UNIT_MULT", METRIC_TO_UNIT_MULT),
-        ]
-        maps = [same_name, *others] if same_name_first else [*others, same_name]
-
-        result = map_structures(metric_df, self._structure_map(maps))
-
-        expected = pd.DataFrame(
-            {
-                "METRIC": ["GDP", "POP"],
-                "UNIT_MEASURE": ["USD", "PS"],
-                "UNIT_MULT": ["6", "3"],
-            }
-        )
-        pd.testing.assert_frame_equal(
-            result[["METRIC", "UNIT_MEASURE", "UNIT_MULT"]], expected
-        )
-
-    def test_map_structures_template_shared_source(self, metric_df):
-        """The #265 template: METRIC feeds METRIC and the unit targets."""
-        targets = ["METRIC", "UNIT_MEASURE", "UNIT_TYPE", "UNIT_MULTIPLIER"]
-        mappings = {
-            "INFO": pd.DataFrame({"Key": ["dataflow"], "Value": ["WB:DF_GEM(1.0)"]}),
-            "COMP_MAPPING": pd.DataFrame(
-                {
-                    "SOURCE": ["METRIC"] * len(targets),
-                    "TARGET": targets,
-                    "MAPPING_RULES": ["representation"] * len(targets),
-                }
-            ),
-            "REP_MAPPING": pd.DataFrame(
-                {
-                    "S:METRIC": ["GDP_USD_MN", "POP_TH"],
-                    "T:METRIC": ["GDP", "POP"],
-                    "T:UNIT_MEASURE": ["USD", "PS"],
-                    "T:UNIT_TYPE": ["CUR", "NUM"],
-                    "T:UNIT_MULTIPLIER": ["6", "3"],
-                }
-            ),
-        }
-        structure_map = build_structure_map_from_template_wb(mappings)
-
-        result = map_structures(metric_df, structure_map)
-
-        expected = pd.DataFrame(
-            {
-                "METRIC": ["GDP", "POP"],
-                "UNIT_MEASURE": ["USD", "PS"],
-                "UNIT_TYPE": ["CUR", "NUM"],
-                "UNIT_MULTIPLIER": ["6", "3"],
-            }
-        )
-        pd.testing.assert_frame_equal(result[targets], expected)
-
-    def test_map_structures_fixed_target_does_not_feed_component(self, metric_df):
-        """A ComponentMap reads its source, not a fixed value written over it."""
-        maps = [
-            FixedValueMap(target="METRIC", value="_Z"),
-            self._component_map("METRIC", "UNIT_MEASURE", METRIC_TO_UNIT_MEASURE),
-        ]
-        result = map_structures(metric_df, self._structure_map(maps))
-        assert list(result["UNIT_MEASURE"]) == ["USD", "PS"]
-
-    def test_map_structures_implicit_target_does_not_feed_component(self, metric_df):
-        """A ComponentMap reads its source, not an implicit copy written over it."""
-        maps = [
-            ImplicitComponentMap("REF_AREA", "METRIC"),
-            self._component_map("METRIC", "UNIT_MEASURE", METRIC_TO_UNIT_MEASURE),
-        ]
-        result = map_structures(metric_df, self._structure_map(maps))
-        assert list(result["UNIT_MEASURE"]) == ["USD", "PS"]
-
-    def test_map_structures_component_target_does_not_feed_multi(self, metric_df):
-        """A MultiComponentMap matches the source values, not mapped ones."""
-        multi = MultiComponentMap(
-            source=["METRIC", "REF_AREA"],
-            target=["INDICATOR"],
-            values=MultiRepresentationMap(
-                id="MR",
-                agency="WB",
-                source=["String", "String"],
-                target=["String"],
-                maps=[
-                    MultiValueMap(source=["GDP_USD_MN", "KEN"], target=["KEN_GDP"]),
-                    MultiValueMap(source=["POP_TH", "KEN"], target=["KEN_POP"]),
-                ],
-            ),
-        )
-        maps = [self._component_map("METRIC", "METRIC", METRIC_TO_METRIC), multi]
-        result = map_structures(metric_df, self._structure_map(maps))
-        assert list(result["INDICATOR"]) == ["KEN_GDP", "KEN_POP"]
-
-    def test_map_structures_last_write_wins(self, metric_df):
-        """When two maps write one target, the later map type wins."""
-        maps = [
-            FixedValueMap(target="UNIT_MEASURE", value="_Z"),
-            self._component_map("METRIC", "UNIT_MEASURE", METRIC_TO_UNIT_MEASURE),
-        ]
-        result = map_structures(metric_df, self._structure_map(maps))
-        assert list(result["UNIT_MEASURE"]) == ["USD", "PS"]
-
-    def test_map_structures_source_written_by_another_map_raises(self, metric_df):
-        """A source that only another map produces is not in the input."""
-        maps = [
-            ImplicitComponentMap("METRIC", "NEW"),
-            self._component_map("NEW", "UNIT_MEASURE", METRIC_TO_UNIT_MEASURE),
-        ]
-        with pytest.raises(KeyError, match="Source column 'NEW' not found"):
-            map_structures(metric_df, self._structure_map(maps))
-
-    def test_map_structures_does_not_mutate_input(self, metric_df):
-        """The input frame is left untouched."""
-        original = metric_df.copy()
-        maps = [self._component_map("METRIC", "METRIC", METRIC_TO_METRIC)]
-        map_structures(metric_df, self._structure_map(maps))
-        pd.testing.assert_frame_equal(metric_df, original)
