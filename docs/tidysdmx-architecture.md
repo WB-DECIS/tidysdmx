@@ -238,7 +238,7 @@ smap = build_structure_map_from_template_wb(mappings, agency="WB")
 result_df = map_structures(df, smap)
 ```
 
-`map_structures` dispatches by map type — it calls `apply_fixed_value_maps()`, `apply_implicit_component_maps()`, `apply_component_map()`, and `apply_multi_component_map()` depending on what the `StructureMap` contains. Each function operates on a DataFrame and returns a DataFrame. Every map reads its source columns from the DataFrame passed in, never from another map's output, so one source column can feed several targets — including a target with the same name.
+`map_structures` dispatches by map type — it calls `apply_fixed_value_maps()`, `apply_implicit_component_maps()`, `apply_component_map()`, and `apply_multi_component_map()` depending on what the `StructureMap` contains. Each function operates on a DataFrame and returns a DataFrame.
 
 **pysdmx view vs tidysdmx view:**
 
