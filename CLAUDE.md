@@ -35,8 +35,9 @@ upstream dependency your code wraps:
    its guard, its upstream fix and the trigger for deleting the workaround
 
 `docs/reviews/` holds architecture reviews. `docs/reviews/2026-06-architecture-review.md`
-§7 is the live refactoring backlog; several `TODO` comments in this repository
-cite its IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn).
+§7 is the live refactoring backlog (A1–C5 with dated statuses, D1–D10 added in
+October 2026); its §3 finding IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn, PYSDMX-nn)
+are what code comments cite, e.g. `TODO(TEST-15)` in `pyproject.toml`.
 
 ## Python Environment
 
@@ -106,7 +107,8 @@ src/tidysdmx/
 tests/
 ├── conftest.py             — shared fixtures (NOT pytest_plugins — see the rules)
 ├── fixtures/fxtr_*.py      — reusable test data and cassettes, imported by conftest
-└── test_*.py               — one file per source module
+└── test_*.py               — one file per source module (kedro.py has none yet: TEST-05),
+                              plus test_pipeline_integration.py for the end-to-end path
 
 docs/                       — SDMX domain references and architecture reviews.
                               Contributor- and agent-facing, NOT published by great-docs.
@@ -114,6 +116,7 @@ great-docs.yml              — docs site config; reference.sections lists the p
 index.qmd                   — docs landing page
 user_guide/*.qmd            — narrative documentation
 SKILL.md                    — API summary published for AI agents consuming this package
+notebooks/                  — exploratory notebooks (outputs stripped by the nbstripout hook)
 
 .github/workflows/          — ci, release, docs, security, pr-review
 ```
@@ -121,10 +124,11 @@ SKILL.md                    — API summary published for AI agents consuming th
 ## Key pysdmx Classes Used
 
 - `DataStructureDefinition`, `Component`, `Components` — DSD and its components
-- `Codelist`, `Code` — codelist artefacts
+- `Codelist`, `Code`, `Hierarchy` — enumerations (a component's codes can be either)
 - `ConceptScheme`, `Concept` — concept schemes
 - `Schema` — schema fetched from FMR
 - `StructureMap` and related map types (via `pysdmx.model.map`) — structure map artefacts
+- `Dataflow`, `CategoryScheme`, `AgencyScheme`, `Agency` — used by `artefact_builder.py`
 - `Role`, `DataType` — component roles and data types
 - `ItemReference` — references to artefacts
 - `pysdmx.api.fmr` — FMR API client (`RegistryClient`, reads)
@@ -138,15 +142,37 @@ clean `import pysdmx` has no `.model` attribute, so that form resolves only when
 some other module happens to have imported the submodule first. Inside `fmr.py`
 import the clients by name (`from pysdmx.api.fmr import RegistryClient`) rather than
 `from pysdmx.api import fmr`, which would put two things called `fmr` in one module.
+Import from the public `pysdmx.model`; only `MaintainableArtefact` and `ItemScheme`,
+which pysdmx does not re-export, come from the private `pysdmx.model.__base`.
+
+Three pysdmx facts the code depends on, each the cause of a past bug:
+
+- **A component's codes are `Component.enumeration`**, not `local_codes`: it falls
+  back to the concept's codes, and it is a `Hierarchy` (no `.items`; use
+  `all_codes()`) when FMR resolves a hierarchy association.
+- **SDMX has no `MultiRepresentationMap` class.** Both map types are SDMX
+  `RepresentationMap`s; build URNs from `artefact.short_urn`, which knows this.
+- **`ComponentMap.values` is `RepresentationMap | str`** — a URN when the map was not
+  resolved. Narrow it before use; `RegistryClient.get_mapping()` returns it resolved.
+
+`docs/pysdmx-overview.md` §11 lists what else to take from pysdmx, and what is
+deliberately not taken.
 
 ## pysdmx Source Code
 
 When you need to understand how pysdmx implements something, read the installed
 source directly rather than guessing. Locate it with
-`uv run python -c "import pysdmx; print(pysdmx.__file__)"`. Key modules:
+`uv run python -c "import pysdmx; print(pysdmx.__file__)"` — `uv run` syncs first.
+Reading `.venv` directly can show an older pysdmx than `uv.lock` pins, because the
+git hooks run `--no-sync`. Key modules:
 
 - `pysdmx/model/` — core data model classes
 - `pysdmx/io/` — readers and writers
+- `pysdmx/api/fmr/` — registry clients
+- `pysdmx/util/` — URN parsers, `find_by_urn`, `convert_dpm`
+
+`uv.lock` pins the pysdmx you develop against; `pyproject.toml` holds the floor.
+When the lock moves to a new pysdmx release, follow `docs/pysdmx-overview.md` §13.
 
 ## SDMX Domain Knowledge
 
@@ -244,7 +270,8 @@ applicable hunk is in.
 - **`ci.yml`** — ruff lint + format, mypy, pytest on Python 3.11–3.14, a build
   that checks metadata and verifies the wheel is importable, a `pr-title` gate
   (the title must be a Conventional Commit), and the `All checks` aggregate that
-  branch protection requires. Every job runs a `Makefile` target. Runs on `main`
+  branch protection requires. The lint, typecheck, test and build jobs each run a
+  `Makefile` target; `pr-title` and `All checks` are workflow-only. Runs on `main`
   and `dev`.
 - **`release.yml`** — on push to `main`, python-semantic-release computes the version
   from commit messages, tags, and creates the GitHub Release; a separate job builds

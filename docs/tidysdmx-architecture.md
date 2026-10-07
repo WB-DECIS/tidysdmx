@@ -15,8 +15,8 @@ The table below captures the philosophical gap at each stage of the workflow:
 | Structure | `Schema` object | The schema is fetched once, passed around, and never directly queried by the analyst |
 | Components | `Components` / `Component` (typed SDMX artefacts) | A list of column names; a dict of allowed values |
 | Mapping specification | `StructureMap` (SDMX artefact with typed sub-maps) | A JSON file with `components` and `representation` dicts; or an Excel workbook |
-| Applying mappings | Iterate `StructureMap.maps`, dispatch by type | `map_structures(df, smap)` or `map_to_sdmx(df, mapping)` — a single function call |
-| Validation | `Component.required`, `Component.local_codes.items` | `validate_dataset_local(df, schema)` — returns a DataFrame of error messages |
+| Applying mappings | Group `StructureMap.maps` by type (`fixed_value_maps`, `component_maps`, ...) and apply each to the data yourself | `map_structures(df, smap)` or `map_to_sdmx(df, mapping)` — a single function call |
+| Validation | `Component.required`, `Component.enumeration` | `validate_dataset_local(df, schema)` — returns a DataFrame of error messages |
 | Output preparation | No equivalent | `standardize_output(df, artefact_id, schema)` — adds metadata columns and reorders |
 | Production use | No equivalent | Kedro-compatible wrapper functions |
 
@@ -95,9 +95,9 @@ schema = fetch_schema(
 
 ### 2. Schema Introspection
 
-**pysdmx view:** The `Schema` object is a rich tree of typed SDMX objects. To find out which columns are required, iterate `Components` and test `component.required`. To get allowed values, access `component.local_codes.items`. To identify dimensions, test `component.role == Role.DIMENSION`.
+**pysdmx view:** The `Schema` object is a rich tree of typed SDMX objects. To find out which columns are required, iterate `Components` and test `component.required`. To get allowed values, read `component.enumeration` — the component's local (constrained) codes if the schema carries any, otherwise the codes of its concept's core representation — which is a `Codelist`, or a `Hierarchy` when FMR resolves a hierarchy association. To identify dimensions, test `component.role == Role.DIMENSION`.
 
-**tidysdmx view:** Call `extract_validation_info(schema)` once and get a plain Python `dict` with everything needed to validate a DataFrame. No pysdmx attributes are accessed after this point.
+**tidysdmx view:** Call `extract_validation_info(schema)` once and get a plain Python `dict` with everything needed to validate a DataFrame. A component counts as coded when its `enumeration` is set, and a `Hierarchy` is flattened to every code at every level (`Hierarchy.all_codes()`). No pysdmx attributes are accessed after this point.
 
 ```python
 # pysdmx — analyst must understand Component structure
@@ -105,7 +105,7 @@ from pysdmx.model import Role
 
 mandatory = [c.id for c in schema.components if schema.components[c.id].required]
 coded = [
-    c.id for c in schema.components if schema.components[c.id].local_codes is not None
+    c.id for c in schema.components if schema.components[c.id].enumeration is not None
 ]
 dims = [
     c.id for c in schema.components if schema.components[c.id].role == Role.DIMENSION
@@ -120,9 +120,10 @@ valid = extract_validation_info(schema)
 # valid["codelist_ids"]   → {"FREQ": ["A", "M", "Q"], "REF_AREA": ["US", "GB", ...]}
 # valid["dim_comp"]       → ["FREQ", "REF_AREA", "INDICATOR", "TIME_PERIOD"]
 # valid["valid_comp"]     → all component IDs
+# valid["sdmx_cols"]      → ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 ```
 
-The `valid` dict is the analyst's entire interface to schema knowledge. It is passed as a pre-computed argument to all downstream functions (`validate_dataset_local`, `kd_validate_datasets_local`, `filter_tidy_raw`) to avoid re-parsing the schema for each dataset.
+The `valid` dict is the analyst's entire interface to schema knowledge. The downstream functions (`validate_dataset_local`, `kd_validate_datasets_local`, `filter_tidy_raw`) take the `schema` itself and call `extract_validation_info` internally; passing a pre-computed dict as `validate_dataset_local(valid=...)` is deprecated (see [Validation pre-computation](#validation-pre-computation)). `get_codelist_ids` raises `ValueError` if asked for a component that is uncoded or not in the schema.
 
 ---
 
@@ -156,13 +157,17 @@ The analyst writes a JSON file. No SDMX knowledge is required — no `StructureM
 }
 ```
 
-`read_mapping(path)` parses this into a Python dict where DataFrames replace the lists, ready for `map_to_sdmx()`.
+`read_mapping(path)` parses this into a Python dict where DataFrames replace the lists: `schema_version`, `dsd_id`, `components`, and one top-level key per `representation` sub-key (`mapping["REF_AREA"]`, not `mapping["representation"]["REF_AREA"]`).
+
+**Known defect — the output is not ready for `map_to_sdmx()`.** `map_to_sdmx` reads only `mapping["representation"]`, which `read_mapping` never produces, so on a mapping loaded this way it recodes nothing and returns the values unchanged. `standardize_sdmx` and `kd_standardize_sdmx` inherit this. None of these four functions has a test yet (TEST-03 / TEST-05, backlog B4 in `docs/reviews/2026-06-architecture-review.md`); only a hand-built dict that keeps the nested `representation` key gets recoded.
 
 **pysdmx equivalent:** A `StructureMap` containing `ImplicitComponentMap`s (for the column renames), `ComponentMap`s with `RepresentationMap`s (for the value mappings), and `FixedValueMap`s — each a typed SDMX object constructed in Python code.
 
 #### 3b. Excel Mapping Template (Accessible / Business Analyst Workflows)
 
-For non-programmers or mixed technical/non-technical teams, tidysdmx generates an Excel workbook from a schema:
+For non-programmers or mixed technical/non-technical teams, the mapping can be written in an Excel workbook.
+
+**Known defect — the template writer and reader disagree (ARCH-01, open backlog item A3).** tidysdmx has a writer that generates a workbook from a schema, but the reader rejects what it writes:
 
 ```python
 from tidysdmx import fetch_schema, extract_component_ids, write_excel_mapping_template
@@ -174,7 +179,9 @@ write_excel_mapping_template(
 )
 ```
 
-The workbook has a `COMP_MAPPING` sheet (source component → target component, with a `MAPPING_RULES` column accepting `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
+The writer emits a legacy layout: `build_excel_workbook` (which `write_excel_mapping_template` saves) produces a lowercase `comp_mapping` sheet with `source` / `target` / `mapping_rules` columns, plus one tab per `rep_maps` entry with `source` / `target` / `valid_from` / `valid_to` headers. The reader, `build_structure_map_from_template_wb` (via `_validate_mapping_template_wb`), requires `INFO`, `COMP_MAPPING` and `REP_MAPPING` sheets and fails with `Missing required sheet` for all three. There is no working write→read round trip today; a workbook the reader accepts has to be laid out by hand in the format below.
+
+The format the reader accepts has an `INFO` sheet (key/value metadata such as the agency), a `COMP_MAPPING` sheet (`SOURCE` / `TARGET` / `MAPPING_RULES` columns, plus optional `SOURCE_CL` / `TARGET_CL` / `DEFAULT_VALUE`; `MAPPING_RULES` accepts `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
 
 For a **single** coded component, use `"representation"` with one component ID in `SOURCE`:
 
@@ -199,7 +206,7 @@ For an **N→1 multi-component** mapping (a tuple of source components jointly d
 
 This produces a pysdmx `MultiComponentMap` whose `source` is the ordered tuple `(FREQ, REF_AREA)` and `target` is `[INDICATOR]`. (`|` is used purely as a separator inside the Excel template — it never appears in the emitted SDMX artefact, whose `MultiComponentMap` uses the parsed component IDs, so it does not need to be SDMX-compliant. A `multi_representation` rule needs at least two source components; source codelists are not yet read for multi rules, so sources map as plain strings while `TARGET_CL` is still honoured.)
 
-`build_structure_map_from_template_wb(mappings)` reads the filled-in workbook and returns a pysdmx `StructureMap`. The analyst fills in Excel cells; pysdmx objects are the implementation detail.
+`parse_mapping_template_wb(path)` reads the filled-in workbook into a dict of DataFrames (one per sheet), and `build_structure_map_from_template_wb(mappings)` turns that dict into a pysdmx `StructureMap`. The analyst fills in Excel cells; pysdmx objects are the implementation detail. Those four rules are the only ones the template accepts, so a template-built `StructureMap` holds only `FixedValueMap`, `ImplicitComponentMap`, `ComponentMap` and `MultiComponentMap` — never a `DatePatternMap`.
 
 **pysdmx equivalent:** A developer constructs the `StructureMap` programmatically in Python.
 
@@ -223,7 +230,7 @@ df = transform_source_to_target(raw_df, mapping)
 df = map_to_sdmx(df, mapping)
 ```
 
-`map_to_sdmx` iterates the `representation` dict and applies vectorised pandas operations (`np.select` with regex or exact matching). There are no pysdmx objects involved at this point.
+`map_to_sdmx` iterates the `representation` dict and applies vectorised pandas operations (`np.select` with regex or exact matching). There are no pysdmx objects involved at this point. As written, though, step 2 is a no-op: the dict `read_mapping` returns has no `representation` key (see the known defect in §3a).
 
 #### Path B — pysdmx `StructureMap` → `map_structures()`
 
@@ -240,7 +247,12 @@ smap = build_structure_map_from_template_wb(mappings, agency="WB")
 result_df = map_structures(df, smap)
 ```
 
-`map_structures` dispatches by map type — it calls `apply_fixed_value_maps()`, `apply_implicit_component_maps()`, `apply_component_map()`, and `apply_multi_component_map()` depending on what the `StructureMap` contains. Each function operates on a DataFrame and returns a DataFrame. Every map reads its source columns from the DataFrame passed in, never from another map's output, so one source column can feed several targets — including a target with the same name.
+`map_structures` dispatches by map type — it groups the maps with pysdmx's own typed views (`StructureMap.fixed_value_maps`, `implicit_component_maps`, `component_maps`, `multi_component_maps`, which keep stored order) and calls `apply_fixed_value_maps()`, `apply_implicit_component_maps()`, `apply_component_map()`, and `apply_multi_component_map()` depending on what the `StructureMap` contains. Each function operates on a DataFrame and returns a DataFrame. Every map reads its source columns from the DataFrame passed in, never from another map's output, so one source column can feed several targets — including a target with the same name.
+
+`map_structures` raises `TypeError` in two cases:
+
+- the `StructureMap` holds any other map type — in practice a `DatePatternMap`, which tidysdmx can build (`build_date_pattern_map`) but not apply;
+- a `ComponentMap` or `MultiComponentMap` references its representation map by URN string instead of embedding it, so there are no value maps to apply. Fetch the structure map with pysdmx's `RegistryClient.get_mapping()`, which resolves the representation maps, rather than passing one whose `values` is still a URN.
 
 **pysdmx view vs tidysdmx view:**
 
@@ -251,6 +263,7 @@ FixedValueMap                  →   apply_fixed_value_maps()
 ImplicitComponentMap           →   apply_implicit_component_maps()
 ComponentMap (+ RepresentationMap) apply_component_map()
 MultiComponentMap              →   apply_multi_component_map()
+DatePatternMap                 →   (not supported — TypeError)
 ```
 
 Each `apply_*` function signature takes a DataFrame and returns a DataFrame. The pysdmx object is an argument, not the working data.
@@ -271,22 +284,26 @@ Analyst input (tabular)          →   pysdmx object
 pd.DataFrame[source, target, ...]→   list[ValueMap]         (via build_value_map_list)
 pd.DataFrame + agency/id/...     →   RepresentationMap      (via build_representation_map)
 pd.DataFrame + source/target_comp→   ComponentMap           (via build_single_component_map)
-Workbook (openpyxl)              →   StructureMap           (via build_structure_map)
+pd.DataFrame + source/target_cols→   list[MultiValueMap]    (via build_multi_value_map_list)
+pd.DataFrame + agency/id/...     →   MultiRepresentationMap (via build_multi_representation_map)
+pd.DataFrame + source/target_comps→  MultiComponentMap      (via build_multi_component_map)
 dict[str, pd.DataFrame]          →   StructureMap           (via build_structure_map_from_template_wb)
 ```
 
 This layer is intentionally thin. Each builder function validates its inputs, then calls the pysdmx constructor. There is no business logic here — the translation is structural, not semantic.
 
+A second family of builders lives in `tidysdmx.artefact_builder`: `build_codelist`, `build_concept_scheme`, `build_category_scheme`, `build_agency_scheme`, `build_hierarchy`, `build_data_structure_definition` and `build_dataflow` take plain values and pysdmx objects rather than DataFrames, and run the publish-readiness rules in `tidysdmx.artefact_validation` before returning (raising `ValidationError`). That module also defines value-driven `build_representation_map` / `build_multi_representation_map` with different signatures from the DataFrame-driven ones above; only the `structures` pair is exported from `tidysdmx` (CONS-20, backlog B7).
+
 ---
 
 ### 6. Schema Creation from Data
 
-`create_schema_from_table()` runs in the opposite direction: it produces a pysdmx `Schema` from a pandas DataFrame. It is used when no SDMX registry is available and a schema needs to be inferred from data alone.
+`create_schema_from_table()` runs in the opposite direction: it builds SDMX structures from a pandas DataFrame. It is used when no SDMX registry is available and a schema needs to be inferred from data alone.
 
 ```python
 from tidysdmx import create_schema_from_table
 
-schema = create_schema_from_table(
+parts = create_schema_from_table(
     dataframe=df,
     dimensions=["FREQ", "REF_AREA"],
     time_dimension="YEAR",  # mapped to standard TIME_PERIOD component
@@ -295,51 +312,50 @@ schema = create_schema_from_table(
     agency_id="WB",
     schema_id="INFERRED_WDI",
 )
+schema = parts.dsd.to_schema()  # pysdmx Schema, context "datastructure"
 ```
 
 The function:
 1. Infers `DataType` from pandas dtypes
-2. Builds a `Codelist` from unique values in each dimension column
+2. Builds a `Codelist` from unique values in each dimension column (and each string-typed attribute column)
 3. Creates `Component` objects with the correct `Role` and `local_codes`
 4. Maps the `time_dimension` column to the standardised `TIME_PERIOD` concept (with `DataType.PERIOD`)
-5. Returns a `Schema` that is structurally identical to one fetched from a registry
+5. Returns a `SchemaComponents(dsd, concept_scheme, codelists)` named tuple — a pysdmx `DataStructureDefinition`, its `ConceptScheme`, and the generated `Codelist`s — not a `Schema`
 
-**Why this matters:** Once created, this schema can be passed to `validate_dataset_local()`, `standardize_output()`, or `filter_tidy_raw()` exactly like a registry-fetched schema. The analyst's workflow is identical regardless of whether the schema came from a registry or was inferred.
+**Why this matters:** Once converted with `parts.dsd.to_schema()`, the schema can be passed to `validate_dataset_local()`, `standardize_output()`, or `filter_tidy_raw()` like a registry-fetched one. The analyst's workflow is the same regardless of whether the schema came from a registry or was inferred.
 
 ---
 
 ### 7. Validation
 
-**pysdmx view:** Validation means navigating the object model: iterate `Components`, check `component.required`, compare data values against `component.local_codes.items`. Each check is a custom loop over the DataFrame.
+**pysdmx view:** Validation means navigating the object model: iterate `Components`, check `component.required`, compare data values against the codes of `component.enumeration`. Each check is a custom loop over the DataFrame.
 
 **tidysdmx view:** `validate_dataset_local(df, schema)` is a single call that returns a DataFrame of errors. If the DataFrame is empty, the data is valid. Each validation failure is a row. The analyst can sort, filter, and export the error DataFrame like any other.
 
 ```python
-from tidysdmx import validate_dataset_local, extract_validation_info
+from tidysdmx import validate_dataset_local
 
-# Either pass the schema directly
 errors = validate_dataset_local(df, schema=schema)
-
-# Or pre-compute validation info for reuse across many datasets
-valid = extract_validation_info(schema)
-errors = validate_dataset_local(df, valid=valid)
 
 # errors is a plain pd.DataFrame:
 # ┌──────────────────────┬──────────────────────────────────────────────┐
 # │ Validation           │ Error                                        │
 # ├──────────────────────┼──────────────────────────────────────────────┤
-# │ codelist_ids         │ Invalid values found in 'REF_AREA': ['XYZ'] │
-# │ missing_values       │ Missing values found in mandatory columns... │
+# │ columns              │ Unexpected column: 'FOO'                     │
+# │ codelist_ids         │ 'REF_AREA': XYZ                              │
+# │ missing_values       │ Found 2 row(s) with missing values in ...    │
 # └──────────────────────┴──────────────────────────────────────────────┘
 ```
 
-The five validation checks and their pysdmx source:
+The `Validation` column takes one of `columns`, `mandatory_columns`, `codelist_ids`, `duplicates` or `missing_values`. The value-level checks (codelist, duplicates, missing values) run only when no mandatory column is missing. The deprecated `valid=` argument still works but emits a `FutureWarning`; with neither `schema` nor `valid`, the call raises `ValueError`.
+
+The five validation checks and their pysdmx source. Each is also public on its own; unlike `validate_dataset_local`, the individual `validate_*` functions return `None` and raise `ValueError` when their check fails:
 
 | tidysdmx check | pysdmx attribute used | Task-level meaning |
 |---|---|---|
 | `validate_columns` | `component.id` (all) | No unexpected columns exist |
 | `validate_mandatory_columns` | `component.required` | All required columns are present |
-| `validate_codelist_ids` | `component.local_codes.items` | All coded values are in the allowed list |
+| `validate_codelist_ids` | `component.enumeration` (a `Hierarchy` flattened to all its codes) | All coded values are in the allowed list |
 | `validate_duplicates` | `component.role == Role.DIMENSION` | No duplicate observations (same key) |
 | `validate_no_missing_values` | `component.required` | No nulls in mandatory columns |
 
@@ -356,7 +372,7 @@ result = standardize_output(df, artefact_id="WB:WDI(1.0.0)", schema=schema, acti
 # Adds reference columns, drops non-schema columns, moves metadata columns to front
 ```
 
-Internally, `standardize_output` reads `schema.context` and calls `_add_sdmx_reference_cols()`, which adds the standard SDMX-CSV reference columns (`STRUCTURE`, `STRUCTURE_ID`, `ACTION`) with the context (`dataflow` / `datastructure` / `provisionagreement`) as the `STRUCTURE` value. The analyst specifies the action (`"I"`, `"U"`, `"D"`) in plain English terms; the SDMX column value is identical.
+Internally, `standardize_output` reads `schema.context` and calls `_add_sdmx_reference_cols()`, which adds the standard SDMX-CSV reference columns (`STRUCTURE`, `STRUCTURE_ID`, `ACTION`). `STRUCTURE` carries the SDMX-CSV name of the context: `dataflow`, `datastructure`, or `dataprovision` for a provision-agreement schema (pysdmx's SDMX-CSV reader rejects `provisionagreement`). `action` is one of the SDMX-CSV codes pysdmx reads and writes — `"I"` (Information, the default), `"A"` (Append), `"R"` (Replace), `"D"` (Delete) — and is written to the `ACTION` column as given.
 
 ---
 
@@ -371,7 +387,7 @@ kd_validate_dataset_local() →  calls validate_dataset_local(), returns (bool, 
 kd_validate_datasets_local()→  calls kd_validate_dataset_local() for each partition
 ```
 
-There is no new pysdmx usage in the Kedro layer. It is purely an orchestration adapter.
+There is no new pysdmx usage in the Kedro layer. It is purely an orchestration adapter. Two known bugs pass through it: `kd_standardize_sdmx` inherits the JSON-path defect in §3a (no values are recoded), and `kd_validate_datasets_local(datasets, schema, boolean)` computes `extract_validation_info(schema)` once and passes it down as the deprecated `valid=` argument, so it triggers the `FutureWarning` from `validate_dataset_local` itself.
 
 ### 10. Registry Access and Authentication
 
@@ -411,23 +427,23 @@ client.put_structures(artefacts)
 
 ### pysdmx objects as opaque handles
 
-When tidysdmx functions accept a `schema` parameter, they treat it as an opaque handle. The analyst passes the schema through the pipeline without ever needing to understand its internal structure. The schema is unpacked exactly once — inside `extract_validation_info()` — and the result is a plain dict that the analyst can inspect, cache, and pass around freely.
+When tidysdmx functions accept a `schema` parameter, they treat it as an opaque handle. The analyst passes the schema through the pipeline without ever needing to understand its internal structure. The schema is unpacked inside tidysdmx — for validation and filtering by `extract_validation_info()` — and the result is a plain dict that the analyst can inspect.
 
 ### DataFrames as the universal currency
 
-Every function that touches data accepts a `pd.DataFrame` and returns a `pd.DataFrame`. Mapping specifications are DataFrames. Validation results are DataFrames. Error reports are DataFrames. This means the analyst never needs to switch mental models: everything is a table.
+Every function that transforms data accepts a `pd.DataFrame` and returns a `pd.DataFrame`. Mapping specifications are DataFrames. Validation results are DataFrames. Error reports are DataFrames. This means the analyst never needs to switch mental models: everything is a table.
 
 ### Two mapping paths, same pysdmx destination
 
-The JSON mapping dict (`read_mapping` → `map_to_sdmx`) and the Excel mapping template (`parse_mapping_template_wb` → `build_structure_map_from_template_wb` → `map_structures`) both ultimately apply the same logical transformations. The JSON path is older, faster, and simpler. The Excel path produces a pysdmx `StructureMap` as an intermediate, enabling richer mapping types (e.g. `DatePatternMap`, `MultiComponentMap`) and formal SDMX artefact compliance.
+The JSON mapping dict (`read_mapping` → `map_to_sdmx`) and the Excel mapping template (`parse_mapping_template_wb` → `build_structure_map_from_template_wb` → `map_structures`) are meant to apply the same logical transformations. The JSON path is older and simpler, but today it recodes nothing when fed by `read_mapping` (the known defect in §3a). The Excel path produces a pysdmx `StructureMap` as an intermediate, enabling `MultiComponentMap` and formal SDMX artefact compliance; its writer half is broken (ARCH-01, §3b), so its workbooks are authored by hand. Neither path handles `DatePatternMap`: the template has no rule for it, and `map_structures` raises `TypeError` on one.
 
 ### Validation pre-computation
 
-`extract_validation_info(schema)` is designed to be called **once** per run and reused. The `valid` dict is passed as an argument to all validation functions, allowing batch validation of hundreds of partitions without re-parsing the schema on each call. This is the pattern used in `kd_validate_datasets_local()`.
+`extract_validation_info(schema)` was designed to be called once per run, with the `valid` dict passed to every validation call so that hundreds of partitions could be validated without re-parsing the schema. That pattern is now deprecated: `validate_dataset_local(valid=...)` emits a `FutureWarning`, and the parameter will be removed. Pass `schema`; `validate_dataset_local`, `filter_tidy_raw` and `kd_validate_datasets_local` all take it and derive the dict themselves. `kd_validate_datasets_local()` still pre-computes the dict and passes `valid=` internally — a known bug (§9), not a pattern to copy.
 
 ### A stateful client object
 
-Every other public name in the package is a function. `FmrClient` is a class because a token cache has a lifetime: it must outlive a single call and be shared by every request against the same registry. Hold one instance per registry. Everything it returns is still a pysdmx object.
+Apart from its own token types (`TokenProvider`, `BearerToken` and the two providers) and the artefact-validation types (`ValidationIssue`, `ValidationError`), every other public name in the package is a function. `FmrClient` is a class because a token cache has a lifetime: it must outlive a single call and be shared by every request against the same registry. Hold one instance per registry. Everything it returns is still a pysdmx object.
 
 ### Guarded pysdmx seams
 
@@ -436,6 +452,8 @@ pysdmx 1.19.0 offers no way to put an `Authorization` header on reads and no way
 ### Deprecation pattern
 
 Early versions of tidysdmx used function names tied to SDMX jargon (`fetch_dsd_schema`, `parse_dsd_id`, `add_sdmx_reference_cols`, `standardize_data_for_upload`). These have been deprecated in favour of names that describe the analyst's task (`fetch_schema`, `parse_artefact_id`, `standardize_output`). The renamed functions also dropped DSD-specific semantics in favour of generic artefact handling.
+
+Deprecations also retire workarounds once pysdmx catches up: `fix_sdmx_xml_datatype_tags` emits a `FutureWarning` because pysdmx 1.14.0 and later write `SourceDataType`/`TargetDataType` correctly, so the call is no longer needed. Every deprecation in the package, the `valid=` argument included, warns with `FutureWarning` (shown to end users by default, unlike `DeprecationWarning`).
 
 ---
 
@@ -448,20 +466,42 @@ tidysdmx/
 │                     Wraps fmr.RegistryClient (fetch_schema)
 │
 ├── structures.py   ← Translation layer: DataFrames → pysdmx objects
-│                     All build_*() functions live here
-│                     Also create_schema_from_table() (DataFrame → Schema)
+│                     The DataFrame-driven build_*() map builders, and
+│                     build_structure_map_from_template_wb() (Excel reader)
+│                     gen_urn() — URNs under the SDMX class name
+│                     (MultiRepresentationMap → RepresentationMap=,
+│                     DataStructureDefinition → DataStructure=)
+│                     Also create_schema_from_table()
+│                     (DataFrame → SchemaComponents; .dsd.to_schema())
+│
+├── artefact_builder.py ← Value-driven build_*() builders (codelist, concept,
+│                     category and agency schemes, hierarchy, DSD, dataflow,
+│                     representation maps), validated before returning
+│
+├── artefact_validation.py ← Publish-readiness rules for artefacts
+│                     validate(), validate_many(), raise_if_invalid()
+│                     Raises ValidationError (a ValueError subclass)
+│
+├── structure_map_writer.py ← StructureMap → upload-ready artefact list
+│                     collect_structure_map_artifacts(),
+│                     validate_structure_map_references(),
+│                     prepare_structure_map_for_upload()
 │
 ├── mapping.py      ← DataFrame-level application of pysdmx map objects
 │                     map_structures(), apply_fixed_value_maps(), etc.
 │                     Each function: (DataFrame, pysdmx map) → DataFrame
+│                     TypeError on DatePatternMap or URN-only map values
 │
 ├── validation.py   ← Schema-driven DataFrame validation
-│                     validate_dataset_local() and individual check functions
-│                     Returns DataFrames of errors, not exceptions
+│                     validate_dataset_local() returns a DataFrame of errors
+│                     Individual validate_*() checks raise ValueError
 │
 ├── utils.py        ← Schema introspection and Excel tooling
 │                     extract_validation_info() — the pysdmx → dict bridge
-│                     Excel template generation and parsing
+│                     Excel template writer (build_excel_workbook,
+│                     write_excel_mapping_template — legacy layout the
+│                     reader rejects, ARCH-01) and parse_mapping_template_wb()
+│                     fix_sdmx_xml_datatype_tags() (deprecated)
 │
 ├── fmr.py          ← Registry access with authentication
 │                     FmrClient wraps RegistryClient + RegistryMaintenanceClient

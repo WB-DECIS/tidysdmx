@@ -1,7 +1,7 @@
 # python
 import pandas as pd
-import pysdmx as px
 import pytest
+from pysdmx.model import Components, Schema
 from typeguard import TypeCheckError
 
 # Import tidysdmx functions
@@ -145,10 +145,10 @@ class TestFilterTidyRaw:
     def test_filter_tidy_raw_no_filter_needed(self, sdmx_df):
         """If all rows are valid, the output should match the input."""
         # Instantiate an empty Components object
-        empty_components = px.model.Components([])
+        empty_components = Components([])
 
         # Create an empty Schema instance
-        empty_schema = px.model.Schema(
+        empty_schema = Schema(
             context="datastructure",  # or "dataflow"
             agency="TEST_AGENCY",
             id="EMPTY_SCHEMA",

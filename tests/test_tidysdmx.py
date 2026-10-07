@@ -638,26 +638,36 @@ class TestAddSdmxReferenceCols:
     """
 
     @pytest.mark.parametrize(
-        ("artefact_type", "expected_cols"),
-        [
-            ("dataflow", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            ("datastructure", ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"]),
-            (
-                "provisionagreement",
-                ["OBS_VALUE", "STRUCTURE", "STRUCTURE_ID", "ACTION"],
-            ),
-        ],
+        "artefact_type", ["dataflow", "datastructure", "provisionagreement"]
     )
-    def test_add_columns_for_valid_types(self, artefact_type, expected_cols):
+    def test_add_columns_for_valid_types(self, artefact_type):
         """Tests that correct columns are added for each valid artefact_type."""
         df = pd.DataFrame({"OBS_VALUE": [100, 200]})
         result = _add_sdmx_reference_cols(df, "TEST_ID", artefact_type, "I")
-        assert list(result.columns) == expected_cols
-        assert all(result[expected_cols[1]] == artefact_type)
-        assert all(result[expected_cols[2]] == "TEST_ID")
+        assert list(result.columns) == [
+            "OBS_VALUE",
+            "STRUCTURE",
+            "STRUCTURE_ID",
+            "ACTION",
+        ]
+        assert all(result["STRUCTURE_ID"] == "TEST_ID")
         assert all(result["ACTION"] == "I")
 
-    @pytest.mark.parametrize("action", ["I", "U", "D"])
+    @pytest.mark.parametrize(
+        ("artefact_type", "expected_structure"),
+        [
+            ("dataflow", "dataflow"),
+            ("datastructure", "datastructure"),
+            ("provisionagreement", "dataprovision"),
+        ],
+    )
+    def test_structure_uses_sdmx_csv_name(self, artefact_type, expected_structure):
+        """STRUCTURE uses SDMX-CSV names: dataprovision, not provisionagreement."""
+        df = pd.DataFrame({"OBS_VALUE": [100]})
+        result = _add_sdmx_reference_cols(df, "TEST_ID", artefact_type, "I")
+        assert result["STRUCTURE"].iloc[0] == expected_structure
+
+    @pytest.mark.parametrize("action", ["I", "A", "R", "D"])
     def test_valid_actions(self, action):
         """Tests that valid actions are correctly applied."""
         df = pd.DataFrame({"OBS_VALUE": [1]})
@@ -752,9 +762,19 @@ class TestStandardizeOutput:
     def test_action_custom_value(self, sample_df, ifpri_asti_schema):
         """Tests that custom action value is applied correctly."""
         result = standardize_output(
-            sample_df, artefact_id="DF_IFPRI_ASTI", schema=ifpri_asti_schema, action="U"
+            sample_df, artefact_id="DF_IFPRI_ASTI", schema=ifpri_asti_schema, action="R"
         )
-        assert all(result["ACTION"] == "U")
+        assert all(result["ACTION"] == "R")
+
+    def test_action_update_is_rejected(self, sample_df, ifpri_asti_schema):
+        """U is not an SDMX-CSV action code; pysdmx's reader rejects it."""
+        with pytest.raises(TypeCheckError, match="action"):
+            standardize_output(
+                sample_df,
+                artefact_id="DF_IFPRI_ASTI",
+                schema=ifpri_asti_schema,
+                action="U",
+            )
 
     def test_columns_filtered_by_schema(self, sample_df, ifpri_asti_schema):
         """Tests that only schema components remain after filtering."""

@@ -49,6 +49,7 @@ from tidysdmx.structures import (
     build_value_map,
     build_value_map_list,
     create_schema_from_table,
+    gen_urn,
 )
 
 # region fixtures
@@ -1069,7 +1070,7 @@ class TestBuildMultiRepresentationMap:
             sample_df, id="MRM1", agency="WB", generate_urn=True
         )
         assert result.urn is not None
-        assert "MultiRepresentationMap=WB:MRM1(1.0)" in result.urn
+        assert "structuremapping.RepresentationMap=WB:MRM1(1.0)" in result.urn
 
     def test_generate_urn_false_leaves_urn_none(self, sample_df):
         """Tests that no URN is generated when generate_urn is False."""
@@ -2982,6 +2983,37 @@ class TestValidateMappingTemplateWb:
 
         # Act & Assert (no exception expected)
         _validate_mapping_template_wb(mappings)
+
+
+# endregion
+
+
+# region Testing gen_urn()
+class TestGenUrn:
+    def test_gen_urn_builds_structure_map_urn(self):
+        assert gen_urn("StructureMap", "BIS", "SM_TEST", "1.0") == (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=BIS:SM_TEST(1.0)"
+        )
+
+    @pytest.mark.parametrize(
+        ("pysdmx_class", "expected_urn"),
+        [
+            (
+                "MultiRepresentationMap",
+                "urn:sdmx:org.sdmx.infomodel.structuremapping"
+                ".RepresentationMap=WB:RM(1.0.0)",
+            ),
+            (
+                "DataStructureDefinition",
+                "urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=WB:RM(1.0.0)",
+            ),
+        ],
+    )
+    def test_gen_urn_writes_pysdmx_only_classes_under_sdmx_class(
+        self, pysdmx_class, expected_urn
+    ):
+        """SDMX has no MultiRepresentationMap or DataStructureDefinition class."""
+        assert gen_urn(pysdmx_class, "WB", "RM", "1.0.0") == expected_urn
 
 
 # endregion

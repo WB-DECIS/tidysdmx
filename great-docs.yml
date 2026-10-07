@@ -90,9 +90,14 @@ nav_icons:
 # the build pipeline. They are emitted at the site root and available
 # for download by package users and AI agents.
 #
-# SKILL.md is auto-discovered by great-docs from the package — no
-# explicit config needed. To override with a hand-written file, set
-# `skill.file:` to its path.
+# SKILL.md: without `skill.file`, great-docs only looks for
+# skills/<package>/SKILL.md and otherwise generates its own from the API
+# reference, so the hand-written SKILL.md at the repository root must be
+# named here. The path is relative to the directory holding pyproject.toml;
+# the file is published verbatim as skill.md and under
+# .well-known/agent-skills/.
+skill:
+  file: SKILL.md
 
 # Generate downloadable .md versions of every page (the
 # "Copy / View as Markdown" feature).
@@ -112,17 +117,16 @@ site:
 # ----------------------------------------------------------------------
 reference:
   desc: >-
-    Public API of tidysdmx — fetch SDMX schemas from FMR, infer schemas
+    Public API of tidysdmx — fetch SDMX schemas from FMR, infer DSDs
     from tidy DataFrames, build structure maps from Excel templates,
-    map data to dissemination schemas, validate datasets, and emit
-    SDMX-ML artefacts ready for FMR upload.
+    map data to dissemination schemas, validate datasets, and prepare
+    data and structure maps for FMR upload.
   sections:
     - title: FMR & Schemas
       desc: Fetch and parse SDMX schemas from a Fusion Metadata Registry.
       contents:
         - fetch_schema
         - parse_artefact_id
-        - create_schema_from_table
     - title: FMR Client
       desc: >-
         Connect to a Fusion Metadata Registry with automatic bearer-token
@@ -133,8 +137,14 @@ reference:
         - BearerToken
         - StaticTokenProvider
         - AzureTokenProvider
+    - title: Schema Inference
+      desc: >-
+        Describe a tidy DataFrame as a DSD with its concept scheme and
+        codelists.
+      contents:
+        - create_schema_from_table
     - title: Structure Maps
-      desc: Build, parse, validate, and write SDMX structure maps.
+      desc: Build, parse, validate, and prepare SDMX structure maps for upload.
       contents:
         - parse_mapping_template_wb
         - build_structure_map_from_template_wb
@@ -182,7 +192,7 @@ reference:
         - filter_tidy_raw
         - filter_rows
     - title: Utilities
-      desc: Helpers for codelists, components, Excel templates, and XML.
+      desc: Helpers for codelists, components, Excel templates, and URNs.
       contents:
         - extract_validation_info
         - get_codelist_ids
@@ -191,7 +201,6 @@ reference:
         - build_excel_workbook
         - write_excel_mapping_template
         - read_mapping
-        - fix_sdmx_xml_datatype_tags
         - gen_urn
     - title: Artefact Builders
       desc: >-
@@ -240,3 +249,4 @@ reference:
         - parse_dsd_id
         - standardize_data_for_upload
         - add_sdmx_reference_cols
+        - fix_sdmx_xml_datatype_tags

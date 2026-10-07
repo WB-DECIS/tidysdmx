@@ -17,6 +17,13 @@ from typeguard import typechecked
 
 logger = logging.getLogger(__name__)
 
+_SUPPORTED_MAP_TYPES: tuple[type, ...] = (
+    FixedValueMap,
+    ImplicitComponentMap,
+    ComponentMap,
+    MultiComponentMap,
+)
+
 
 def _progress_level(verbose: bool) -> int:
     """Return the log level for progress messages (INFO when verbose)."""
@@ -77,7 +84,9 @@ def map_structures(
     Raises:
         KeyError: If a ComponentMap or MultiComponentMap source column is not
             in ``df``.
-        TypeError: If the StructureMap contains an unsupported map type.
+        TypeError: If the StructureMap contains an unsupported map type
+            (e.g. ``DatePatternMap``), or a ComponentMap/MultiComponentMap
+            references its representation map by URN instead of embedding it.
     """
     fixed_value_maps, implicit_maps, component_maps, multi_component_maps = (
         _split_maps_by_type(structure_map)
@@ -125,27 +134,33 @@ def _split_maps_by_type(
 ]:
     """Group a StructureMap's maps by type, keeping their stored order.
 
+    Delegates to pysdmx's typed views (``StructureMap.fixed_value_maps`` and
+    friends), which filter ``maps`` in stored order.
+
     Raises:
         TypeError: If a map is not one of the four supported types.
     """
-    fixed_value_maps = []
-    implicit_maps = []
-    component_maps = []
-    multi_component_maps = []
-
     for m in structure_map.maps:
-        if isinstance(m, FixedValueMap):
-            fixed_value_maps.append(m)
-        elif isinstance(m, ImplicitComponentMap):
-            implicit_maps.append(m)
-        elif isinstance(m, ComponentMap):
-            component_maps.append(m)
-        elif isinstance(m, MultiComponentMap):
-            multi_component_maps.append(m)
-        else:
+        if not isinstance(m, _SUPPORTED_MAP_TYPES):
             raise TypeError(f"Unknown map type: {type(m)}")
 
-    return fixed_value_maps, implicit_maps, component_maps, multi_component_maps
+    return (
+        list(structure_map.fixed_value_maps),
+        list(structure_map.implicit_component_maps),
+        list(structure_map.component_maps),
+        list(structure_map.multi_component_maps),
+    )
+
+
+def _unresolved_values_error(kind: str, source: object, urn: str) -> TypeError:
+    """Build the error for a component map whose values are only a URN."""
+    return TypeError(
+        f"The {kind} for source {source!r} references its representation map "
+        f"by URN ({urn!r}) instead of embedding it, so there are no value maps "
+        "to apply. Pass a StructureMap whose maps embed their representation "
+        "maps, e.g. one fetched with pysdmx's RegistryClient.get_mapping(), "
+        "which resolves them."
+    )
 
 
 @typechecked
@@ -244,12 +259,19 @@ def apply_component_map(
 
     Returns:
         DataFrame with the target column added or overwritten.
+
+    Raises:
+        KeyError: If the source column is not in ``df``.
+        TypeError: If ``component_map.values`` is a URN string rather than an
+            embedded RepresentationMap.
     """
     result_df = df.copy()
 
     source_col = component_map.source
     target_col = component_map.target
     rep_map = component_map.values
+    if isinstance(rep_map, str):
+        raise _unresolved_values_error("ComponentMap", source_col, rep_map)
 
     if source_col not in result_df.columns:
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
@@ -334,12 +356,19 @@ def apply_multi_component_map(
 
     Returns:
         DataFrame with the target column added or overwritten.
+
+    Raises:
+        KeyError: If a source column is not in ``df``.
+        TypeError: If ``multi_component_map.values`` is a URN string rather
+            than an embedded MultiRepresentationMap.
     """
     result_df = df.copy()
 
     source_cols = multi_component_map.source
     target_col = multi_component_map.target[0]
     rep_map = multi_component_map.values
+    if isinstance(rep_map, str):
+        raise _unresolved_values_error("MultiComponentMap", list(source_cols), rep_map)
 
     missing_cols = [col for col in source_cols if col not in result_df.columns]
     if missing_cols:
