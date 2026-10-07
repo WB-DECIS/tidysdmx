@@ -148,7 +148,31 @@ branch (quick win); 📋 = backlog (§7).
 
 **No CLAUDE.md "don't reimplement pysdmx" violations found.**
 
+**Addendum, October 2026 (pysdmx 1.20.0 audit).** A second pass found pysdmx
+features the code was not using, and three defects caused by not using them.
+All six were fixed on `claude/pysdmx-1.20-audit`:
+
+| Candidate | Verdict | Evidence |
+|---|---|---|
+| `extract_validation_info` / `get_codelist_ids` read `local_codes.items` | **Replaced by `Component.enumeration` + `Hierarchy.all_codes()`** | `get_schema` puts a `Hierarchy` (no `.items`) in `local_codes` for components with a hierarchy association → `AttributeError`; codes held on the concept were never validated. |
+| `mapping._split_maps_by_type` `isinstance` loop | **Replaced by `StructureMap.*_maps` views** | Drop-in; same stored order. |
+| Role filtering on `c.role == Role.DIMENSION` | **Replaced by `Components.dimensions`** | Drop-in (utils.py, artefact_validation.py). |
+| `gen_urn("MultiRepresentationMap", …)` | **Fixed — class names follow `short_urn`** | SDMX has no MultiRepresentationMap class; the generated URNs could not resolve on FMR. Port of `d00679d` from the unmerged July line. |
+| `standardize_output` STRUCTURE/ACTION values | **Aligned with pysdmx's SDMX-CSV writer** | `provisionagreement` → `dataprovision`; ACTION `U` (rejected by pysdmx's reader) dropped, `A`/`R` added. |
+| `ComponentMap.values` assumed resolved | **Narrowed — clear `TypeError` on a URN** | mypy `union-attr` suppression for `tidysdmx.mapping` removed. |
+| `fix_sdmx_xml_datatype_tags` | **Deprecated (`FutureWarning`)** | A1; deletion waits for the next breaking release. |
+
+Still no pysdmx equivalent, re-checked at 1.20.0: a full-URN builder (`gen_urn`),
+a dataset-vs-schema validator (`validation.py`) and a StructureMap applier
+(`mapping.py`). `docs/pysdmx-overview.md` §11 records what is deliberately not
+taken from pysdmx and why.
+
 ## 5. pysdmx 1.16.0 upgrade assessment
+
+> **Superseded (October 2026).** `uv.lock` pins pysdmx 1.20.0 and the floor is
+> `>=1.19.0` (PR #264). The full suite, including the cassette-backed
+> integration tests, passes on 1.20.0. The procedure below is kept for history;
+> the current one is `docs/pysdmx-overview.md` §13.
 
 - **Changes 1.13.0 → 1.16.0:** 1.14.0 fixes the RepresentationMap XML
   writer (PR #556) and a Dataflow short_urn bug; 1.15.0 changes the FMR default
@@ -194,15 +218,22 @@ green after every change.
 ## 7. Prioritized refactoring backlog
 
 Ordered by severity, then effort-ascending × unblocking value. Each item is
-independently shippable.
+independently shippable. *Status* lines were added on 2026-10-07 against `dev`
+plus PR #264 and the pysdmx 1.20 audit branch; the unmerged July line (PR #233)
+was not counted.
 
 **A. Now (P0/P1, small–medium)**
 - **A1** Upgrade pysdmx → 1.16.0 + delete `fix_sdmx_xml_datatype_tags`
   (PYSDMX-01/07). Gate: full suite + FMR smoke. *S*
+  *Status:* mostly done — pysdmx locked at 1.20.0, floor 1.19.0; the function is
+  deprecated rather than deleted (removal → D8).
 - **A2** Regenerate & commit the two IFPRI cassettes; make cassette-missing a
   hard failure when `$CI` is set (TEST-01). Requires FMR network access. *S*
+  *Status:* partly done — the IFPRI cassettes are committed (`4ddb8e1`); the
+  fixtures still skip rather than fail when one is missing.
 - **A3** Fix the Excel template writer↔reader mismatch; add a write→parse→build
   round-trip test (ARCH-01). Decide: fix writer or deprecate writer trio. *M*
+  *Status:* open.
 - **A4** Untangle deprecation: re-route `standardize_sdmx` off
   `standardize_data_for_upload`; remove deprecated functions from great-docs;
   schedule removal (0.9: drop from `__all__`; 1.0: delete) (ARCH-05/CONS-21). *M*
@@ -212,48 +243,70 @@ independently shippable.
   has no tests at all — so whoever adds the coverage TEST-03 asks for will hit an
   immediate failure. Re-route the internal call first, then add the test.
   Re-raised in review of PR #261.
+  *Status:* open — the deprecated names are still in `__all__` at 0.10.0.
 - **A5** Switch `Agency`/`ItemReference` imports to public `pysdmx.model`;
   isolate the two unavoidable private imports; request upstream re-export
   (PYSDMX-03). *S*
+  *Status:* done except the upstream request — `MaintainableArtefact` and
+  `ItemScheme` are still private at pysdmx 1.20.0, and each remaining import
+  carries a comment saying so.
 - **A6** `poetry update idna`; add main-group `pip-audit` step to CI (PROD-05). *S*
+  *Status:* done — `security.yml` audits the lockfile; Poetry is gone.
 - **A7** Wire or remove semantic-release (PROD-01). *M*
+  *Status:* done — `release.yml` releases from `main`.
 
 **B. Structural (P2, larger)**
 - **B1** Split `structures.py` → `map_builders.py` / `schema_builder.py` /
   `excel_template.py` (absorbing utils.py's Excel writer) / `urn.py`
   (absorbing `parse_artefact_id`, killing the back-import). One extraction per
   PR, `__init__.py` re-exports keep the API stable (ARCH-02/03). *L*
+  *Status:* open on `dev`; done on the unmerged July line (PR #233).
 - **B2** Split `tidysdmx.py` → `registry.py` / `standardize.py` /
   `json_mapping.py`; retire the package-shadowing module name. *M*
+  *Status:* open.
   *Update (2026-09): `tidysdmx/fmr.py` now exists and is the natural home for
   the registry slice — move `fetch_schema` there instead of creating
   `registry.py`.*
 - **B3** Dissolve `utils.py` → `introspection.py` + (Excel→B1) +
   `pysdmx_workarounds.py` (deleted entirely after A1). *S*
+  *Status:* open.
 - **B4** Unit-test kedro.py with plain fakes; remove the coverage `omit`
   (TEST-05). Add tests for `map_to_sdmx`, `read_mapping`, `standardize_sdmx`,
   `gen_urn` (TEST-03, ARCH-06/07). *M*
+  *Status:* open — `gen_urn` now has tests; kedro.py, `map_to_sdmx`,
+  `read_mapping` and `standardize_sdmx` still have none (see D1).
 - **B5** `_types.py`: `MappingDict`/`ValidationInfo` TypedDicts,
   `SdmxContext`/`SdmxAction` aliases; annotate kedro.py; eliminate the
   6 redeclared context Literals and the third vocabulary (CONS-17/18/19). *M*
+  *Status:* open.
 - **B6** Remaining dedup: `_require_rep_data`, `_unique_map_id`, unify the
   three rep-map validators (CONS-04/05/07); resolve the NaN policy (CONS-02);
   add INFO-sheet fallback warnings (CONS-14); fix
   `transform_source_to_target` error attribution (CONS-15). *M*
+  *Status:* open. pysdmx 1.17 now rejects a RepresentationMap with maps but a
+  `None` source/target, so part of the rep-map validators is unreachable (D9).
 - **B7** Rename the colliding artefact_builder map builders to
   `*_from_values` (CONS-20). *S*
+  *Status:* open.
 - **B8** Docs consolidation: delete docs/architecture.md + docs/overview.md;
   retire the dead Sphinx toolchain or the great-docs one (pick one); align RTD
   config and trigger branches; update pysdmx-overview.md's stale version
   (ARCH-12/13, PROD-13). *M*
+  *Status:* done — Sphinx, RTD and the duplicate docs are gone, and
+  `pysdmx-overview.md` is verified against 1.20.0.
 - **B9** Fixture hygiene: function-scope the 5 mutable DataFrame fixtures,
   delete dead `to_csv` caching (TEST-12). *S*
+  *Status:* open.
 - **B10** Skip-debt triage: rewrite the 4 crashing test_utils tests + fix the
   broken docstring example (TEST-06); xfail the NaN-bug tests or fix NaN
   passthrough (TEST-08); implement whitespace validation (TEST-09); resolve or
   delete the fixture-contradicting tests (TEST-11). *M*
+  *Status:* open (the skipped `get_codelist_ids` test was replaced with working
+  ones in the pysdmx audit).
 - **B11** Mypy adoption: lenient config + per-module burn-down of the 45
   errors (PROD-03). *M*
+  *Status:* done as adoption — mypy runs in CI; the per-module burn-down in
+  `pyproject.toml` continues.
 - **B12** `collect_structure_map_artifacts` collects one RepresentationMap per
   map rule without deduplicating by artefact identity
   (structure_map_writer.py:126). Two ComponentMaps embedding the same
@@ -261,22 +314,59 @@ independently shippable.
   the upload list twice, which FMR may reject or duplicate. Key a seen-set on the
   URN (or agency/id/version) while preserving first-use order, and add a test
   covering the shared-rep-map case. Raised in review of PR #261. *S*
+  *Status:* open.
 
 **C. Polish (P3)**
 - **C1** CI: matrix +3.13, slim lint job, dependency caching, drop dead uv step
   (PROD-02, TEST-14); raise coverage gate to 85 (TEST-13); split
   notebooks/docs dependency groups (PROD-07).
+  *Status:* done — matrix 3.11–3.14, gate at 85 (actual ~91), separate groups.
 - **C2** Ruff: adopt `N, ERA, T20, ANN, PLC, PLW, PLR2004` + `C90`
   (max-complexity 14); adopt `PT` for tests and burn down the 54 bare
   `pytest.raises` (CONS-23/24, TEST-15).
+  *Status:* partly done — N, ERA, T20, ANN, C90 (max-complexity 10) and PT are
+  on; PLC/PLW/PLR2004 are not, and PT011 is still ignored for tests.
 - **C3** README rewrite per drafted outline + pyproject URLs/classifiers
   (PROD-08).
+  *Status:* done.
 - **C4** Privatize `vectorized_lookup_ordered_v1/_v2`; export or privatize
   `apply_component_map` consistently (ARCH-04/14); delete zombie
   `_extract_artefact_id` + dead alias (ARCH-09/10).
+  *Status:* open.
 - **C5** `fetch_schema` path flexibility (PYSDMX-04); document the pre-push
   hook installation (PROD-12); file the upstream `build_urn` feature request
   (PYSDMX-02).
+  *Status:* partly done — `FmrClient` (PR #264) takes the registry root once;
+  `fetch_schema` still hardcodes `/FMR/sdmx/v2/`. No upstream request filed.
+
+**D. Found in the October 2026 pysdmx 1.20 audit, not fixed there**
+- **D1** `read_mapping` → `map_to_sdmx` contract break: `read_mapping` flattens
+  representation sub-keys to the top level while `map_to_sdmx` reads only
+  `mapping["representation"]`, so the JSON path recodes nothing (since
+  `cb76203`). Untested; the Kedro JSON nodes inherit it. P0. *M*
+- **D2** `kd_validate_datasets_local` passes the deprecated `valid=` to
+  `validate_dataset_local`, so every caller gets a `FutureWarning`. *S*
+- **D3** Validate series keys against `Schema.keys` / `excluded_keys`
+  (constraint key sets, pysdmx 1.12/1.13); `validate_dataset_local` ignores them. *M*
+- **D4** Apply `DatePatternMap` in `map_structures`, using pysdmx's
+  `DatePatternMap.py_pattern`; today tidysdmx builds them but `map_structures`
+  raises `TypeError`. *M*
+- **D5** Port the rest of `d00679d` from the July line: run the common
+  maintainable checks on embedded representation maps, because pysdmx's
+  SDMX-JSON writer rejects a name-less map at upload; plus rule C002 (duplicate
+  code IDs). *S*
+- **D6** Validity dates: tidysdmx builds naive `datetime`s, pysdmx's readers
+  return UTC-aware ones, so built and fetched maps compare unequal. Pick UTC. *S*
+- **D7** Cassettes: regenerate under the locked pysdmx with the production
+  format (`FUSION_JSON`; the fixtures use the client default, SDMX-JSON) and an
+  explicit `get_mapping` version (the default became `"~"` in pysdmx 1.15);
+  delete the orphan `dsd_schema.pkl`. Needs FMR access. *S*
+- **D8** Delete `fix_sdmx_xml_datatype_tags` (deprecated in the audit) in the
+  next breaking release. *S*
+- **D9** Drop the rep-map `None` checks pysdmx 1.17 made unreachable, together
+  with B6's validator unification. *S*
+- **D10** Nothing tests the pysdmx floor: CI installs only the lock. Consider a
+  `--resolution lowest-direct` lane, or keep floor = last tested lock. *S*
   *Update (2026-09): `FmrClient` takes the registry root and derives both
   endpoints itself (see `docs/pysdmx-shortcomings.md`, PYSDMX-AUTH-08); fix
   PYSDMX-04 by delegating `fetch_schema` to it.*

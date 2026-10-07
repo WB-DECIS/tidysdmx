@@ -31,7 +31,7 @@ uv add tidysdmx
 
 ## Usage
 
-The canonical flow is fetch → build a map → apply it → validate → standardise.
+The canonical flow is fetch → build a map → apply it → standardise → validate.
 
 ```python
 import pandas as pd
@@ -56,18 +56,21 @@ schema = fetch_schema(
 sheets = parse_mapping_template_wb("mapping_template.xlsx")
 structure_map = build_structure_map_from_template_wb(sheets)
 
-# 3. Apply the map to raw data.
+# 3. Apply the map to raw data. The result keeps the raw columns alongside
+#    every target column.
 raw = pd.read_csv("raw_data.csv")
 mapped = map_structures(raw, structure_map)
 
-# 4. Validate against the schema's codelists. Returns a DataFrame of errors;
-#    an empty frame means the dataset is clean.
-errors = validate_dataset_local(mapped, schema=schema)
+# 4. Keep only the schema's components and add the SDMX-CSV reference columns
+#    (STRUCTURE, STRUCTURE_ID, ACTION). ACTION defaults to "I"; pass
+#    action="A", "R" or "D" for the other SDMX-CSV actions.
+final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
+
+# 5. Validate against the schema's columns and codelists. Returns a DataFrame
+#    of errors; an empty frame means the dataset is clean.
+errors = validate_dataset_local(final, schema=schema)
 if not errors.empty:
     raise ValueError(errors["Error"].tolist())
-
-# 5. Add the SDMX reference columns an SDMX-CSV message needs.
-final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
 ```
 
 Behind single sign-on, `FmrClient` handles the bearer token — acquisition,

@@ -32,6 +32,5 @@ guide through it, not a replacement for it.
    `make release-dry` is the only form of it you use (the shared settings deny
    the rest).
 
-If this is the project's first release, check the one-time setup boxes in
-`TEMPLATE-NEXT-STEPS.md` are done — otherwise the release tags successfully and
-then fails at the publish step.
+If a release fails at the publish step after tagging, check the boxes under
+*One-time setup* in RELEASING.md (Trusted Publishing, branch protection).

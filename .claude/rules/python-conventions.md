@@ -19,7 +19,7 @@ template dropped. Use it on new public functions so the codebase stays
 consistent.
 
 The reason it is still here is sequencing, not disagreement: `TypeCheckError` is
-currently part of the public contract (91 decorators, and tests asserting the
+currently part of the public contract (over 90 decorators, and tests asserting the
 exception), so removing it is a breaking change that belongs in its own release.
 mypy is being adopted first — see the burn-down list in `pyproject.toml`. Once
 mypy reaches `strict = true`, typeguard goes, and this section with it.

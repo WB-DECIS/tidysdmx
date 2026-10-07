@@ -5,7 +5,7 @@ pagetitle: "tidysdmx — A tidy toolbox for SDMX data"
 
 # tidysdmx
 
-**A tidy toolbox for working with SDMX data.** Fetch schemas from FMR, infer schemas from tidy DataFrames, build structure maps from Excel templates, map data to dissemination schemas, validate, and export SDMX-ML artefacts — all with a Pythonic, pandas-friendly API.
+**A tidy toolbox for working with SDMX data.** Fetch schemas from FMR, infer DSDs from tidy DataFrames, build structure maps from Excel templates, map data to dissemination schemas, validate, and prepare data and structure maps for FMR upload — all with a Pythonic, pandas-friendly API.
 
 ## Three steps to your first SDMX-ready dataset
 
@@ -72,11 +72,11 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 
 ## What does tidysdmx give me on top of pysdmx?
 
-- **Schema inference from tidy data** — `create_schema_from_table()` builds a pysdmx `Schema` (with DSD, ConceptScheme, and Codelists) directly from a pandas DataFrame, so you can describe and validate your raw input without writing a line of XML.
+- **Schema inference from tidy data** — `create_schema_from_table()` builds a DSD, ConceptScheme, and Codelists directly from a pandas DataFrame; `.dsd.to_schema()` turns the DSD into the pysdmx `Schema` that validation takes, so you can describe and validate your raw input without writing a line of XML.
 - **Excel-driven structure maps** — `parse_mapping_template_wb()` + `build_structure_map_from_template_wb()` turn the World Bank mapping workbook format into a fully-formed `StructureMap` with all the `FixedValueMap`, `ComponentMap`, and `RepresentationMap` instances pysdmx expects.
-- **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
-- **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
-- **Upload-ready outputs** — `standardize_output()` and `collect_structure_map_artifacts()` prepare both data and structure artefacts for FMR submission.
+- **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a new DataFrame holding the input columns plus every target column; `standardize_output()` then keeps only the target schema's components.
+- **Local validation** — `validate_dataset_local()` checks columns, codelist membership (the schema's constrained codes when it has them), duplicates, and required values against any pysdmx `Schema`.
+- **Upload-ready outputs** — `standardize_output()` shapes data as SDMX-CSV, and `collect_structure_map_artifacts()` returns a structure map with its representation maps as pysdmx artefacts, ready for `FmrClient.put_structures()` or pysdmx's `write_sdmx()`.
 - **Authenticated registry access** — `FmrClient` wraps pysdmx's FMR clients with bearer-token acquisition and refresh (Azure Entra ID out of the box, any provider via `TokenProvider`), so reads and uploads against a registry behind single sign-on need one object, not a token-juggling script.
 
 ## License & credits

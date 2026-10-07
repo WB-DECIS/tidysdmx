@@ -15,8 +15,8 @@ authors = [
 ]
 keywords = ["sdmx", "statistics", "data", "metadata", "fmr", "pysdmx"]
 # Licence classifiers are deliberately absent: PEP 639 supersedes them with the
-# SPDX `license` expression above. Python version classifiers are now written by
-# hand — Poetry used to synthesise them, hatchling does not.
+# SPDX `license` expression above. Python version classifiers are written by
+# hand — Poetry used to synthesise them, flit_core does not.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3.11",
@@ -233,7 +233,7 @@ max-complexity = 10
     # Cassette fixtures load pickled pysdmx Schema objects from files this
     # repository generates and commits itself. Not untrusted input.
     "S301",
-    # TODO(TEST-15): 54 `pytest.raises` calls lack `match=`. Burning those down
+    # TODO(TEST-15): 54 broad `pytest.raises` (PT011) lack `match=`. Burning those down
     # is its own change — see docs/reviews/2026-06-architecture-review.md.
     # Remove this line once they are done.
     "PT011",
@@ -275,10 +275,11 @@ warn_unused_ignores = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-# pysdmx ships no py.typed marker, and neither do openpyxl or the pandas stubs
-# we do not install. Untyped imports become Any rather than errors.
-# pysdmx does ship py.typed; it is listed here only so a future version that
-# drops it cannot silently degrade the MapRule alias below into a variable.
+# openpyxl ships no type information and the pandas stubs are not installed,
+# so their imports become Any rather than errors. pysdmx, typeguard and numpy
+# do ship py.typed, so this has no effect on them today; pysdmx stays listed so
+# that a release dropping its marker cannot silently degrade the MapRule alias
+# in structure_map_writer.py into a variable.
 # TODO: add `pandas-stubs` to the dev group and drop pandas from this list. It
 # is left out for now because turning on real pandas types surfaces a further
 # batch of errors that belongs in its own change.
@@ -355,9 +356,9 @@ relative_files = true
 omit = ["src/tidysdmx/kedro.py"]
 
 [tool.coverage.report]
-# Raised from 70. Actual coverage is ~89, and a gate 19 points below reality
-# cannot catch a regression. This is a floor, not a target: raise it again once
-# real coverage moves up.
+# Raised from 70. Actual coverage is ~91 (unit lane, October 2026), and a gate
+# far below reality cannot catch a regression. This is a floor, not a target:
+# raise it again once real coverage moves up.
 fail_under = 85
 show_missing = true
 exclude_lines = [
