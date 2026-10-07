@@ -5,6 +5,7 @@ import sys
 import threading
 import types
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple, get_args
 
 import httpx
 import pytest
@@ -12,11 +13,15 @@ from pysdmx.api.fmr import RegistryClient
 from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
 from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
+from pysdmx.model import Components, Dataflow, DataStructureDefinition
 from typeguard import TypeCheckError
 
 from tests.fixtures.fxtr_fmr import (
     AGENCIES_FUSION_JSON,
     AGENCIES_URL,
+    CODELIST_FUSION_JSON,
+    CODELIST_URL,
+    DSD_URN,
     FMR_ROOT,
     FMR_SCOPE,
     NOW,
@@ -29,7 +34,9 @@ from tests.fixtures.fxtr_fmr import (
     SequenceTokenProvider,
 )
 from tidysdmx.fmr import (
+    _FETCHERS,
     DEFAULT_REFRESH_MARGIN,
+    ArtefactType,
     AzureTokenProvider,
     BearerToken,
     FmrClient,
@@ -39,6 +46,60 @@ from tidysdmx.fmr import (
 )
 
 ONE_HOUR = timedelta(hours=1)
+LIVE_FMR_ROOT = "https://fmrqa.worldbank.org/FMR"
+
+
+class _FetchCase(NamedTuple):
+    """One artefact type and how FmrClient fetches it.
+
+    ``method`` is the typed FmrClient method, ``getter`` the pysdmx getter behind
+    it, and ``fixture`` the fixture holding what that getter returns.
+    """
+
+    artefact_type: str
+    method: str
+    getter: str
+    fixture: str
+    listed: bool  # pysdmx returns a list for this type
+
+
+_FETCH_CASES = [
+    _FetchCase("codelist", "fetch_codelist", "get_codes", "codelist", False),
+    _FetchCase("hierarchy", "fetch_hierarchy", "get_hierarchy", "hierarchy", False),
+    _FetchCase(
+        "conceptscheme",
+        "fetch_concept_scheme",
+        "get_concepts",
+        "concept_scheme",
+        False,
+    ),
+    _FetchCase(
+        "categoryscheme",
+        "fetch_category_scheme",
+        "get_categories",
+        "category_scheme",
+        False,
+    ),
+    _FetchCase("dataflow", "fetch_dataflow", "get_dataflows", "dataflow", True),
+    _FetchCase(
+        "datastructure",
+        "fetch_data_structure_definition",
+        "get_data_structures",
+        "data_structure_definition",
+        True,
+    ),
+    _FetchCase(
+        "provisionagreement",
+        "fetch_provision_agreement",
+        "get_provision_agreement",
+        "provision_agreement",
+        False,
+    ),
+    _FetchCase(
+        "structuremap", "fetch_structure_map", "get_mapping", "structure_map", False
+    ),
+]
+_FETCH_CASE_IDS = [case.artefact_type for case in _FETCH_CASES]
 
 
 def _mock_agencies(respx_mock):
@@ -51,6 +112,31 @@ def _mock_upload(respx_mock, status_code: int = 200):
     return respx_mock.post(STRUCTURES_UPLOAD_URL).mock(
         return_value=httpx.Response(status_code)
     )
+
+
+def _mock_codelist(respx_mock):
+    return respx_mock.get(CODELIST_URL).mock(
+        return_value=httpx.Response(200, content=CODELIST_FUSION_JSON)
+    )
+
+
+def _patch_getter(monkeypatch, client, getter, result):
+    """Replace one pysdmx getter on ``client.registry``; return its calls."""
+    calls = []
+
+    def fake_getter(agency, id, version):
+        calls.append((agency, id, version))
+        return result
+
+    monkeypatch.setattr(client.registry, getter, fake_getter)
+    return calls
+
+
+def _patch_case(monkeypatch, request, client, case):
+    """Patch the getter behind ``case`` to return its fixture; return both."""
+    artefact = request.getfixturevalue(case.fixture)
+    result = [artefact] if case.listed else artefact
+    return artefact, _patch_getter(monkeypatch, client, case.getter, result)
 
 
 class TestBearerToken:
@@ -564,6 +650,174 @@ class TestFmrClientMaintenance:
             FmrClient(FMR_ROOT, token_provider=rotating_provider)
 
 
+class TestFmrClientFetchArtefact:
+    def test_fetch_artefact_covers_every_artefact_type(self):
+        assert set(_FETCHERS) == set(get_args(ArtefactType))
+
+    def test_fetch_artefact_cases_cover_every_artefact_type(self):
+        # Keeps the parametrised tests below honest when a type is added.
+        assert set(_FETCH_CASE_IDS) == set(get_args(ArtefactType))
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_fetch_artefact_dispatches_by_type(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        artefact, _ = _patch_case(monkeypatch, request, fmr_client, case)
+
+        fetched = fmr_client.fetch_artefact("WB:X_TEST(1.0)", case.artefact_type)
+
+        assert fetched is artefact
+
+    @pytest.mark.parametrize("artefact_type", ["schema", "valuelist", "Codelist"])
+    def test_fetch_artefact_rejects_unsupported_type(self, fmr_client, artefact_type):
+        with pytest.raises(TypeCheckError, match=r'argument "artefact_type"'):
+            fmr_client.fetch_artefact("WB:CL_TEST(1.0)", artefact_type)
+
+    @pytest.mark.parametrize(
+        "artefact_id",
+        [
+            "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",
+            "Codelist=WB:CL_TEST(1.0)",
+        ],
+    )
+    def test_fetch_artefact_rejects_urn(self, fmr_client, artefact_id):
+        with pytest.raises(ValueError, match="not a URN"):
+            fmr_client.fetch_artefact(artefact_id, "codelist")
+
+    @pytest.mark.parametrize(
+        "artefact_id",
+        ["WB:CL_TEST(*)", "WB:*(1.0)", "*:CL_TEST(1.0)", "WB:CL_A,CL_B(1.0)"],
+    )
+    def test_fetch_artefact_rejects_wildcards_and_lists(self, fmr_client, artefact_id):
+        with pytest.raises(ValueError, match="must identify a single artefact"):
+            fmr_client.fetch_artefact(artefact_id, "codelist")
+
+    @pytest.mark.parametrize("version", ["~", "+"])
+    def test_fetch_artefact_passes_latest_version_wildcards(
+        self, monkeypatch, fmr_client, codelist, version
+    ):
+        calls = _patch_getter(monkeypatch, fmr_client, "get_codes", codelist)
+
+        fmr_client.fetch_artefact(f"WB:CL_TEST({version})", "codelist")
+
+        assert calls == [("WB", "CL_TEST", version)]
+
+    @pytest.mark.parametrize("artefact_id", ["CL_TEST", "WB:CL_TEST", "WB:(1.0)"])
+    def test_fetch_artefact_rejects_malformed_artefact_id(
+        self, fmr_client, artefact_id
+    ):
+        with pytest.raises(ValueError, match=r"agency:id\(version\)"):
+            fmr_client.fetch_artefact(artefact_id, "codelist")
+
+    def test_fetch_artefact_propagates_pysdmx_not_found(self, monkeypatch, fmr_client):
+        def missing(agency, id, version):
+            raise NotFound("Not found", "no such codelist")
+
+        monkeypatch.setattr(fmr_client.registry, "get_codes", missing)
+
+        with pytest.raises(NotFound, match="no such codelist"):
+            fmr_client.fetch_artefact("WB:CL_TEST(1.0)", "codelist")
+
+
+class TestFmrClientTypedFetchers:
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_fetcher_returns_registry_artefact(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        artefact, _ = _patch_case(monkeypatch, request, fmr_client, case)
+
+        fetched = getattr(fmr_client, case.method)("WB:X_TEST(1.0)")
+
+        assert fetched is artefact
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_fetcher_passes_parsed_reference_to_pysdmx_getter(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        _, calls = _patch_case(monkeypatch, request, fmr_client, case)
+
+        getattr(fmr_client, case.method)("WB.GGH:X_TEST(1.2.0)")
+
+        assert calls == [("WB.GGH", "X_TEST", "1.2.0")]
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_fetcher_rejects_urn(self, fmr_client, case):
+        with pytest.raises(ValueError, match="not a URN"):
+            getattr(fmr_client, case.method)(DSD_URN)
+
+
+class TestFmrClientFetchCodelist:
+    def test_fetch_codelist_parses_registry_response(self, respx_mock, codelist):
+        _mock_codelist(respx_mock)
+
+        fetched = FmrClient(FMR_ROOT).fetch_codelist("WB:CL_TEST(1.0)")
+
+        assert fetched == codelist
+
+    def test_fetch_codelist_reads_anonymously_without_token_provider(self, respx_mock):
+        _mock_codelist(respx_mock)
+
+        FmrClient(FMR_ROOT).fetch_codelist("WB:CL_TEST(1.0)")
+
+        assert "authorization" not in respx_mock.calls[0].request.headers
+
+    def test_fetch_codelist_sends_bearer_with_token_provider(
+        self, respx_mock, fmr_client
+    ):
+        _mock_codelist(respx_mock)
+
+        fmr_client.fetch_codelist("WB:CL_TEST(1.0)")
+
+        assert respx_mock.calls[0].request.headers["Authorization"] == "Bearer t1"
+
+
+class TestFmrClientFetchDataflow:
+    def test_fetch_dataflow_raises_not_found_when_registry_returns_none(
+        self, monkeypatch, fmr_client
+    ):
+        _patch_getter(monkeypatch, fmr_client, "get_dataflows", [])
+
+        with pytest.raises(NotFound, match="no dataflow for 'WB:DF_TEST"):
+            fmr_client.fetch_dataflow("WB:DF_TEST(1.0)")
+
+    def test_fetch_dataflow_rejects_several_matches(
+        self, monkeypatch, fmr_client, dataflow
+    ):
+        newer = Dataflow(
+            id="DF_TEST", agency="WB", version="2.0", name="Newer", structure=DSD_URN
+        )
+        _patch_getter(monkeypatch, fmr_client, "get_dataflows", [dataflow, newer])
+
+        with pytest.raises(ValueError, match=r"matches 2 dataflow .*1\.0, 2\.0"):
+            fmr_client.fetch_dataflow("WB:DF_TEST(1+.0)")
+
+
+class TestFmrClientFetchDataStructureDefinition:
+    def test_fetch_data_structure_definition_raises_not_found_when_none(
+        self, monkeypatch, fmr_client
+    ):
+        _patch_getter(monkeypatch, fmr_client, "get_data_structures", [])
+
+        with pytest.raises(NotFound, match="no datastructure for 'WB:DSD_TEST"):
+            fmr_client.fetch_data_structure_definition("WB:DSD_TEST(1.0)")
+
+    def test_fetch_data_structure_definition_rejects_several_matches(
+        self, monkeypatch, fmr_client, data_structure_definition
+    ):
+        newer = DataStructureDefinition(
+            id="DSD_TEST", agency="WB", version="2.0", components=Components([])
+        )
+        _patch_getter(
+            monkeypatch,
+            fmr_client,
+            "get_data_structures",
+            [data_structure_definition, newer],
+        )
+
+        with pytest.raises(ValueError, match="matches 2 datastructure"):
+            fmr_client.fetch_data_structure_definition("WB:DSD_TEST(1+.0)")
+
+
 class TestFmrClientFetchSchema:
     def test_fetch_schema_parses_artefact_id_and_delegates(
         self, monkeypatch, fmr_client, sdmx_schema
@@ -588,6 +842,10 @@ class TestFmrClientFetchSchema:
     def test_fetch_schema_rejects_unknown_context(self, fmr_client):
         with pytest.raises(TypeCheckError, match=r'argument "context"'):
             fmr_client.fetch_schema("WB:WDI(1.0.0)", "codelist")
+
+    def test_fetch_schema_rejects_urn(self, fmr_client):
+        with pytest.raises(ValueError, match="not a URN"):
+            fmr_client.fetch_schema(DSD_URN, "datastructure")
 
 
 class TestFmrClientGetSchema:
@@ -656,3 +914,31 @@ class TestFmrClientPutStructures:
     def test_put_structures_requires_token_provider(self, codelist):
         with pytest.raises(ValueError, match="token_provider"):
             FmrClient(FMR_ROOT).put_structures([codelist])
+
+
+@pytest.mark.integration
+class TestFmrClientFetchLive:
+    """Live reads from the World Bank's QA registry.
+
+    The artefacts are the ones the cassette fixtures already rely on. Run with
+    ``-m integration``; these tests need FMR access.
+    """
+
+    def test_fetch_data_structure_definition_reads_live_registry(self):
+        dsd = FmrClient(LIVE_FMR_ROOT).fetch_data_structure_definition(
+            "WB:IFPRI_ASTI(1.0)"
+        )
+
+        assert dsd.short_urn == "DataStructure=WB:IFPRI_ASTI(1.0)"
+
+    def test_fetch_dataflow_reads_live_registry(self):
+        dataflow = FmrClient(LIVE_FMR_ROOT).fetch_dataflow("WB:DF_IFPRI_ASTI(1.0)")
+
+        assert dataflow.short_urn == "Dataflow=WB:DF_IFPRI_ASTI(1.0)"
+
+    def test_fetch_artefact_reads_live_structure_map(self):
+        structure_map = FmrClient(LIVE_FMR_ROOT).fetch_artefact(
+            "WB:SM_IFPRI_ASTI_TO_DATA360(~)", "structuremap"
+        )
+
+        assert structure_map.id == "SM_IFPRI_ASTI_TO_DATA360"
