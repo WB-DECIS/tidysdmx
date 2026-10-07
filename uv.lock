@@ -2949,16 +2949,16 @@ wheels = [
 
 [[package]]
 name = "pysdmx"
-version = "1.19.0"
+version = "1.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "msgspec" },
     { name = "parsy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/4f/9bd4b01f2815957b482b3b593a662787744d2435796c9bc0d1091ccbc4b3/pysdmx-1.19.0.tar.gz", hash = "sha256:44996e6e6a3f3fb9e8a0235d73ef589109c662b5fe688df0c0b42216bebb76a5", size = 211556, upload-time = "2026-08-14T09:30:21.54Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/1a/27b2115087e61b09cd8d4b3409bc51f572e343a8745b9cacb6b2b8d723ad/pysdmx-1.20.0.tar.gz", hash = "sha256:cee050bd2b79585999c91c4999272877c8b3da6a95185791a74f7819faf505a0", size = 221840, upload-time = "2026-09-18T12:51:36.834Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/99/d62c7a622d0bf57af7a04f3f5d119d45f23babdb488259d943aa23f42f98/pysdmx-1.19.0-py3-none-any.whl", hash = "sha256:2bfa576afd201d6e24b41d128128ba7436073eea816055dc69ac76c49cba3a3c", size = 310361, upload-time = "2026-08-14T09:30:22.497Z" },
+    { url = "https://files.pythonhosted.org/packages/14/b8/5163d0a482cc34c080ad2abfe2d52b8afd655f6e6d0839264e6c096e2641/pysdmx-1.20.0-py3-none-any.whl", hash = "sha256:17d30262a06b3a9e1d6bfa08cfff6f8c65f985174e829040bc3b3272af00cace", size = 321353, upload-time = "2026-09-18T12:51:38.188Z" },
 ]
 
 [[package]]
