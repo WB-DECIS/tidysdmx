@@ -400,7 +400,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
-| **Fetch schema** | `fmr.RegistryClient.get_schema()` | `fetch_schema()` — simplified wrapper with URL building and ID parsing |
+| **Fetch schema** | `RegistryClient.get_schema()` | `fetch_schema()` — URL building and ID parsing |
 | **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_mapping()` — separate agency, id and version; dataflows and DSDs only as lists | `FmrClient.fetch_artefact()` and one typed `fetch_*` method per type — one `"AGENCY:ID(VERSION)"` string, a single result, URNs and wildcards refused |
 | **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Components.dimensions`, `Component.required`, `Component.enumeration`, `Hierarchy.all_codes()` | `extract_validation_info()`, `get_codelist_ids()`, `extract_component_ids()` |
@@ -517,8 +517,7 @@ result_df = map_structures(df, smap)
 
 | Don't reimplement | Use instead |
 |---|---|
-| SDMX artefact identity parsing | `parse_artefact_id()` (tidysdmx thin wrapper over standard parsing) |
-| HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.fetch_schema()` |
+| HTTP schema fetching | `RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.fetch_schema()` |
 | Artefact fetching | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_dataflows()`, ... via `FmrClient.fetch_*()` |
 | Artefact upload | `RegistryMaintenanceClient.put_structures()` via `FmrClient.put_structures()` |
 | Resolving map references | `RegistryClient.get_mapping()` / `get_code_map()`; `pysdmx.util.find_by_urn` over objects you hold |

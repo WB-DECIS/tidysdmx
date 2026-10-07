@@ -78,7 +78,7 @@ reference columns and rejects every column that is not a schema component.
 
 | Task | Functions |
 |---|---|
-| Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id`, `create_schema_from_table` |
+| Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id` |
 | Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_structure_map`, `fetch_schema` |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Describe a tidy DataFrame as SDMX structures | `create_schema_from_table` — returns `SchemaComponents(dsd, concept_scheme, codelists)`; `.dsd.to_schema()` gives the pysdmx `Schema` that validation takes |
@@ -116,10 +116,9 @@ reference columns and rejects every column that is not a schema component.
   Its `fetch_*` methods take `"AGENCY:ID(VERSION)"`, never a URN (convert one
   with `pysdmx.util.parse_urn`), and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
-  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols` and
-  the `FmrClient.get_schema` method (use `FmrClient.fetch_schema`) are retained
-  for compatibility only; each names its replacement in its docstring.
-  `fix_sdmx_xml_datatype_tags` are retained for compatibility only; each names
+  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
+  `fix_sdmx_xml_datatype_tags` and the `FmrClient.get_schema` method (use
+  `FmrClient.fetch_schema`) are retained for compatibility only; each names
   its replacement in its docstring (pysdmx now writes SDMX-ML data types
   correctly, so `fix_sdmx_xml_datatype_tags` is simply dropped). The `valid`
   argument of `validate_dataset_local` is deprecated too: pass `schema`.
