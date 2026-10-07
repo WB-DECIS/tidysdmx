@@ -969,7 +969,9 @@ class FmrClient:
     def fetch_structure_map(self, artefact_id: str) -> StructureMap:
         """Fetch a structure map given as ``"AGENCY:ID(VERSION)"``.
 
-        The result can be applied as is with :func:`tidysdmx.map_structures`.
+        Its representation maps come embedded, as
+        :func:`tidysdmx.map_structures` needs; ``map_structures`` does not apply
+        ``DatePatternMap`` rules and raises ``TypeError`` on one.
 
         Args:
             artefact_id: The structure map identifier, e.g.

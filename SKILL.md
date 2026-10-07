@@ -106,9 +106,9 @@ reference columns and rejects every column that is not a schema component.
   when FMR returns a hierarchy, every code at every level is valid.
 - **`map_structures` needs embedded representation maps.** A `ComponentMap`
   whose representation map is only a URN string raises `TypeError`, as does a
-  `DatePatternMap`. Fetch a structure map with pysdmx's
-  `RegistryClient.get_mapping()` (e.g. `client.registry.get_mapping(...)`),
-  which embeds them.
+  `DatePatternMap`. Fetch a structure map with
+  `FmrClient.fetch_structure_map("AGENCY:ID(VERSION)")`, which wraps pysdmx's
+  `RegistryClient.get_mapping()` and embeds them.
 - **`FmrClient` is the only stateful object.** Build one per registry and reuse it:
   `client.registry` is pysdmx's `RegistryClient`, `client.maintenance` its
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
