@@ -133,6 +133,8 @@ reference:
         authentication, on top of pysdmx's clients.
       contents:
         - FmrClient
+        - ArtefactType
+        - RegistryArtefact
         - TokenProvider
         - BearerToken
         - StaticTokenProvider

@@ -79,7 +79,7 @@ reference columns and rejects every column that is not a schema component.
 | Task | Functions |
 |---|---|
 | Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id` |
-| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_structure_map`, `fetch_schema` |
+| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_structure_map`, `fetch_schema`; `ArtefactType` lists the type names, `RegistryArtefact` is what `fetch_artefact` returns |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Describe a tidy DataFrame as SDMX structures | `create_schema_from_table` — returns `SchemaComponents(dsd, concept_scheme, codelists)`; `.dsd.to_schema()` gives the pysdmx `Schema` that validation takes |
 | Read Excel mapping templates | `parse_mapping_template_wb`, `build_structure_map_from_template_wb` |

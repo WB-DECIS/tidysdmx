@@ -33,10 +33,10 @@ from tests.fixtures.fxtr_fmr import (
     NotABearerTokenProvider,
     SequenceTokenProvider,
 )
+from tidysdmx import ArtefactType
 from tidysdmx.fmr import (
     _FETCHERS,
     DEFAULT_REFRESH_MARGIN,
-    ArtefactType,
     AzureTokenProvider,
     BearerToken,
     FmrClient,
