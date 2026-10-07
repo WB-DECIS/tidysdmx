@@ -463,6 +463,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
 | **Fetch schema** | `fmr.RegistryClient.get_schema()` | `fetch_schema()` — simplified wrapper with URL building and ID parsing |
+| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_mapping()` — separate agency, id and version; dataflows and DSDs only as lists | `FmrClient.fetch_artefact()` and one typed `fetch_*` method per type — one `"AGENCY:ID(VERSION)"` string, a single result, URNs and wildcards refused |
 | **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Schema`, `Components`, `Component`, `Role`, `Codelist` | `extract_validation_info()` — extracts validation dict from schema; `extract_component_ids()` — list of component IDs |
 | **Column validation** | Component `required` flag, `local_codes` | `validate_dataset_local()` — full validation pipeline; `validate_columns()`, `validate_mandatory_columns()`, `validate_codelist_ids()`, `validate_duplicates()`, `validate_no_missing_values()` |
@@ -586,6 +587,7 @@ The following capabilities already exist in pysdmx and should be used directly r
 |---|---|
 | SDMX artefact identity parsing | `parse_artefact_id()` (tidysdmx thin wrapper over standard parsing) |
 | HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.fetch_schema()` |
+| Artefact fetching | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_dataflows()`, ... via `FmrClient.fetch_*()` |
 | Artefact upload | `RegistryMaintenanceClient.put_structures()` via `FmrClient.put_structures()` |
 | Component role checking | `component.role == Role.DIMENSION` etc. |
 | Codelist access | `component.local_codes.items` |

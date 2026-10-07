@@ -72,6 +72,7 @@ final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
 | Task | Functions |
 |---|---|
 | Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id`, `create_schema_from_table` |
+| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_structure_map`, `fetch_schema` |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Read Excel mapping templates | `parse_mapping_template_wb`, `build_structure_map_from_template_wb` |
 | Build map rules by hand | `build_fixed_map`, `build_implicit_component_map`, `build_date_pattern_map`, `build_value_map`, `build_single_component_map`, `build_multi_component_map` |
@@ -95,6 +96,8 @@ final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
   `client.registry` is pysdmx's `RegistryClient`, `client.maintenance` its
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
   Anything with `get_token() -> BearerToken` works as a `token_provider`.
+  Its `fetch_*` methods take `"AGENCY:ID(VERSION)"`, never a URN (convert one
+  with `pysdmx.util.parse_urn`), and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
   `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols` and
   the `FmrClient.get_schema` method (use `FmrClient.fetch_schema`) are retained

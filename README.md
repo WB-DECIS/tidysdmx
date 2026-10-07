@@ -82,6 +82,7 @@ client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
 # client.registry is pysdmx's RegistryClient and client.maintenance its
 # RegistryMaintenanceClient; both send a bearer token that refreshes itself.
 schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
+regions = client.fetch_codelist("WB:CL_REF_AREA(1.0)")
 client.put_structures(artefacts)
 ```
 

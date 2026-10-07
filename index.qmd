@@ -77,7 +77,7 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 - **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
 - **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
 - **Upload-ready outputs** — `standardize_output()` and `collect_structure_map_artifacts()` prepare both data and structure artefacts for FMR submission.
-- **Authenticated registry access** — `FmrClient` wraps pysdmx's FMR clients with bearer-token acquisition and refresh (Azure Entra ID out of the box, any provider via `TokenProvider`), so reads and uploads against a registry behind single sign-on need one object, not a token-juggling script.
+- **Authenticated registry access** — `FmrClient` wraps pysdmx's FMR clients with bearer-token acquisition and refresh (Azure Entra ID out of the box, any provider via `TokenProvider`), so reads and uploads against a registry behind single sign-on need one object, not a token-juggling script. Its `fetch_*` methods read any artefact — codelists, hierarchies, dataflows, data structures, structure maps — from an `"AGENCY:ID(VERSION)"` string.
 
 ## License & credits
 
