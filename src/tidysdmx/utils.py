@@ -6,10 +6,9 @@ from pathlib import Path
 from typing import Literal
 
 import pandas as pd
-import pysdmx as px
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from pysdmx.model import Schema
+from pysdmx.model import Components, Schema
 from typeguard import typechecked
 
 _STANDARD_SDMX_REFERENCE_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
@@ -46,7 +45,7 @@ def sdmx_reference_cols_for(
 
 
 @typechecked
-def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, object]:
+def extract_validation_info(schema: Schema) -> dict[str, object]:
     """Extract validation information from a given schema.
 
     Args:
@@ -69,7 +68,7 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
     valid_comp = [c.id for c in comp]
     mandatory_comp = [c.id for c in comp if c.required]
     coded_comp = [c.id for c in comp if c.local_codes is not None]
-    dim_comp = [c.id for c in comp if c.role == px.model.Role.DIMENSION]
+    dim_comp = [c.id for c in comp.dimensions]
 
     return {
         "valid_comp": valid_comp,
@@ -82,9 +81,7 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
 
 
 @typechecked
-def get_codelist_ids(
-    comp: px.model.dataflow.Components, coded_comp: list[str]
-) -> dict[str, list[str]]:
+def get_codelist_ids(comp: Components, coded_comp: list[str]) -> dict[str, list[str]]:
     """Retrieve all codelist IDs for given coded components.
 
     Args:
@@ -116,17 +113,14 @@ def extract_component_ids(schema: Schema) -> list[str]:
         ValueError: If the schema has no components.
 
     Examples:
-        >>> from pysdmx.model import Schema, Components, Component
-        >>> comp1 = Component(id="FREQ")
-        >>> comp2 = Component(id="TIME_PERIOD")
-        >>> schema = Schema(
-        ...     context="datastructure",
-        ...     agency="ECB",
-        ...     id_="EXR",
-        ...     components=Components([comp1, comp2]),
-        ...     version="1.0.0",
-        ...     urns=[],
+        >>> from pysdmx.model import Component, Components, Concept, Role, Schema
+        >>> comps = Components(
+        ...     [
+        ...         Component("FREQ", True, Role.DIMENSION, Concept("FREQ")),
+        ...         Component("TIME_PERIOD", True, Role.DIMENSION, Concept("TIME")),
+        ...     ]
         ... )
+        >>> schema = Schema("datastructure", "ECB", "EXR", comps, "1.0.0")
         >>> extract_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """

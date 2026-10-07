@@ -17,9 +17,9 @@ from pysdmx.model import (
     ConceptScheme,
     DataStructureDefinition,
     DataType,
+    ItemReference,
     Role,
 )
-from pysdmx.model.__base import ItemReference
 from pysdmx.model.map import (
     ComponentMap,
     DatePatternMap,

@@ -7,11 +7,12 @@ as FMR, but that may legitimately not hold for artefacts round-tripped
 from a registry (e.g. partial or draft records). For that reason the
 checks are opt-in and are not moved into ``__post_init__``.
 
-This is a temporary home for the logic: once the upstream pysdmx PR
-on branch ``claude/optimize-sdmx-packages-Z92qC`` is released, callers
-can switch to ``pysdmx.model.validate`` / ``validate_many`` and this
-module can be deleted without any API change here beyond re-exporting
-from the new location.
+This is a temporary home for the logic. The upstream proposal
+(``pysdmx.model.validate`` / ``validate_many``, drafted on the pysdmx fork
+branch ``claude/optimize-sdmx-packages-Z92qC``) is unreleased as of pysdmx
+1.20.0. Once it ships, callers can switch to it and this module can be
+deleted without any API change here beyond re-exporting from the new
+location.
 
 The public entry points are :func:`validate` and :func:`validate_many`,
 plus the :class:`ValidationIssue` and :class:`ValidationError` types.
@@ -21,11 +22,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+# Not re-exported from pysdmx.model (still private as of pysdmx 1.20).
 from pysdmx.model.__base import ItemScheme, MaintainableArtefact
 from pysdmx.model.category import CategoryScheme
 from pysdmx.model.code import Codelist, Hierarchy
 from pysdmx.model.concept import ConceptScheme
-from pysdmx.model.dataflow import Dataflow, DataStructureDefinition, Role
+from pysdmx.model.dataflow import Dataflow, DataStructureDefinition
 from pysdmx.model.map import MultiRepresentationMap, RepresentationMap
 from pysdmx.model.organisation import AgencyScheme
 from typeguard import typechecked
@@ -198,7 +200,7 @@ def _check_dsd(a: DataStructureDefinition) -> list[ValidationIssue]:
                 "components",
             )
         ]
-    if not any(c.role == Role.DIMENSION for c in components):
+    if not a.components.dimensions:
         return [
             _issue(
                 "D002",

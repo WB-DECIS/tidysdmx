@@ -17,6 +17,13 @@ from typeguard import typechecked
 
 logger = logging.getLogger(__name__)
 
+_SUPPORTED_MAP_TYPES: tuple[type, ...] = (
+    FixedValueMap,
+    ImplicitComponentMap,
+    ComponentMap,
+    MultiComponentMap,
+)
+
 
 def _progress_level(verbose: bool) -> int:
     """Return the log level for progress messages (INFO when verbose)."""
@@ -125,27 +132,22 @@ def _split_maps_by_type(
 ]:
     """Group a StructureMap's maps by type, keeping their stored order.
 
+    Delegates to pysdmx's typed views (``StructureMap.fixed_value_maps`` and
+    friends), which filter ``maps`` in stored order.
+
     Raises:
         TypeError: If a map is not one of the four supported types.
     """
-    fixed_value_maps = []
-    implicit_maps = []
-    component_maps = []
-    multi_component_maps = []
-
     for m in structure_map.maps:
-        if isinstance(m, FixedValueMap):
-            fixed_value_maps.append(m)
-        elif isinstance(m, ImplicitComponentMap):
-            implicit_maps.append(m)
-        elif isinstance(m, ComponentMap):
-            component_maps.append(m)
-        elif isinstance(m, MultiComponentMap):
-            multi_component_maps.append(m)
-        else:
+        if not isinstance(m, _SUPPORTED_MAP_TYPES):
             raise TypeError(f"Unknown map type: {type(m)}")
 
-    return fixed_value_maps, implicit_maps, component_maps, multi_component_maps
+    return (
+        list(structure_map.fixed_value_maps),
+        list(structure_map.implicit_component_maps),
+        list(structure_map.component_maps),
+        list(structure_map.multi_component_maps),
+    )
 
 
 @typechecked

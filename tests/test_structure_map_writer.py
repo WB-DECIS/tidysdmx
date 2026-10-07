@@ -378,7 +378,7 @@ class TestValidateRepMapFields:
 
     def test_missing_source_reported(self):
         """A RepresentationMap with an empty source should report it."""
-        # pysdmx >=1.14 rejects source=None when maps are set; an empty string
+        # pysdmx >=1.17 rejects source=None when maps are set; an empty string
         # still exercises tidysdmx's own "source is None or empty" check.
         rep_map = RepresentationMap(
             id="RM",
@@ -395,7 +395,7 @@ class TestValidateRepMapFields:
 
     def test_missing_target_reported(self):
         """A RepresentationMap with an empty target should report it."""
-        # pysdmx >=1.14 rejects target=None when maps are set; an empty string
+        # pysdmx >=1.17 rejects target=None when maps are set; an empty string
         # still exercises tidysdmx's own "target is None or empty" check.
         rep_map = RepresentationMap(
             id="RM",
@@ -658,7 +658,7 @@ class TestValidateStructureMapReferences:
 
     def test_rep_map_missing_source_raises_value_error(self):
         """RepresentationMap with an empty source must raise ValueError."""
-        # pysdmx >=1.14 rejects source=None when maps are set; an empty string
+        # pysdmx >=1.17 rejects source=None when maps are set; an empty string
         # still triggers tidysdmx's reference validation.
         rep_map = RepresentationMap(
             id="RM",

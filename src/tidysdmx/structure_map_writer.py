@@ -2,6 +2,7 @@
 
 from typing import TypeAlias
 
+# Not re-exported from pysdmx.model (still private as of pysdmx 1.20).
 from pysdmx.model.__base import MaintainableArtefact
 from pysdmx.model.map import (
     ComponentMap,
