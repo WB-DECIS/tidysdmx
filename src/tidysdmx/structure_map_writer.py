@@ -16,8 +16,6 @@ from pysdmx.model.map import (
 )
 from typeguard import typechecked
 
-from .structures import gen_urn
-
 # Annotated rather than a bare assignment: without the annotation mypy silently
 # treats this as a variable if the pysdmx names ever stop resolving, and the
 # error surfaces as a confusing "Variable ... is not valid as a type" cascade at
@@ -56,11 +54,11 @@ def _replace_values_with_urn(map_rule: MapRule) -> MapRule:
     rep_map = _get_embedded_rep_map(map_rule)
     if rep_map is None:
         return map_rule
-    urn = rep_map.urn or gen_urn(
-        artefact_type=type(rep_map).__name__,
-        agency=rep_map.agency,
-        artefact_id=rep_map.id,
-        version=rep_map.version,
+    # pysdmx's short_urn carries the SDMX class name ("RepresentationMap" for
+    # both map types); type(rep_map).__name__ would give the pysdmx-only
+    # "MultiRepresentationMap".
+    urn = rep_map.urn or (
+        f"urn:sdmx:org.sdmx.infomodel.structuremapping.{rep_map.short_urn}"
     )
     return type(map_rule)(source=map_rule.source, target=map_rule.target, values=urn)
 

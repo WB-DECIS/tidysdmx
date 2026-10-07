@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 from pysdmx.model import (
     ComponentMap,
+    DatePatternMap,
     FixedValueMap,
     ImplicitComponentMap,
     MultiComponentMap,
@@ -588,6 +589,67 @@ class TestMapStructures:
             assert any("Applied" in msg for msg in info_messages)
         else:
             assert not info_messages
+
+
+class TestMapStructuresRejectsUnusableMaps:
+    """Maps that cannot be applied fail with a TypeError naming the problem."""
+
+    REP_MAP_URN = (
+        "urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=WB:RM_SEX(1.0)"
+    )
+
+    def test_component_map_with_urn_values_raises(self):
+        """A RepresentationMap referenced by URN has no value maps to apply."""
+        df = pd.DataFrame({"SEX_RAW": ["F"]})
+        cmap = ComponentMap(source="SEX_RAW", target="SEX", values=self.REP_MAP_URN)
+
+        with pytest.raises(TypeError, match=r"RegistryClient\.get_mapping"):
+            apply_component_map(df, cmap)
+
+    def test_multi_component_map_with_urn_values_raises(self):
+        """A MultiRepresentationMap referenced by URN has no value maps either."""
+        df = pd.DataFrame({"A": ["1"], "B": ["2"]})
+        mcm = MultiComponentMap(
+            source=["A", "B"], target=["C"], values=self.REP_MAP_URN
+        )
+
+        with pytest.raises(TypeError, match="references its representation map"):
+            apply_multi_component_map(df, mcm)
+
+    def test_map_structures_with_urn_values_raises(self):
+        """map_structures surfaces the same error instead of an AttributeError."""
+        df = pd.DataFrame({"SEX_RAW": ["F"]})
+        sm = StructureMap(
+            id="SM",
+            agency="WB",
+            name="SM",
+            maps=[
+                ComponentMap(source="SEX_RAW", target="SEX", values=self.REP_MAP_URN)
+            ],
+        )
+
+        with pytest.raises(TypeError, match="RepresentationMap=WB:RM_SEX"):
+            map_structures(df, sm)
+
+    def test_map_structures_rejects_date_pattern_map(self):
+        """DatePatternMaps are not applied, so they are rejected up front."""
+        df = pd.DataFrame({"DATE": ["2020-01"]})
+        sm = StructureMap(
+            id="SM",
+            agency="WB",
+            name="SM",
+            maps=[
+                DatePatternMap(
+                    source="DATE",
+                    target="TIME_PERIOD",
+                    pattern="yyyy-MM",
+                    frequency="M",
+                )
+            ],
+        )
+
+        with pytest.raises(TypeError, match=r"Unknown map type.*DatePatternMap"):
+            map_structures(df, sm)
 
 
 # Value pairs shared by the source-isolation tests: one source column, METRIC,

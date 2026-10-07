@@ -306,7 +306,7 @@ class TestReplaceValuesWithUrn:
         """If the MultiRepresentationMap has a URN, it should be used as-is."""
         explicit_urn = (
             "urn:sdmx:org.sdmx.infomodel.structuremapping"
-            ".MultiRepresentationMap=ECB:MRM_CTRY(1.0)"
+            ".RepresentationMap=ECB:MRM_CTRY(1.0)"
         )
         mrm = make_multi_rep_map(urn=explicit_urn)
         mcm = MultiComponentMap(
@@ -346,6 +346,26 @@ class TestReplaceValuesWithUrn:
 
         assert "MRM_CTRY" in result.values
         assert "BIS" in result.values
+
+    def test_multi_component_map_urn_uses_sdmx_class_name(self, make_multi_rep_map):
+        """A generated URN names the SDMX class RepresentationMap, as pysdmx does.
+
+        MultiRepresentationMap is a pysdmx type, not an SDMX class, so a URN
+        carrying it cannot be resolved by a registry.
+        """
+        mrm = make_multi_rep_map(id="MRM_CTRY", agency="BIS", version="1.0")
+        mcm = MultiComponentMap(
+            source=["COUNTRY", "CURRENCY"],
+            target=["CURRENCY"],
+            values=mrm,
+        )
+
+        result = _replace_values_with_urn(mcm)
+
+        assert result.values == (
+            "urn:sdmx:org.sdmx.infomodel.structuremapping"
+            ".RepresentationMap=BIS:MRM_CTRY(1.0)"
+        )
 
     def test_multi_component_map_with_urn_string_unchanged(self):
         """MultiComponentMap whose values is already a URN string is returned as-is."""

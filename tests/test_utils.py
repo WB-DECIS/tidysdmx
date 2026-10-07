@@ -21,6 +21,7 @@ from tidysdmx.utils import (
     create_mapping_rules,
     extract_component_ids,
     extract_validation_info,
+    fix_sdmx_xml_datatype_tags,
     get_codelist_ids,
     parse_mapping_template_wb,
     sdmx_reference_cols_for,
@@ -497,3 +498,36 @@ class TestParseMappingTemplateWb:
         """ValueError is raised for invalid file type."""
         with pytest.raises(ValueError):
             parse_mapping_template_wb(invalid_mapping_template_path)
+
+
+class TestFixSdmxXmlDatatypeTags:
+    """The deprecated SDMX-ML tag patch still works, and says it is deprecated."""
+
+    BROKEN = (
+        "<str:SourceCodelist>String</str:SourceCodelist>"
+        "<str:TargetCodelist>String</str:TargetCodelist>"
+    )
+
+    def test_fix_sdmx_xml_datatype_tags_warns_deprecated(self, tmp_path):
+        xml = tmp_path / "maps.xml"
+        xml.write_text(self.BROKEN, encoding="utf-8")
+
+        with pytest.warns(FutureWarning, match="fix_sdmx_xml_datatype_tags"):
+            fix_sdmx_xml_datatype_tags(xml)
+
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    def test_fix_sdmx_xml_datatype_tags_rewrites_tags(self, tmp_path):
+        xml = tmp_path / "maps.xml"
+        xml.write_text(self.BROKEN, encoding="utf-8")
+
+        out = fix_sdmx_xml_datatype_tags(xml, tmp_path / "fixed.xml")
+
+        assert out.read_text(encoding="utf-8") == (
+            "<str:SourceDataType>String</str:SourceDataType>"
+            "<str:TargetDataType>String</str:TargetDataType>"
+        )
+
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    def test_fix_sdmx_xml_datatype_tags_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="File not found"):
+            fix_sdmx_xml_datatype_tags(tmp_path / "absent.xml")

@@ -57,12 +57,10 @@ def _resolve_representation_ref(
         The codelist URN if provided, otherwise the default_dtype string value.
 
     Note:
-        The pysdmx XML writer currently always outputs ``<str:SourceCodelist>``
-        / ``<str:TargetCodelist>`` tags, even when the value is a DataType
-        string. DataType-based RepresentationMaps will not produce fully valid
-        SDMX-ML until pysdmx adds ``<str:SourceDataType>`` /
-        ``<str:TargetDataType>`` support. The JSON writer handles both cases
-        correctly.
+        pysdmx's writers tell the two cases apart by the string itself: a
+        value naming a Codelist or ValueList URN is written as a codelist
+        reference, anything else as a data type (``<str:SourceDataType>`` in
+        SDMX-ML since pysdmx 1.14).
     """
     if codelist_urn is not None and str(codelist_urn).strip():
         return str(codelist_urn).strip()
@@ -690,7 +688,9 @@ def build_multi_representation_map(
     # Generate URN if requested and id is provided
     urn = None
     if generate_urn and id:
-        urn = gen_urn("MultiRepresentationMap", agency, id, version)
+        # SDMX has one RepresentationMap class for single- and multi-component
+        # maps; MultiRepresentationMap is a pysdmx type, not an SDMX class.
+        urn = gen_urn("RepresentationMap", agency, id, version)
 
     # Instantiate MultiRepresentationMap with CORRECT arguments
     return MultiRepresentationMap(
@@ -1715,14 +1715,21 @@ STRUCTURE_TYPE_TO_ARTEFACT: dict[str, str] = {
 SDMX_PACKAGE_MAP: dict[str, str] = {
     "StructureMap": "structuremapping",
     "RepresentationMap": "structuremapping",
-    "MultiRepresentationMap": "structuremapping",
     "Codelist": "codelist",
     "ConceptScheme": "conceptscheme",
     "DataStructure": "datastructure",
-    "DataStructureDefinition": "datastructure",
     "Dataflow": "datastructure",
     "AgencyScheme": "base",
     "ProvisionAgreement": "registry",
+}
+
+
+# pysdmx class names that are not SDMX information-model class names, mapped
+# to the class a URN must carry. pysdmx's own ``short_urn`` makes the same
+# substitution.
+_SDMX_CLASS_ALIASES: dict[str, str] = {
+    "MultiRepresentationMap": "RepresentationMap",
+    "DataStructureDefinition": "DataStructure",
 }
 
 
@@ -1731,6 +1738,10 @@ def gen_urn(
     artefact_type: str, agency: str, artefact_id: str, version: str = "1.0"
 ) -> str:
     """Generate a full SDMX URN for any maintainable artefact.
+
+    pysdmx class names with no SDMX counterpart are written under the SDMX
+    class: ``MultiRepresentationMap`` as ``RepresentationMap`` and
+    ``DataStructureDefinition`` as ``DataStructure``.
 
     Args:
         artefact_type: The type of artefact (e.g., "StructureMap", "RepresentationMap")
@@ -1744,7 +1755,10 @@ def gen_urn(
     Example:
         >>> gen_urn("StructureMap", "BIS", "SM_TEST", "1.0")
         'urn:sdmx:org.sdmx.infomodel.structuremapping.StructureMap=BIS:SM_TEST(1.0)'
+        >>> gen_urn("MultiRepresentationMap", "BIS", "RM_TEST", "1.0")
+        'urn:sdmx:org.sdmx.infomodel.structuremapping.RepresentationMap=BIS:RM_TEST(1.0)'
     """
+    artefact_type = _SDMX_CLASS_ALIASES.get(artefact_type, artefact_type)
     package = SDMX_PACKAGE_MAP.get(artefact_type, "base")
     urn = (
         f"urn:sdmx:org.sdmx.infomodel.{package}.{artefact_type}"

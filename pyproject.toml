@@ -305,11 +305,9 @@ module = "tidysdmx.tidy_raw"
 disable_error_code = ["arg-type"]
 
 [[tool.mypy.overrides]]
-# pysdmx types RepresentationMap fields as `RepresentationMap | str` (an
-# unresolved URN or the resolved object); this code assumes the resolved form
-# without narrowing. np.select's overloads reject a list of ndarray conditions.
+# np.select's overloads reject a list of ndarray conditions.
 module = "tidysdmx.mapping"
-disable_error_code = ["union-attr", "call-overload"]
+disable_error_code = ["call-overload"]
 
 [[tool.mypy.overrides]]
 module = "tidysdmx.validation"

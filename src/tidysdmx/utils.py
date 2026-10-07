@@ -1,5 +1,6 @@
 """SDMX component extraction, mapping rules, and Excel helpers."""
 
+import warnings
 import zipfile
 from collections.abc import Sequence, Set
 from pathlib import Path
@@ -310,9 +311,15 @@ def fix_sdmx_xml_datatype_tags(
 ) -> Path:
     """Fix incorrect SourceCodelist/TargetCodelist tags in SDMX-ML.
 
-    The pysdmx XML writer emits ``<str:SourceCodelist>String</str:SourceCodelist>``
-    and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
-    RepresentationMap uses a plain DataType. The correct SDMX 3.0 tags are
+    .. deprecated::
+        pysdmx 1.14.0 fixed the XML writer bug this patches, and tidysdmx
+        requires a later pysdmx. Write SDMX-ML with ``pysdmx.io.write_sdmx``
+        and drop the call; this function will be removed in a future release.
+
+    pysdmx before 1.14.0 emitted
+    ``<str:SourceCodelist>String</str:SourceCodelist>`` and
+    ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
+    RepresentationMap used a plain DataType. The correct SDMX 3.0 tags are
     ``<str:SourceDataType>`` and ``<str:TargetDataType>``.
 
     Args:
@@ -325,7 +332,17 @@ def fix_sdmx_xml_datatype_tags(
 
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
+
+    Warns:
+        FutureWarning: Always; the function is deprecated.
     """
+    warnings.warn(
+        "fix_sdmx_xml_datatype_tags is deprecated and will be removed in a "
+        "future release: pysdmx 1.14.0 and later write SourceDataType/"
+        "TargetDataType correctly, so the call is no longer needed.",
+        FutureWarning,
+        stacklevel=2,
+    )
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")
