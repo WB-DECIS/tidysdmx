@@ -395,7 +395,7 @@ from tidysdmx import AzureTokenProvider, FmrClient
 
 provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
 client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
-schema = client.get_schema("WB:WDI(1.0.0)", "dataflow")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
 client.put_structures(artefacts)
 ```
 

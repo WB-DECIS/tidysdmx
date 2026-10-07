@@ -96,6 +96,6 @@ final = standardize_output(mapped, artefact_id="WB:WDI(1.0.0)", schema=schema)
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
   Anything with `get_token() -> BearerToken` works as a `token_provider`.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
-  `parse_dsd_id`, `standardize_data_for_upload` and `add_sdmx_reference_cols`
-  are retained for compatibility only; each names its replacement in its
-  docstring.
+  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols` and
+  the `FmrClient.get_schema` method (use `FmrClient.fetch_schema`) are retained
+  for compatibility only; each names its replacement in its docstring.

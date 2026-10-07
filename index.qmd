@@ -26,7 +26,7 @@ from tidysdmx import (
 
 # 1. Fetch the dissemination schema from FMR (add token_provider=... behind SSO)
 client = FmrClient("https://fmrqa.worldbank.org/FMR")
-dis_schema = client.get_schema("WB.GGH.HSP:DS_ASPIRE(1.0.0)", "datastructure")
+dis_schema = client.fetch_schema("WB.GGH.HSP:DS_ASPIRE(1.0.0)", "datastructure")
 
 # 2. Build a structure map from an Excel mapping template
 mappings = parse_mapping_template_wb("WB_ASPIRE_MAPPING.xlsx")

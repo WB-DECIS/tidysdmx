@@ -19,7 +19,7 @@ from tidysdmx import FmrClient
 
 client = FmrClient("https://fmrqa.worldbank.org/FMR")
 
-schema = client.get_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
+schema = client.fetch_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
 codelist = client.registry.get_codes("WB", "CL_REF_AREA", "1.0")
 ```
 

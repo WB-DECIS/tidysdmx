@@ -585,7 +585,7 @@ The following capabilities already exist in pysdmx and should be used directly r
 | Don't reimplement | Use instead |
 |---|---|
 | SDMX artefact identity parsing | `parse_artefact_id()` (tidysdmx thin wrapper over standard parsing) |
-| HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.get_schema()` |
+| HTTP schema fetching | `fmr.RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.fetch_schema()` |
 | Artefact upload | `RegistryMaintenanceClient.put_structures()` via `FmrClient.put_structures()` |
 | Component role checking | `component.role == Role.DIMENSION` etc. |
 | Codelist access | `component.local_codes.items` |
