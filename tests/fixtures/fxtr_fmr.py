@@ -1,6 +1,9 @@
 # tests/fixtures/fxtr_fmr.py
 """Offline fixtures for the FMR client: fake providers, credentials and clocks.
 
+Also one small, real pysdmx artefact per type the ``fetch_*`` methods return:
+typeguard checks their return values, so a stand-in object would not do.
+
 The test doubles are real classes with instance methods on purpose: typeguard
 checks ``TokenProvider`` structurally (method presence *and* signature), which
 a ``SimpleNamespace`` or a ``MagicMock`` does not satisfy. Nothing here touches
@@ -13,7 +16,21 @@ from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 import pytest
-from pysdmx.model import Code, Codelist
+from pysdmx.model import (
+    Category,
+    CategoryScheme,
+    Code,
+    Codelist,
+    Components,
+    Concept,
+    ConceptScheme,
+    Dataflow,
+    DataStructureDefinition,
+    HierarchicalCode,
+    Hierarchy,
+    ProvisionAgreement,
+    StructureMap,
+)
 
 from tidysdmx.fmr import BearerToken, FmrClient, StaticTokenProvider
 
@@ -29,6 +46,23 @@ AGENCIES_FUSION_JSON: bytes = (
     b'{"AgencyScheme":[{"agencyId":"WB","items":[{"id":"DECIS",'
     b'"names":[{"locale":"en","value":"Development Data Group"}]}]}]}'
 )
+
+# The smallest Fusion-JSON codelist pysdmx's reader accepts: ``id``, ``urn``,
+# ``names`` and ``agencyId`` on the list, ``id`` on each code.
+CODELIST_URL = f"{REGISTRY_ENDPOINT}/structure/codelist/WB/CL_TEST/1.0/"
+CODELIST_FUSION_JSON: bytes = (
+    b'{"Codelist":[{"id":"CL_TEST","agencyId":"WB","version":"1.0",'
+    b'"urn":"urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",'
+    b'"names":[{"locale":"en","value":"Test codelist"}],'
+    b'"items":[{"id":"A","names":[{"locale":"en","value":"Code A"}]}]}]}'
+)
+
+DSD_URN = "urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=WB:DSD_TEST(1.0)"
+DATAFLOW_URN = "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=WB:DF_TEST(1.0)"
+SOURCE_DATAFLOW_URN = (
+    "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=WB:DF_SOURCE(1.0)"
+)
+PROVIDER_URN = "urn:sdmx:org.sdmx.infomodel.base.DataProvider=WB:DATA_PROVIDERS(1.0).WB"
 
 NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
@@ -136,4 +170,66 @@ def codelist() -> Codelist:
         agency="WB",
         name="Test codelist",
         items=[Code(id="A", name="Code A")],
+    )
+
+
+@pytest.fixture
+def hierarchy() -> Hierarchy:
+    return Hierarchy(
+        id="H_TEST",
+        agency="WB",
+        name="Test hierarchy",
+        codes=[HierarchicalCode(id="A", name="Code A")],
+    )
+
+
+@pytest.fixture
+def concept_scheme() -> ConceptScheme:
+    return ConceptScheme(
+        id="CS_TEST", agency="WB", name="Test concepts", items=[Concept(id="REF_AREA")]
+    )
+
+
+@pytest.fixture
+def category_scheme() -> CategoryScheme:
+    return CategoryScheme(
+        id="CAT_TEST",
+        agency="WB",
+        name="Test categories",
+        items=[Category(id="ECO", name="Economy")],
+    )
+
+
+@pytest.fixture
+def dataflow() -> Dataflow:
+    return Dataflow(id="DF_TEST", agency="WB", name="Test dataflow", structure=DSD_URN)
+
+
+@pytest.fixture
+def data_structure_definition() -> DataStructureDefinition:
+    return DataStructureDefinition(
+        id="DSD_TEST", agency="WB", name="Test DSD", components=Components([])
+    )
+
+
+@pytest.fixture
+def provision_agreement() -> ProvisionAgreement:
+    return ProvisionAgreement(
+        id="PA_TEST",
+        agency="WB",
+        name="Test provision agreement",
+        dataflow=DATAFLOW_URN,
+        provider=PROVIDER_URN,
+    )
+
+
+@pytest.fixture
+def structure_map() -> StructureMap:
+    return StructureMap(
+        id="SM_TEST",
+        agency="WB",
+        name="Test structure map",
+        source=SOURCE_DATAFLOW_URN,
+        target=DATAFLOW_URN,
+        maps=[],
     )

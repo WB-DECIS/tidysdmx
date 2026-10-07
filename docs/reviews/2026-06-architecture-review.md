@@ -243,6 +243,10 @@ was not counted.
   has no tests at all — so whoever adds the coverage TEST-03 asks for will hit an
   immediate failure. Re-route the internal call first, then add the test.
   Re-raised in review of PR #261.
+  *Update (2026-10): `FmrClient.get_schema` joined the deprecated set when the
+  client's methods moved to the `fetch_*` prefix. It warns and otherwise behaves
+  as before; remove it on the same schedule, along with the class-level
+  `FutureWarning` suppression on `TestFmrClientGetSchema`.*
   *Status:* open — the deprecated names are still in `__all__` at 0.10.0.
 - **A5** Switch `Agency`/`ItemReference` imports to public `pysdmx.model`;
   isolate the two unavoidable private imports; request upstream re-export

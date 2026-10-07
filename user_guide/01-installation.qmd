@@ -87,7 +87,7 @@ Most real-world workflows fetch a dissemination schema from a Fusion Metadata Re
 from tidysdmx import FmrClient
 
 client = FmrClient("https://fmrqa.worldbank.org/FMR")
-schema = client.get_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
+schema = client.fetch_schema("WB:IFPRI_ASTI(1.0)", "datastructure")
 ```
 
 See the [FMR client](03-fmr-client.qmd) chapter for signing in with Azure and uploading artefacts.

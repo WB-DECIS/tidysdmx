@@ -79,6 +79,7 @@ reference columns and rejects every column that is not a schema component.
 | Task | Functions |
 |---|---|
 | Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id` |
+| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_structure_map`, `fetch_schema`; `ArtefactType` lists the type names, `RegistryArtefact` is what `fetch_artefact` returns |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Describe a tidy DataFrame as SDMX structures | `create_schema_from_table` — returns `SchemaComponents(dsd, concept_scheme, codelists)`; `.dsd.to_schema()` gives the pysdmx `Schema` that validation takes |
 | Read Excel mapping templates | `parse_mapping_template_wb`, `build_structure_map_from_template_wb` |
@@ -105,16 +106,19 @@ reference columns and rejects every column that is not a schema component.
   when FMR returns a hierarchy, every code at every level is valid.
 - **`map_structures` needs embedded representation maps.** A `ComponentMap`
   whose representation map is only a URN string raises `TypeError`, as does a
-  `DatePatternMap`. Fetch a structure map with pysdmx's
-  `RegistryClient.get_mapping()` (e.g. `client.registry.get_mapping(...)`),
-  which embeds them.
+  `DatePatternMap`. Fetch a structure map with
+  `FmrClient.fetch_structure_map("AGENCY:ID(VERSION)")`, which wraps pysdmx's
+  `RegistryClient.get_mapping()` and embeds them.
 - **`FmrClient` is the only stateful object.** Build one per registry and reuse it:
   `client.registry` is pysdmx's `RegistryClient`, `client.maintenance` its
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
   Anything with `get_token() -> BearerToken` works as a `token_provider`.
+  Its `fetch_*` methods take `"AGENCY:ID(VERSION)"`, never a URN (convert one
+  with `pysdmx.util.parse_urn`), and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
-  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols` and
-  `fix_sdmx_xml_datatype_tags` are retained for compatibility only; each names
+  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
+  `fix_sdmx_xml_datatype_tags` and the `FmrClient.get_schema` method (use
+  `FmrClient.fetch_schema`) are retained for compatibility only; each names
   its replacement in its docstring (pysdmx now writes SDMX-ML data types
   correctly, so `fix_sdmx_xml_datatype_tags` is simply dropped). The `valid`
   argument of `validate_dataset_local` is deprecated too: pass `schema`.

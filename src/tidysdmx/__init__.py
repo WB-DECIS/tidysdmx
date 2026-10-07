@@ -21,9 +21,11 @@ from .artefact_validation import (
     validate_many,
 )
 from .fmr import (
+    ArtefactType,
     AzureTokenProvider,
     BearerToken,
     FmrClient,
+    RegistryArtefact,
     StaticTokenProvider,
     TokenProvider,
 )
@@ -98,9 +100,11 @@ from .validation import (
 )
 
 __all__ = [
+    "ArtefactType",
     "AzureTokenProvider",
     "BearerToken",
     "FmrClient",
+    "RegistryArtefact",
     "StaticTokenProvider",
     "TokenProvider",
     "ValidationError",

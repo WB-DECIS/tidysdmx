@@ -411,11 +411,13 @@ from tidysdmx import AzureTokenProvider, FmrClient
 
 provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
 client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
-schema = client.get_schema("WB:WDI(1.0.0)", "dataflow")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
+regions = client.fetch_codelist("WB:CL_REF_AREA(1.0)")
+dsd = client.fetch_artefact("WB:IFPRI_ASTI(1.0)", "datastructure")
 client.put_structures(artefacts)
 ```
 
-**What tidysdmx hides:** token acquisition and refresh, the `Authorization` header on reads (which pysdmx has no hook for), the two URL conventions, and client construction. `TokenProvider` is the only extension point: anything with `get_token() -> BearerToken` plugs in, so the design is not tied to Azure.
+**What tidysdmx hides:** token acquisition and refresh, the `Authorization` header on reads (which pysdmx has no hook for), the two URL conventions, client construction, and the split of an `"AGENCY:ID(VERSION)"` string into pysdmx's three getter arguments. The `fetch_*` methods add only what pysdmx leaves to the caller: one generic `fetch_artefact` keyed by the SDMX REST resource name, a single result where pysdmx only lists (dataflows, data structures), and a refusal of URNs and wildcards, which `parse_artefact_id` and pysdmx's single-artefact readers would otherwise mishandle silently. `TokenProvider` is the only extension point: anything with `get_token() -> BearerToken` plugs in, so the design is not tied to Azure.
 
 **What it does not hide:** the pysdmx clients themselves. Every pysdmx method stays reachable, and the seams tidysdmx uses to get the token onto the wire are guarded, wire-tested and registered in `docs/pysdmx-shortcomings.md` so they can be deleted when upstream adds an auth hook.
 
