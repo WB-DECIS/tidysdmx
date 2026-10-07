@@ -9,7 +9,7 @@ from typing import Literal
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from pysdmx.model import Components, Schema
+from pysdmx.model import Codelist, Components, Hierarchy, Schema
 from typeguard import typechecked
 
 _STANDARD_SDMX_REFERENCE_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
@@ -49,6 +49,10 @@ def sdmx_reference_cols_for(
 def extract_validation_info(schema: Schema) -> dict[str, object]:
     """Extract validation information from a given schema.
 
+    A component counts as coded when pysdmx's ``Component.enumeration`` is
+    set: its local (constrained) codes if the schema carries any, otherwise
+    the codes of its concept's core representation.
+
     Args:
         schema: The schema object containing all necessary validation
             information.
@@ -68,7 +72,7 @@ def extract_validation_info(schema: Schema) -> dict[str, object]:
     comp = schema.components
     valid_comp = [c.id for c in comp]
     mandatory_comp = [c.id for c in comp if c.required]
-    coded_comp = [c.id for c in comp if c.local_codes is not None]
+    coded_comp = [c.id for c in comp if c.enumeration is not None]
     dim_comp = [c.id for c in comp.dimensions]
 
     return {
@@ -85,6 +89,11 @@ def extract_validation_info(schema: Schema) -> dict[str, object]:
 def get_codelist_ids(comp: Components, coded_comp: list[str]) -> dict[str, list[str]]:
     """Retrieve all codelist IDs for given coded components.
 
+    Codes come from each component's pysdmx ``enumeration``. When FMR
+    resolves a dataflow or provision agreement whose component has a
+    hierarchy association, that enumeration is a ``Hierarchy`` rather than a
+    ``Codelist``; every code at every level of it is valid.
+
     Args:
         comp: A pysdmx Components collection.
         coded_comp: List of coded component IDs.
@@ -92,11 +101,30 @@ def get_codelist_ids(comp: Components, coded_comp: list[str]) -> dict[str, list[
     Returns:
         Dictionary with coded component IDs as keys and lists of codelist
         IDs as values.
+
+    Raises:
+        ValueError: If a component in ``coded_comp`` is not in ``comp`` or has
+            no enumeration.
     """
-    return {
-        component: [code.id for code in comp[component].local_codes.items]
-        for component in coded_comp
-    }
+    codelist_ids: dict[str, list[str]] = {}
+    for component_id in coded_comp:
+        component = comp[component_id]
+        enumeration = component.enumeration if component is not None else None
+        if enumeration is None:
+            raise ValueError(
+                f"Component '{component_id}' is not a coded component of the "
+                "schema; expected one with a codelist or hierarchy."
+            )
+        codelist_ids[component_id] = _enumeration_code_ids(enumeration)
+    return codelist_ids
+
+
+def _enumeration_code_ids(enumeration: Codelist | Hierarchy) -> list[str]:
+    """Return the code IDs of a codelist, or of every level of a hierarchy."""
+    if isinstance(enumeration, Hierarchy):
+        # A code attached under several parents is listed once per parent.
+        return list(dict.fromkeys(code.id for code in enumeration.all_codes()))
+    return [code.id for code in enumeration]
 
 
 @typechecked
