@@ -122,7 +122,8 @@ def get_codelist_ids(comp: Components, coded_comp: list[str]) -> dict[str, list[
 def _enumeration_code_ids(enumeration: Codelist | Hierarchy) -> list[str]:
     """Return the code IDs of a codelist, or of every level of a hierarchy."""
     if isinstance(enumeration, Hierarchy):
-        # A code attached under several parents is listed once per parent.
+        # pysdmx dedupes equal nodes only; a code placed under several parents
+        # with different children or validity comes back once per placement.
         return list(dict.fromkeys(code.id for code in enumeration.all_codes()))
     return [code.id for code in enumeration]
 

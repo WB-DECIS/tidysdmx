@@ -451,7 +451,8 @@ def add_sdmx_reference_cols(
         df: The input DataFrame to which the columns will be added.
         dsd: The Data Structure Definition (DSD) identifier.
         structure: The structure type. Default is ``'datastructure'``.
-        action: The action type. Default is ``'I'`` (Insert).
+        action: The SDMX-CSV ``ACTION`` code. Default is ``'I'``
+            (Information). SDMX-CSV defines ``'I'``, ``'A'``, ``'R'`` and ``'D'``.
 
     Returns:
         The DataFrame with the added SDMX reference columns.
