@@ -108,7 +108,7 @@ result. Review `git diff`, resolve any `.rej` files it left, then re-sync — an
 update can change dependency groups and hooks, and neither happens on its own:
 
 ```bash
-uv sync --all-groups
+uv sync --all-groups --all-extras
 uv run python -m pre_commit install --install-hooks
 ```
 

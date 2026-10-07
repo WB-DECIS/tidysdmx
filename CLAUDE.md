@@ -31,6 +31,8 @@ upstream dependency your code wraps:
 1. `docs/sdmx-information-model.md` — understand the SDMX artefacts involved
 2. `docs/pysdmx-overview.md` — understand how pysdmx models those artefacts
 3. `docs/tidysdmx-architecture.md` — understand how tidysdmx maps onto pysdmx
+4. `docs/pysdmx-shortcomings.md` — the pysdmx gaps tidysdmx works around, each with
+   its guard, its upstream fix and the trigger for deleting the workaround
 
 `docs/reviews/` holds architecture reviews. `docs/reviews/2026-06-architecture-review.md`
 §7 is the live refactoring backlog; several `TODO` comments in this repository
@@ -39,9 +41,11 @@ cite its IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn).
 ## Python Environment
 
 - Python 3.11.9+
-- Package manager: **uv** — `uv sync --all-groups` installs everything
+- Package manager: **uv** — `uv sync --all-groups --all-extras` installs everything
 - Dependency groups (PEP 735): `dev`, `docs`, `release`, `security`, `notebooks`
-- Core runtime dependencies: `pysdmx`, `pandas`, `numpy`, `openpyxl`, `typeguard`
+- Core runtime dependencies: `pysdmx`, `httpx`, `pandas`, `numpy`, `openpyxl`, `typeguard`
+- Optional extra: `azure` (`azure-identity`) for `AzureTokenProvider.from_default_credential`;
+  the core package never imports the Azure SDK
 
 Always run project commands through `uv run` so they use the locked environment,
 never a system Python — and as `uv run python -m <module>` wherever the tool
@@ -85,6 +89,8 @@ Single test: `uv run python -m pytest -k test_name -v`
 src/tidysdmx/
 ├── __init__.py             — public API re-exports, __all__, __version__
 ├── tidysdmx.py             — Core: fetch schemas from FMR, standardise/map SDMX data
+├── fmr.py                  — FmrClient: authenticated FMR access with token refresh, on
+│                             top of pysdmx's RegistryClient + RegistryMaintenanceClient
 ├── structures.py           — Build SDMX artefacts (StructureMap, ValueMap, Codelist, etc.)
 ├── mapping.py              — Apply StructureMaps to DataFrames
 ├── structure_map_writer.py — Collect, validate, and prepare StructureMaps for FMR upload
@@ -121,13 +127,17 @@ SKILL.md                    — API summary published for AI agents consuming th
 - `StructureMap` and related map types (via `pysdmx.model.map`) — structure map artefacts
 - `Role`, `DataType` — component roles and data types
 - `ItemReference` — references to artefacts
-- `pysdmx.api.fmr` — FMR API client
+- `pysdmx.api.fmr` — FMR API client (`RegistryClient`, reads)
+- `pysdmx.api.fmr.maintenance` — `RegistryMaintenanceClient` (uploads, EXPERIMENTAL) and
+  `StructureAction`
 - `pysdmx.io.format.StructureFormat` — structure serialisation formats
 
 Import these by name (`from pysdmx.model.map import StructureMap`). Do **not**
 write `import pysdmx as px` and then reference `px.model.map.StructureMap`: a
 clean `import pysdmx` has no `.model` attribute, so that form resolves only when
-some other module happens to have imported the submodule first.
+some other module happens to have imported the submodule first. Inside `fmr.py`
+import the clients by name (`from pysdmx.api.fmr import RegistryClient`) rather than
+`from pysdmx.api import fmr`, which would put two things called `fmr` in one module.
 
 ## pysdmx Source Code
 

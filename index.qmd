@@ -14,8 +14,8 @@ pip install tidysdmx
 ```
 
 ```python
-from pysdmx.api.fmr import RegistryClient
 from tidysdmx import (
+    FmrClient,
     create_schema_from_table,
     parse_mapping_template_wb,
     build_structure_map_from_template_wb,
@@ -24,12 +24,9 @@ from tidysdmx import (
     validate_dataset_local,
 )
 
-# 1. Fetch the dissemination schema from FMR
-client = RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
-dis_schema = client.get_schema(
-    "datastructure",
-    agency="WB.GGH.HSP", id="DS_ASPIRE", version="1.0.0",
-)
+# 1. Fetch the dissemination schema from FMR (add token_provider=... behind SSO)
+client = FmrClient("https://fmrqa.worldbank.org/FMR")
+dis_schema = client.get_schema("WB.GGH.HSP:DS_ASPIRE(1.0.0)", "datastructure")
 
 # 2. Build a structure map from an Excel mapping template
 mappings = parse_mapping_template_wb("WB_ASPIRE_MAPPING.xlsx")
@@ -80,6 +77,7 @@ tidysdmx wraps [pysdmx](https://py.sdmx.io) with higher-level helpers tuned for 
 - **Tidy mapping** — `map_structures()` applies a `StructureMap` to a DataFrame and returns a tidy DataFrame keyed by the target DSD's components.
 - **Local validation** — `validate_dataset_local()` checks columns, codelist membership, duplicates, and required values against any pysdmx `Schema`.
 - **Upload-ready outputs** — `standardize_output()` and `collect_structure_map_artifacts()` prepare both data and structure artefacts for FMR submission.
+- **Authenticated registry access** — `FmrClient` wraps pysdmx's FMR clients with bearer-token acquisition and refresh (Azure Entra ID out of the box, any provider via `TokenProvider`), so reads and uploads against a registry behind single sign-on need one object, not a token-juggling script.
 
 ## License & credits
 

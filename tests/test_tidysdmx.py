@@ -87,6 +87,21 @@ class TestParseArtefactId:
         with pytest.raises(ValueError, match=re.escape(_INVALID_ARTEFACT_ID_MSG)):
             parse_artefact_id(artefact_id)
 
+    @pytest.mark.parametrize(
+        "artefact_id",
+        [
+            "WB:WDI(1.0",  # no closing parenthesis
+            "WB:WDI(1.0))",  # two closing parentheses
+            "WB:WDI(1.0)x",  # text after the version
+            "WB:WDI()",  # empty version
+            ":WDI(1.0)",  # empty agency
+            "WB:(1.0)",  # empty id
+        ],
+    )
+    def test_parse_artefact_id_rejects_malformed_ids(self, artefact_id):
+        with pytest.raises(ValueError, match=re.escape(_INVALID_ARTEFACT_ID_MSG)):
+            parse_artefact_id(artefact_id)
+
     def test_parse_artefact_id_extra_colon(self):
         # An extra colon is accepted: only the first one separates the agency,
         # so the remainder stays in the id. This asserts the same behaviour as
