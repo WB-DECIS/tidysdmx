@@ -169,7 +169,7 @@ jobs:
   # Branch protection should require THIS check and nothing else from this
   # workflow: the matrix job names ("Test (Python 3.12)") change whenever
   # python_min moves, and a renamed required check blocks every merge until
-  # someone edits the ruleset by hand. See TEMPLATE-NEXT-STEPS.md.
+  # someone edits the ruleset by hand. See RELEASING.md, "One-time setup".
   checks:
     name: All checks
     needs: [lint, typecheck, test, build, pr-title]

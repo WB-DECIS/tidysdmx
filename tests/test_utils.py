@@ -11,6 +11,9 @@ from pysdmx.model import (
     Codelist,
     Component,
     Components,
+    Concept,
+    HierarchicalCode,
+    Hierarchy,
     Role,
     Schema,
 )
@@ -21,6 +24,7 @@ from tidysdmx.utils import (
     create_mapping_rules,
     extract_component_ids,
     extract_validation_info,
+    fix_sdmx_xml_datatype_tags,
     get_codelist_ids,
     parse_mapping_template_wb,
     sdmx_reference_cols_for,
@@ -58,7 +62,7 @@ def sample_codelist() -> Codelist:
         agency="AGENCY",
         version="1.0",
         name={"en": "Test Codelist"},
-        codes=[
+        items=[
             Code(id="CODE_A", name={"en": "Code A"}),
             Code(id="CODE_B", name={"en": "Code B"}),
         ],
@@ -85,6 +89,61 @@ def sample_components(sample_codelist: Codelist) -> Components:
         role=Role.MEASURE,
     )
     return Components([comp_dim, comp_coded, comp_simple])
+
+
+@pytest.fixture
+def area_hierarchy() -> Hierarchy:
+    """A hierarchy whose code ``FR`` sits under two parents."""
+    return Hierarchy(
+        id="H_AREA",
+        agency="AGENCY",
+        codes=[
+            HierarchicalCode(
+                "EU",
+                codes=[HierarchicalCode("FR"), HierarchicalCode("DE")],
+            ),
+            HierarchicalCode("EMU", codes=[HierarchicalCode("FR")]),
+        ],
+    )
+
+
+@pytest.fixture
+def enumerated_components(
+    sample_codelist: Codelist, area_hierarchy: Hierarchy
+) -> Components:
+    """Components coded locally, by a hierarchy, and by their concept only."""
+    return Components(
+        [
+            Component(
+                "LOCAL",
+                True,
+                Role.DIMENSION,
+                Concept("LOCAL"),
+                local_codes=sample_codelist,
+            ),
+            Component(
+                "AREA",
+                True,
+                Role.DIMENSION,
+                Concept("AREA"),
+                local_codes=area_hierarchy,
+            ),
+            Component(
+                "CORE",
+                False,
+                Role.ATTRIBUTE,
+                Concept("CORE", codes=sample_codelist),
+                attachment_level="O",
+            ),
+            Component("OBS_VALUE", True, Role.MEASURE, Concept("OBS_VALUE")),
+        ]
+    )
+
+
+@pytest.fixture
+def enumerated_schema(enumerated_components: Components) -> Schema:
+    """A dataflow schema over ``enumerated_components``."""
+    return Schema("dataflow", "AGENCY", "DF", enumerated_components, "1.0.0")
 
 
 @pytest.fixture
@@ -196,6 +255,18 @@ class TestExtractValidationInfo:
         result = extract_validation_info(ifpri_asti_schema)
         assert result["sdmx_cols"] == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
 
+    def test_extract_validation_info_coded_comp_follows_enumeration(
+        self, enumerated_schema
+    ):
+        """Local codelists, hierarchies and concept-level codes all count."""
+        result = extract_validation_info(enumerated_schema)
+        assert result["coded_comp"] == ["LOCAL", "AREA", "CORE"]
+
+    def test_extract_validation_info_dim_comp_lists_dimensions(self, enumerated_schema):
+        """Dimensions come from pysdmx's Components.dimensions view."""
+        result = extract_validation_info(enumerated_schema)
+        assert result["dim_comp"] == ["LOCAL", "AREA"]
+
 
 class TestSdmxReferenceColsFor:
     @pytest.mark.parametrize(
@@ -233,13 +304,28 @@ class TestGetCodelistIds:
             assert isinstance(value, list)
             assert all(isinstance(code_id, str) for code_id in value)
 
-    @pytest.mark.skip(reason="Test needs to be modified to use correct inputs")
-    def test_get_codelist_ids(self):
-        """Test get_codelist_ids with simple inputs."""
-        comp = {"dim1": "Dimension 1", "dim2": "Dimension 2"}
-        coded_comp = {"dim1": ["A", "B"], "dim2": ["C", "D"]}
-        expected_output = {"dim1": ["A", "B"], "dim2": ["C", "D"]}
-        assert get_codelist_ids(comp, coded_comp) == expected_output
+    def test_get_codelist_ids_reads_local_codelist(self, enumerated_components):
+        """A locally coded component yields its codelist's code IDs."""
+        result = get_codelist_ids(enumerated_components, ["LOCAL"])
+        assert result == {"LOCAL": ["CODE_A", "CODE_B"]}
+
+    def test_get_codelist_ids_flattens_hierarchy(self, enumerated_components):
+        """Every level of a hierarchy is valid; a repeated code is listed once."""
+        result = get_codelist_ids(enumerated_components, ["AREA"])
+        assert result == {"AREA": ["EU", "FR", "DE", "EMU"]}
+
+    def test_get_codelist_ids_reads_concept_codes(self, enumerated_components):
+        """Without local codes, the concept's core representation applies."""
+        result = get_codelist_ids(enumerated_components, ["CORE"])
+        assert result == {"CORE": ["CODE_A", "CODE_B"]}
+
+    @pytest.mark.parametrize("component_id", ["OBS_VALUE", "MISSING"])
+    def test_get_codelist_ids_rejects_uncoded_component(
+        self, enumerated_components, component_id
+    ):
+        """An uncoded or unknown component is reported, not crashed on."""
+        with pytest.raises(ValueError, match="is not a coded component"):
+            get_codelist_ids(enumerated_components, [component_id])
 
 
 class TestExtractCodelistIds:
@@ -497,3 +583,36 @@ class TestParseMappingTemplateWb:
         """ValueError is raised for invalid file type."""
         with pytest.raises(ValueError):
             parse_mapping_template_wb(invalid_mapping_template_path)
+
+
+class TestFixSdmxXmlDatatypeTags:
+    """The deprecated SDMX-ML tag patch still works, and says it is deprecated."""
+
+    BROKEN = (
+        "<str:SourceCodelist>String</str:SourceCodelist>"
+        "<str:TargetCodelist>String</str:TargetCodelist>"
+    )
+
+    def test_fix_sdmx_xml_datatype_tags_warns_deprecated(self, tmp_path):
+        xml = tmp_path / "maps.xml"
+        xml.write_text(self.BROKEN, encoding="utf-8")
+
+        with pytest.warns(FutureWarning, match="fix_sdmx_xml_datatype_tags"):
+            fix_sdmx_xml_datatype_tags(xml)
+
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    def test_fix_sdmx_xml_datatype_tags_rewrites_tags(self, tmp_path):
+        xml = tmp_path / "maps.xml"
+        xml.write_text(self.BROKEN, encoding="utf-8")
+
+        out = fix_sdmx_xml_datatype_tags(xml, tmp_path / "fixed.xml")
+
+        assert out.read_text(encoding="utf-8") == (
+            "<str:SourceDataType>String</str:SourceDataType>"
+            "<str:TargetDataType>String</str:TargetDataType>"
+        )
+
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    def test_fix_sdmx_xml_datatype_tags_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="File not found"):
+            fix_sdmx_xml_datatype_tags(tmp_path / "absent.xml")

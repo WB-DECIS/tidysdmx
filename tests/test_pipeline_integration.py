@@ -68,10 +68,11 @@ def _load_dis_schema() -> Schema:
     network access::
 
         import pickle as pkl
-        import pysdmx as px
         from pathlib import Path
 
-        client = fmr.RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
+        from pysdmx.api.fmr import RegistryClient
+
+        client = RegistryClient("https://fmrqa.worldbank.org/FMR/sdmx/v2")
         schema = client.get_schema(
             "datastructure",
             agency="WB.GGH.HSP",

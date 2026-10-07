@@ -17,7 +17,7 @@ without reinventing validation.
 from collections.abc import Sequence
 from typing import Literal
 
-from pysdmx.model.__base import Agency
+from pysdmx.model import Agency
 from pysdmx.model.category import Category, CategoryScheme
 from pysdmx.model.code import Code, Codelist, HierarchicalCode, Hierarchy
 from pysdmx.model.concept import Concept, ConceptScheme

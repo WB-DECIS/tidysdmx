@@ -1,7 +1,7 @@
 """Filter SDMX DataFrames against schema codelist constraints."""
 
 import pandas as pd
-import pysdmx as px
+from pysdmx.model import Schema
 from typeguard import typechecked
 
 from .utils import extract_validation_info
@@ -43,7 +43,7 @@ def filter_rows(
 @typechecked
 def filter_tidy_raw(
     df: pd.DataFrame,
-    schema: px.model.dataflow.Schema,
+    schema: Schema,
 ) -> pd.DataFrame:
     """Filter an SDMX DataFrame by removing rows that violate codelist constraints.
 

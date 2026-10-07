@@ -5,7 +5,7 @@ repository. It is committed so the whole team gets the same behaviour.
 
 | Path | Purpose |
 |---|---|
-| `settings.json` | Shared permissions. `allow`: the local loop — make targets, `uv run`/`sync`/`lock`/`build`, `git add`/`commit` and read-only git. `ask`: anything that reaches GitHub (`git push`, `gh pr create`, `gh release`). `deny`: force pushes, hook-skipping commits, a real `semantic_release` run, publishing, `rm -rf`, and reading `.env` files. |
+| `settings.json` | Shared permissions. `allow`: the local loop — make targets, `uv run`/`sync`/`lock`/`build`, `git add`/`commit` and read-only git. `ask`: anything that reaches GitHub (`git push`, `gh pr create`, `gh release`). `deny`: force pushes, hook-skipping commits, `git reset --hard`, a real `semantic_release` run, publishing, `rm -rf`, and reading `.env` files. |
 | `commands/*.md` | Slash commands (`/test`, `/lint`, `/typecheck`, `/review-pr`, `/add-tests`, `/commit`, `/docs`, `/release`). |
 | `rules/*.md` | Coding, testing and commit conventions. Imported into context by `CLAUDE.md` via `@` references. |
 

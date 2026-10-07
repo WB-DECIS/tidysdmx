@@ -1,15 +1,15 @@
 """SDMX component extraction, mapping rules, and Excel helpers."""
 
+import warnings
 import zipfile
 from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
-import pysdmx as px
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from pysdmx.model import Schema
+from pysdmx.model import Codelist, Components, Hierarchy, Schema
 from typeguard import typechecked
 
 _STANDARD_SDMX_REFERENCE_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
@@ -31,7 +31,7 @@ def sdmx_reference_cols_for(
 
     Per the SDMX-CSV specification the reference column names are the same
     for every context — only the values carried in the ``STRUCTURE`` column
-    differ (``dataflow``, ``datastructure``, ``provisionagreement``) — so
+    differ (``dataflow``, ``datastructure``, ``dataprovision``) — so
     every context currently resolves to
     ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]``.
 
@@ -46,8 +46,12 @@ def sdmx_reference_cols_for(
 
 
 @typechecked
-def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, object]:
+def extract_validation_info(schema: Schema) -> dict[str, object]:
     """Extract validation information from a given schema.
+
+    A component counts as coded when pysdmx's ``Component.enumeration`` is
+    set: its local (constrained) codes if the schema carries any, otherwise
+    the codes of its concept's core representation.
 
     Args:
         schema: The schema object containing all necessary validation
@@ -68,8 +72,8 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
     comp = schema.components
     valid_comp = [c.id for c in comp]
     mandatory_comp = [c.id for c in comp if c.required]
-    coded_comp = [c.id for c in comp if c.local_codes is not None]
-    dim_comp = [c.id for c in comp if c.role == px.model.Role.DIMENSION]
+    coded_comp = [c.id for c in comp if c.enumeration is not None]
+    dim_comp = [c.id for c in comp.dimensions]
 
     return {
         "valid_comp": valid_comp,
@@ -82,10 +86,13 @@ def extract_validation_info(schema: px.model.dataflow.Schema) -> dict[str, objec
 
 
 @typechecked
-def get_codelist_ids(
-    comp: px.model.dataflow.Components, coded_comp: list[str]
-) -> dict[str, list[str]]:
+def get_codelist_ids(comp: Components, coded_comp: list[str]) -> dict[str, list[str]]:
     """Retrieve all codelist IDs for given coded components.
+
+    Codes come from each component's pysdmx ``enumeration``. When FMR
+    resolves a dataflow or provision agreement whose component has a
+    hierarchy association, that enumeration is a ``Hierarchy`` rather than a
+    ``Codelist``; every code at every level of it is valid.
 
     Args:
         comp: A pysdmx Components collection.
@@ -94,11 +101,31 @@ def get_codelist_ids(
     Returns:
         Dictionary with coded component IDs as keys and lists of codelist
         IDs as values.
+
+    Raises:
+        ValueError: If a component in ``coded_comp`` is not in ``comp`` or has
+            no enumeration.
     """
-    return {
-        component: [code.id for code in comp[component].local_codes.items]
-        for component in coded_comp
-    }
+    codelist_ids: dict[str, list[str]] = {}
+    for component_id in coded_comp:
+        component = comp[component_id]
+        enumeration = component.enumeration if component is not None else None
+        if enumeration is None:
+            raise ValueError(
+                f"Component '{component_id}' is not a coded component of the "
+                "schema; expected one with a codelist or hierarchy."
+            )
+        codelist_ids[component_id] = _enumeration_code_ids(enumeration)
+    return codelist_ids
+
+
+def _enumeration_code_ids(enumeration: Codelist | Hierarchy) -> list[str]:
+    """Return the code IDs of a codelist, or of every level of a hierarchy."""
+    if isinstance(enumeration, Hierarchy):
+        # pysdmx dedupes equal nodes only; a code placed under several parents
+        # with different children or validity comes back once per placement.
+        return list(dict.fromkeys(code.id for code in enumeration.all_codes()))
+    return [code.id for code in enumeration]
 
 
 @typechecked
@@ -116,17 +143,14 @@ def extract_component_ids(schema: Schema) -> list[str]:
         ValueError: If the schema has no components.
 
     Examples:
-        >>> from pysdmx.model import Schema, Components, Component
-        >>> comp1 = Component(id="FREQ")
-        >>> comp2 = Component(id="TIME_PERIOD")
-        >>> schema = Schema(
-        ...     context="datastructure",
-        ...     agency="ECB",
-        ...     id_="EXR",
-        ...     components=Components([comp1, comp2]),
-        ...     version="1.0.0",
-        ...     urns=[],
+        >>> from pysdmx.model import Component, Components, Concept, Role, Schema
+        >>> comps = Components(
+        ...     [
+        ...         Component("FREQ", True, Role.DIMENSION, Concept("FREQ")),
+        ...         Component("TIME_PERIOD", True, Role.DIMENSION, Concept("TIME")),
+        ...     ]
         ... )
+        >>> schema = Schema("datastructure", "ECB", "EXR", comps, "1.0.0")
         >>> extract_component_ids(schema)
         ['FREQ', 'TIME_PERIOD']
     """
@@ -316,9 +340,15 @@ def fix_sdmx_xml_datatype_tags(
 ) -> Path:
     """Fix incorrect SourceCodelist/TargetCodelist tags in SDMX-ML.
 
-    The pysdmx XML writer emits ``<str:SourceCodelist>String</str:SourceCodelist>``
-    and ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
-    RepresentationMap uses a plain DataType. The correct SDMX 3.0 tags are
+    .. deprecated::
+        pysdmx 1.14.0 fixed the XML writer bug this patches, and tidysdmx
+        requires a later pysdmx. Write SDMX-ML with ``pysdmx.io.write_sdmx``
+        and drop the call; this function will be removed in a future release.
+
+    pysdmx before 1.14.0 emitted
+    ``<str:SourceCodelist>String</str:SourceCodelist>`` and
+    ``<str:TargetCodelist>String</str:TargetCodelist>`` when a
+    RepresentationMap used a plain DataType. The correct SDMX 3.0 tags are
     ``<str:SourceDataType>`` and ``<str:TargetDataType>``.
 
     Args:
@@ -331,7 +361,17 @@ def fix_sdmx_xml_datatype_tags(
 
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
+
+    Warns:
+        FutureWarning: Always; the function is deprecated.
     """
+    warnings.warn(
+        "fix_sdmx_xml_datatype_tags is deprecated and will be removed in a "
+        "future release: pysdmx 1.14.0 and later write SourceDataType/"
+        "TargetDataType correctly, so the call is no longer needed.",
+        FutureWarning,
+        stacklevel=2,
+    )
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {input_path}")

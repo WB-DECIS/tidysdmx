@@ -10,12 +10,13 @@
 
 ## Fixture registration — read this before adding a fixture module
 
-Shared fixtures go **directly in `tests/conftest.py`**. Do **not** add a
-`pytest_plugins` list to `tests/conftest.py`: pytest only permits
-`pytest_plugins` in the *top-level* (rootdir) conftest, and putting it in
-`tests/` depends on confcutdir resolution that changes between pytest versions.
-If you genuinely need plugin-style registration, create a `conftest.py` at the
-repository root and put it there.
+Shared fixtures go **directly in `tests/conftest.py`**: import the fixture
+functions from `tests/fixtures/fxtr_*.py` by name. Do **not** register them with a
+`pytest_plugins` list. The suite runs with `--import-mode=importlib` and `tests/`
+is a package, so the bare module paths `pytest_plugins` takes
+(`fixtures.fxtr_schemas`) raise `ModuleNotFoundError`; and pytest rejects
+`pytest_plugins` outright in any non-initial conftest, such as one in
+`tests/fixtures/`. The docstring of `tests/conftest.py` has the details.
 
 - Function-scoped fixtures for anything mutable, no matter how cheap. Two tests
   sharing a mutable object is a bug waiting for a specific test ordering.
@@ -58,9 +59,9 @@ the "no network" guarantee is fiction.
 ## Coverage
 
 - Every new public function needs at least one test.
-- The gate is `fail_under = 85` in `pyproject.toml`, against ~87% actual. It is a
-  floor, not a target —
-  and once real coverage is well above it, raise it. A gate far below reality
+- The gate is `fail_under = 85` in `pyproject.toml`, against ~91% actual (unit
+  lane, October 2026). It is a floor, not a target — and once real coverage is
+  well above it, raise it. A gate far below reality
   cannot catch a regression.
 - Coverage is deliberately **not** in pytest's `addopts`, so `pytest -k one_test`
   does not trip the gate. Use `make cov` for a measured run.
@@ -78,6 +79,8 @@ the "no network" guarantee is fiction.
   or class with `pytest.mark.filterwarnings`, next to the code it describes —
   never add a blanket ignore to `pyproject.toml`. A scoped suppression is deleted
   along with the deprecated function; a global one outlives it.
-- **Known debt.** 54 `pytest.raises` calls still lack `match=`, so `PT011` is
-  temporarily ignored for `tests/**` in `pyproject.toml`. New tests must pass
-  `match=` anyway. Removing that ignore is backlog item TEST-15.
+- **Known debt.** 54 `pytest.raises` calls on broad exceptions such as
+  `ValueError` lack `match=` — the ones ruff's `PT011` flags — so `PT011` is
+  temporarily ignored for `tests/**` in `pyproject.toml`. About 50 more, on
+  `TypeCheckError` and other narrow types, lack it too without tripping the rule.
+  New tests must pass `match=` anyway. Removing that ignore is backlog item TEST-15.
