@@ -31,7 +31,7 @@ def sdmx_reference_cols_for(
 
     Per the SDMX-CSV specification the reference column names are the same
     for every context — only the values carried in the ``STRUCTURE`` column
-    differ (``dataflow``, ``datastructure``, ``provisionagreement``) — so
+    differ (``dataflow``, ``datastructure``, ``dataprovision``) — so
     every context currently resolves to
     ``["STRUCTURE", "STRUCTURE_ID", "ACTION"]``.
 

@@ -550,8 +550,8 @@ def standardize_data_for_upload(
         dsd: The Data Structure Definition (DSD) identifier.
         structure: The structure type. Default is ``'datastructure'``.
             Options: ``'datastructure'``, ``'metadataflow'``, ``'dataflow'``.
-        action: The action type. Default is ``'I'`` (Insert).
-            Options: ``'I'``, ``'U'``, ``'D'``.
+        action: The SDMX-CSV ``ACTION`` code. Default is ``'I'``
+            (Information). SDMX-CSV defines ``'I'``, ``'A'``, ``'R'`` and ``'D'``.
         cat_indicator: Whether OBS_VALUE is a categorical indicator.
             Default is False.
 
@@ -585,13 +585,16 @@ def standardize_output(
     df: pd.DataFrame,
     artefact_id: str,
     schema: Schema,
-    action: Literal["I", "U", "D"] = "I",
+    action: Literal["I", "A", "R", "D"] = "I",
 ) -> pd.DataFrame:
     """Standardize the output DataFrame by adding SDMX reference columns.
 
     Enriches the given DataFrame with SDMX-related metadata columns
     (``STRUCTURE``, ``STRUCTURE_ID``, ``ACTION``) based on the provided
     artefact ID and schema, then ensures these columns appear first.
+    ``STRUCTURE`` carries the SDMX-CSV name of the schema context:
+    ``dataflow``, ``datastructure``, or ``dataprovision`` for a provision
+    agreement.
 
     Args:
         df: Input DataFrame containing SDMX data.
@@ -599,9 +602,10 @@ def standardize_output(
             Dataflow ID).
         schema: A pysdmx Schema object used to determine artefact type
             and filter columns.
-        action: Action indicator for SDMX operations. Defaults to ``"I"``.
-            Allowed values: ``"I"`` (Insert), ``"U"`` (Update),
-            ``"D"`` (Delete).
+        action: SDMX-CSV ``ACTION`` code. Defaults to ``"I"``. Allowed
+            values are the codes pysdmx reads and writes: ``"I"``
+            (Information), ``"A"`` (Append), ``"R"`` (Replace) and ``"D"``
+            (Delete).
 
     Returns:
         A new DataFrame with SDMX reference columns added and reordered.
@@ -677,20 +681,30 @@ def _extract_artefact_type(
     return schema.context
 
 
+# SDMX-CSV names a provision agreement "dataprovision" in its STRUCTURE
+# column; the other schema contexts keep their name. Mirrors pysdmx's SDMX-CSV
+# writer, whose reader rejects "provisionagreement".
+_SDMX_CSV_STRUCTURE_BY_CONTEXT: dict[str, str] = {
+    "dataflow": "dataflow",
+    "datastructure": "datastructure",
+    "provisionagreement": "dataprovision",
+}
+
+
 @typechecked
 def _add_sdmx_reference_cols(
     df: pd.DataFrame,
     artefact_id: str,
     artefact_type: Literal["dataflow", "datastructure", "provisionagreement"],
-    action: Literal["I", "U", "D"] = "I",
+    action: Literal["I", "A", "R", "D"] = "I",
 ) -> pd.DataFrame:
     """Add SDMX reference columns to a DataFrame based on artefact type.
 
     Args:
         df: Input DataFrame.
         artefact_id: Identifier for the SDMX artefact.
-        artefact_type: Artefact type.
-        action: Action type. Defaults to ``"I"``.
+        artefact_type: Artefact type (schema context).
+        action: SDMX-CSV ``ACTION`` code. Defaults to ``"I"``.
 
     Returns:
         DataFrame with added SDMX reference columns.
@@ -709,7 +723,7 @@ def _add_sdmx_reference_cols(
 
     structure_col, structure_id_col, _ = sdmx_reference_cols_for(artefact_type)
 
-    df.loc[:, structure_col] = artefact_type
+    df.loc[:, structure_col] = _SDMX_CSV_STRUCTURE_BY_CONTEXT[artefact_type]
     df.loc[:, structure_id_col] = artefact_id
     df.loc[:, "ACTION"] = action
 
