@@ -48,6 +48,7 @@ from typing import (
     Protocol,
     Self,
     TypeAlias,
+    cast,
     overload,
     runtime_checkable,
 )
@@ -60,16 +61,21 @@ from pysdmx.api.qb import ApiVersion, RefMetaFormat, RestService, SchemaFormat
 from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
 from pysdmx.model import (
+    Agency,
     Categorisation,
     CategoryScheme,
     Codelist,
     ConceptScheme,
     Dataflow,
+    DataflowInfo,
+    DataProvider,
     DataStructureDefinition,
     Hierarchy,
     ItemReference,
     Metadataflow,
+    MetadataProvider,
     MetadataProvisionAgreement,
+    MetadataReport,
     MetadataStructure,
     MultiRepresentationMap,
     ProvisionAgreement,
@@ -161,6 +167,10 @@ _SCOPE_EXAMPLE: Final[str] = "api://<fmr-app-id>/.default"
 # path escaping only "[]:+*,", so anything else ("?", "#", "/", spaces) would
 # silently query a different resource (PYSDMX-READ-02).
 _REFERENCE_PART: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_@$.+~-]+")
+# SDMX's nested agency ID grammar, e.g. "WB" or "WB.DEC".
+_AGENCY_ID: Final[re.Pattern[str]] = re.compile(
+    r"[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*"
+)
 
 
 def _utcnow() -> datetime:
@@ -643,6 +653,8 @@ def _parse_reference(
     several matches without a word (PYSDMX-READ-01), so both are stopped
     before any request.
     """
+    if "=" in reference and not urn_classes:
+        raise ValueError(_malformed_message(reference, urn_classes, argument, form))
     if "=" in reference:
         parts = _split_urn(reference, urn_classes, argument=argument, form=form)
     else:
@@ -705,10 +717,23 @@ def _classes_text(urn_classes: frozenset[str]) -> str:
 def _malformed_message(
     reference: str, urn_classes: frozenset[str], argument: str, form: str
 ) -> str:
-    return (
-        f"{argument} must be {form!r} or the URN of {_classes_text(urn_classes)}; "
-        f"got {reference!r}"
-    )
+    urn = f" or the URN of {_classes_text(urn_classes)}" if urn_classes else ""
+    return f"{argument} must be {form!r}{urn}; got {reference!r}"
+
+
+def _check_agency(agency: str) -> str:
+    """Return ``agency`` if it is one SDMX agency ID, else raise.
+
+    pysdmx's organisation-scheme getters keep the first scheme's items when
+    the agency matches several (PYSDMX-READ-01), so wildcards and lists are
+    refused along with anything that is not an agency ID.
+    """
+    if not _AGENCY_ID.fullmatch(agency):
+        raise ValueError(
+            "agency must be one agency ID such as 'WB' or 'WB.DEC'; wildcards, "
+            f"lists and artefact references are not supported, got {agency!r}"
+        )
+    return agency
 
 
 def _exactly_one(
@@ -820,9 +845,14 @@ class FmrClient:
     as ``Dataflow.structure``, can be passed straight back:
     :meth:`fetch_artefact` for any supported artefact type, one typed method per
     type (:meth:`fetch_codelist`, :meth:`fetch_hierarchy`,
-    :meth:`fetch_dataflow`, ...) and :meth:`fetch_schema`. A URN must name the
-    class being fetched. They behave the same whether or not a token provider is
-    set.
+    :meth:`fetch_dataflow`, ...), and :meth:`fetch_schema`,
+    :meth:`fetch_dataflow_info` and :meth:`fetch_metadata_reports`, which take
+    the artefact the same way. A URN must name the class being fetched.
+    :meth:`fetch_agencies`, :meth:`fetch_data_providers` and
+    :meth:`fetch_metadata_providers` take an agency ID, and
+    :meth:`fetch_metadata_report` a metadata set as ``"PROVIDER:ID(VERSION)"``.
+    Together they wrap every getter of pysdmx's ``RegistryClient``, and they
+    behave the same whether or not a token provider is set.
 
     This is the package's first stateful object: hold one instance per
     registry and reuse it; the token cache lives on it. When a token provider
@@ -1372,6 +1402,170 @@ class FmrClient:
             artefact_id, _ARTEFACT_SPECS[context].urn_classes
         )
         return self.registry.get_schema(context, agency, id_part, version)
+
+    def fetch_dataflow_info(
+        self,
+        artefact_id: str,
+        detail: Literal["all", "core", "providers", "schema"] = "all",
+    ) -> DataflowInfo:
+        """Fetch what the registry knows about a dataflow, for discovery.
+
+        Unlike :meth:`fetch_dataflow`, which returns the ``Dataflow`` artefact,
+        this returns pysdmx's ``DataflowInfo`` summary: the dataflow's name and
+        description with, as ``detail`` asks, the organisations providing data
+        for it and its schema. ``"all"`` and ``"schema"`` cost two extra
+        requests, for the schema.
+
+        Args:
+            artefact_id: The dataflow identifier, e.g.
+                ``"WB:DF_IFPRI_ASTI(1.0)"``, or its URN. Prefer an exact
+                version: pysdmx matches the dataflow in the registry's answer
+                against the version string, so ``+`` misses a dataflow whose
+                version is not ``X.Y.Z`` and a SemVer wildcard such as
+                ``1.+.0`` never matches (PYSDMX-READ-04).
+            detail: ``"core"`` for the dataflow only, ``"providers"`` to add
+                its data providers, ``"schema"`` to add its schema, ``"all"``
+                for both.
+
+        Returns:
+            The dataflow summary.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                dataflow (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such dataflow, or
+                pysdmx finds none matching the requested version in the
+                registry's answer.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        agency, id_part, version = _parse_reference(
+            artefact_id, _ARTEFACT_SPECS["dataflow"].urn_classes
+        )
+        return self.registry.get_dataflow_details(agency, id_part, version, detail)
+
+    def fetch_agencies(self, agency: str) -> Sequence[Agency]:
+        """Fetch the sub-agencies an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose agency scheme to read, e.g.
+                ``"WB"``.
+
+        Returns:
+            The agencies in its scheme, their IDs qualified with ``agency``
+            (``"WB.DECIS"``).
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no agency scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.registry.get_agencies(_check_agency(agency))
+
+    def fetch_data_providers(
+        self, agency: str, *, with_flows: bool = False
+    ) -> Sequence[DataProvider]:
+        """Fetch the data providers an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose data provider scheme to read,
+                e.g. ``"WB"``.
+            with_flows: Also fill each provider's ``dataflows`` with the
+                dataflows it provides data for, read from its provision
+                agreements.
+
+        Returns:
+            The data providers in its scheme.
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no data provider
+                scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.registry.get_providers(_check_agency(agency), with_flows)
+
+    def fetch_metadata_providers(
+        self, agency: str, *, with_flows: bool = False
+    ) -> Sequence[MetadataProvider]:
+        """Fetch the metadata providers an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose metadata provider scheme to
+                read, e.g. ``"WB"``.
+            with_flows: Also fill each provider's ``dataflows`` with references
+                to the metadataflows it provides reports for, read from its
+                metadata provision agreements.
+
+        Returns:
+            The metadata providers in its scheme.
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no metadata
+                provider scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        providers = self.registry.get_metadata_providers(
+            _check_agency(agency), with_flows
+        )
+        # pysdmx annotates Sequence[DataProvider] but returns MetadataProvider
+        # objects (PYSDMX-READ-03); mypy reports this cast as redundant once
+        # the annotation is fixed upstream.
+        return cast("Sequence[MetadataProvider]", providers)
+
+    def fetch_metadata_report(self, report_id: str) -> MetadataReport:
+        """Fetch a reference metadata report given as ``"PROVIDER:ID(VERSION)"``.
+
+        Args:
+            report_id: The metadata provider's ID, the metadata set ID and its
+                version, e.g. ``"DECIS:MDS_QUALITY(1.0)"``. The version may be
+                ``~`` (latest) or ``+`` (latest stable). URNs are not accepted
+                here.
+
+        Returns:
+            The metadata report.
+
+        Raises:
+            ValueError: If ``report_id`` is not ``PROVIDER:ID(VERSION)``, or
+                holds a wildcard, a list or a character no SDMX identifier has.
+            pysdmx.errors.NotFound: If the registry has no such report.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        provider, id_part, version = _parse_reference(
+            report_id, frozenset(), argument="report_id", form="PROVIDER:ID(VERSION)"
+        )
+        return self.registry.get_report(provider, id_part, version)
+
+    def fetch_metadata_reports(
+        self, artefact_id: str, artefact_type: str
+    ) -> Sequence[MetadataReport]:
+        """Fetch the reference metadata reports attached to an artefact.
+
+        Args:
+            artefact_id: The artefact the reports describe, as
+                ``"AGENCY:ID(VERSION)"`` or its URN, e.g.
+                ``"WB:DF_IFPRI_ASTI(1.0)"``.
+            artefact_type: The artefact's type, one of the values of
+                :data:`ArtefactType`. ``"codelist"`` searches codelists only:
+                unlike :meth:`fetch_codelist`, there is no fallback to a value
+                list of the same ID.
+
+        Returns:
+            The reports attached to the artefact.
+
+        Raises:
+            ValueError: If ``artefact_type`` is not an :data:`ArtefactType`
+                value, or ``artefact_id`` does not identify exactly one
+                artefact of that type (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no reports for it.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        spec = _artefact_spec(artefact_type)
+        agency, id_part, version = _parse_reference(artefact_id, spec.urn_classes)
+        return self.registry.get_reports(artefact_type, agency, id_part, version)
 
     def put_structures(
         self,

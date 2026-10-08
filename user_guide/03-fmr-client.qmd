@@ -80,6 +80,28 @@ dsd = client.fetch_data_structure_definition(dataflow.structure)
 
 The URN must name the class the method fetches — exactly as URNs spell it, `DataStructure` for a data structure definition — so a dataflow's URN passed to `fetch_codelist` raises `ValueError` instead of fetching something else. A URN of an item inside an artefact, such as a `Code`, is refused too. `fetch_codelist` takes a `ValueList` URN as well as a `Codelist` one.
 
+### Other reads
+
+The rest of pysdmx's `RegistryClient` getters take something other than one artefact, so each has its own method. Together with the table above they cover every getter, and the same rules apply: one reference, no wildcards or lists, pysdmx's object returned unchanged.
+
+| Method | Takes | Returns |
+|---|---|---|
+| `fetch_schema(artefact_id, context)` | a dataflow, data structure or provision agreement, and which of the three it is | `Schema`, with codelists and constraints applied |
+| `fetch_dataflow_info(artefact_id, detail="all")` | a dataflow; `detail` is `"core"`, `"providers"`, `"schema"` or `"all"` | `DataflowInfo`, a discovery summary |
+| `fetch_agencies(agency)` | one agency ID, e.g. `"WB"` | the sub-agencies it maintains |
+| `fetch_data_providers(agency, with_flows=False)` | one agency ID | its `DataProvider`s, with their dataflows if `with_flows` |
+| `fetch_metadata_providers(agency, with_flows=False)` | one agency ID | its `MetadataProvider`s |
+| `fetch_metadata_report(report_id)` | a metadata set as `"PROVIDER:ID(VERSION)"` | one `MetadataReport` |
+| `fetch_metadata_reports(artefact_id, artefact_type)` | any artefact of the table above, and its type | the `MetadataReport`s attached to it |
+
+```python
+groups = client.fetch_agencies("WB")
+info = client.fetch_dataflow_info("WB:DF_IFPRI_ASTI(1.0)", detail="providers")
+reports = client.fetch_metadata_reports("WB:DF_IFPRI_ASTI(1.0)", "dataflow")
+```
+
+Pass `fetch_dataflow_info` an exact version: pysdmx matches the dataflow in the registry's answer against the version string you gave, so `+` misses a dataflow whose version is not `X.Y.Z`. `fetch_metadata_reports(..., "codelist")` searches codelists only, with no fallback to a value list.
+
 ## 3. Sign in with Azure (Entra ID)
 
 Install the optional extra once:
@@ -213,7 +235,7 @@ from tidysdmx import AzureTokenProvider, FmrClient, build_codelist
 provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
 client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
 
-client.registry.get_agencies("WB")
+client.fetch_agencies("WB")
 codelist = build_codelist(
     "CL_SMOKE_TEST", "WB", "Smoke test", codes=[Code(id="OK", name="Smoke test")]
 )

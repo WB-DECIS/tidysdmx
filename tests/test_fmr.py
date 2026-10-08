@@ -1,9 +1,11 @@
 """Tests for tidysdmx.fmr — all offline; HTTP is intercepted by respx."""
 
 import dataclasses
+import inspect
 import sys
 import threading
 import types
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import (
     Any,
@@ -25,19 +27,25 @@ from pysdmx.api.qb import StructureType
 from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
 from pysdmx.model import (
+    Agency,
     Categorisation,
     CategoryScheme,
     Codelist,
     ConceptScheme,
     Dataflow,
+    DataflowInfo,
+    DataProvider,
     DataStructureDefinition,
     Hierarchy,
     Metadataflow,
+    MetadataProvider,
     MetadataProvisionAgreement,
+    MetadataReport,
     MetadataStructure,
     MultiRepresentationMap,
     ProvisionAgreement,
     RepresentationMap,
+    Schema,
     StructureMap,
     TransformationScheme,
 )
@@ -52,6 +60,8 @@ from tests.fixtures.fxtr_fmr import (
     DSD_URN,
     FMR_ROOT,
     FMR_SCOPE,
+    METADATA_PROVIDERS_FUSION_JSON,
+    METADATA_PROVIDERS_URL,
     NOW,
     REGISTRY_ENDPOINT,
     STRUCTURES_UPLOAD_URL,
@@ -185,11 +195,107 @@ _LISTED_CASES = [case for case in _FETCH_CASES if case.listed]
 _LISTED_CASE_IDS = [case.artefact_type for case in _LISTED_CASES]
 
 
+class _QueryCase(NamedTuple):
+    """One FmrClient read that is not an artefact fetch, and its pysdmx getter.
+
+    ``expected_call`` is how the getter must be called for ``args``; ``fixture``
+    holds what it returns, wrapped in a list when ``listed``.
+    """
+
+    method: str
+    args: tuple[Any, ...]
+    getter: str
+    expected_call: Any
+    fixture: str
+    result_type: Any
+    listed: bool = False
+
+
+_QUERY_CASES = [
+    _QueryCase(
+        "fetch_schema",
+        ("WB:WDI(1.0.0)", "dataflow"),
+        "get_schema",
+        call("dataflow", "WB", "WDI", "1.0.0"),
+        "sdmx_schema",
+        Schema,
+    ),
+    _QueryCase(
+        "fetch_dataflow_info",
+        ("WB:DF_TEST(1.0)",),
+        "get_dataflow_details",
+        call("WB", "DF_TEST", "1.0", "all"),
+        "dataflow_info",
+        DataflowInfo,
+    ),
+    _QueryCase(
+        "fetch_agencies",
+        ("WB",),
+        "get_agencies",
+        call("WB"),
+        "agency",
+        Sequence[Agency],
+        True,
+    ),
+    _QueryCase(
+        "fetch_data_providers",
+        ("WB",),
+        "get_providers",
+        call("WB", False),
+        "data_provider",
+        Sequence[DataProvider],
+        True,
+    ),
+    _QueryCase(
+        "fetch_metadata_providers",
+        ("WB",),
+        "get_metadata_providers",
+        call("WB", False),
+        "metadata_provider",
+        Sequence[MetadataProvider],
+        True,
+    ),
+    _QueryCase(
+        "fetch_metadata_report",
+        ("DECIS:MDS_TEST(1.0)",),
+        "get_report",
+        call("DECIS", "MDS_TEST", "1.0"),
+        "metadata_report",
+        MetadataReport,
+    ),
+    _QueryCase(
+        "fetch_metadata_reports",
+        ("WB:DF_TEST(1.0)", "dataflow"),
+        "get_reports",
+        call("dataflow", "WB", "DF_TEST", "1.0"),
+        "metadata_report",
+        Sequence[MetadataReport],
+        True,
+    ),
+]
+_QUERY_CASE_IDS = [case.method for case in _QUERY_CASES]
+_AGENCY_CASES = [case for case in _QUERY_CASES if case.args == ("WB",)]
+_AGENCY_CASE_IDS = [case.method for case in _AGENCY_CASES]
+
+# pysdmx getters deliberately left unwrapped. Empty: FmrClient wraps them all.
+# A pysdmx release that adds a getter fails the completeness test below until
+# the getter is wrapped or, consciously, listed here.
+_UNWRAPPED: frozenset[str] = frozenset()
+
+
 def _classes(hint: Any) -> frozenset[Any]:
     """The classes a type hint admits: the members of a union, else the hint."""
     if get_origin(hint) in (Union, types.UnionType):
         return frozenset(get_args(hint))
     return frozenset([hint])
+
+
+def _shape(hint: Any) -> tuple[bool, frozenset[Any]]:
+    """A return hint as (is a sequence, the classes it admits), to compare."""
+    if get_origin(hint) is Sequence:
+        (item,) = get_args(hint)
+        return True, _classes(item)
+    return False, _classes(hint)
 
 
 def _mock_agencies(respx_mock):
@@ -1093,6 +1199,185 @@ class TestFmrClientFetchSchema:
     def test_fetch_schema_rejects_urn_of_another_context(self, fmr_client):
         with pytest.raises(ValueError, match="is a DataStructure URN, but a Dataflow"):
             fmr_client.fetch_schema(DSD_URN, "dataflow")
+
+
+class TestFmrClientQueries:
+    """The seven reads that are not artefact fetches."""
+
+    def test_every_registry_getter_is_wrapped(self):
+        getters = {
+            name
+            for name, _ in inspect.getmembers(RegistryClient, inspect.isfunction)
+            if name.startswith("get_")
+        }
+        wrapped = {spec.getter for spec in _ARTEFACT_SPECS.values()} | {
+            case.getter for case in _QUERY_CASES
+        }
+
+        assert getters - _UNWRAPPED == wrapped
+
+    @pytest.mark.parametrize("case", _QUERY_CASES, ids=_QUERY_CASE_IDS)
+    def test_query_calls_its_pysdmx_getter(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        result = request.getfixturevalue(case.fixture)
+        returned = [result] if case.listed else result
+        calls = _patch_getter(monkeypatch, fmr_client, case.getter, returned)
+
+        getattr(fmr_client, case.method)(*case.args)
+
+        assert calls == [case.expected_call]
+
+    @pytest.mark.parametrize("case", _QUERY_CASES, ids=_QUERY_CASE_IDS)
+    def test_query_returns_what_pysdmx_returns(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        result = request.getfixturevalue(case.fixture)
+        returned = [result] if case.listed else result
+        _patch_getter(monkeypatch, fmr_client, case.getter, returned)
+
+        assert getattr(fmr_client, case.method)(*case.args) is returned
+
+    @pytest.mark.parametrize("case", _QUERY_CASES, ids=_QUERY_CASE_IDS)
+    def test_query_method_returns_the_case_type(self, case):
+        hint = get_type_hints(getattr(FmrClient, case.method))["return"]
+
+        assert _shape(hint) == _shape(case.result_type)
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            pytest.param(
+                case,
+                marks=pytest.mark.xfail(
+                    strict=True,
+                    reason="PYSDMX-READ-03: pysdmx annotates Sequence[DataProvider]",
+                ),
+            )
+            if case.getter == "get_metadata_providers"
+            else case
+            for case in _QUERY_CASES
+        ],
+        ids=_QUERY_CASE_IDS,
+    )
+    def test_pysdmx_getter_returns_the_query_type(self, case):
+        # When the xfail starts passing, pysdmx has fixed the annotation: drop
+        # the cast in fetch_metadata_providers and close PYSDMX-READ-03.
+        hint = get_type_hints(getattr(RegistryClient, case.getter))["return"]
+
+        assert _shape(hint) == _shape(case.result_type)
+
+    @pytest.mark.parametrize("case", _AGENCY_CASES, ids=_AGENCY_CASE_IDS)
+    @pytest.mark.parametrize(
+        "agency",
+        ["*", "WB,IMF", "WB:AGENCIES(1.0)", "", " WB", "1WB", "WB/DEC", "WB..DEC"],
+    )
+    def test_agency_query_rejects_anything_but_one_agency_id(
+        self, fmr_client, case, agency
+    ):
+        with pytest.raises(ValueError, match="agency must be one agency ID"):
+            getattr(fmr_client, case.method)(agency)
+
+    @pytest.mark.parametrize("case", _AGENCY_CASES, ids=_AGENCY_CASE_IDS)
+    def test_agency_query_accepts_nested_agency_id(self, monkeypatch, fmr_client, case):
+        calls = _patch_getter(monkeypatch, fmr_client, case.getter, [])
+
+        getattr(fmr_client, case.method)("WB.DEC")
+
+        assert calls[0].args[0] == "WB.DEC"
+
+    @pytest.mark.parametrize(
+        "case",
+        [case for case in _AGENCY_CASES if case.method != "fetch_agencies"],
+        ids=["fetch_data_providers", "fetch_metadata_providers"],
+    )
+    def test_provider_query_passes_with_flows(self, monkeypatch, fmr_client, case):
+        calls = _patch_getter(monkeypatch, fmr_client, case.getter, [])
+
+        getattr(fmr_client, case.method)("WB", with_flows=True)
+
+        assert calls == [call("WB", True)]
+
+    def test_fetch_agencies_parses_registry_response(self, respx_mock, fmr_client):
+        _mock_agencies(respx_mock)
+
+        agencies = fmr_client.fetch_agencies("WB")
+
+        assert [found.id for found in agencies] == ["WB.DECIS"]
+
+    def test_fetch_metadata_providers_returns_metadata_providers(
+        self, respx_mock, fmr_client
+    ):
+        respx_mock.get(METADATA_PROVIDERS_URL).mock(
+            return_value=httpx.Response(200, content=METADATA_PROVIDERS_FUSION_JSON)
+        )
+
+        providers = fmr_client.fetch_metadata_providers("WB")
+
+        assert [type(provider) for provider in providers] == [MetadataProvider]
+
+    def test_fetch_dataflow_info_passes_detail(
+        self, monkeypatch, fmr_client, dataflow_info
+    ):
+        calls = _patch_getter(
+            monkeypatch, fmr_client, "get_dataflow_details", dataflow_info
+        )
+
+        fmr_client.fetch_dataflow_info("WB:DF_TEST(1.0)", detail="core")
+
+        assert calls == [call("WB", "DF_TEST", "1.0", "core")]
+
+    def test_fetch_dataflow_info_accepts_dataflow_urn(
+        self, monkeypatch, fmr_client, dataflow_info
+    ):
+        calls = _patch_getter(
+            monkeypatch, fmr_client, "get_dataflow_details", dataflow_info
+        )
+
+        fmr_client.fetch_dataflow_info(DATAFLOW_URN)
+
+        assert calls == [call("WB", "DF_TEST", "1.0", "all")]
+
+    def test_fetch_dataflow_info_rejects_urn_of_another_type(self, fmr_client):
+        with pytest.raises(ValueError, match="is a DataStructure URN, but a Dataflow"):
+            fmr_client.fetch_dataflow_info(DSD_URN)
+
+    def test_fetch_dataflow_info_rejects_unknown_detail(self, fmr_client):
+        with pytest.raises(TypeCheckError, match=r'argument "detail"'):
+            fmr_client.fetch_dataflow_info("WB:DF_TEST(1.0)", detail="everything")
+
+    @pytest.mark.parametrize(
+        "report_id",
+        ["MDS_TEST", "MetadataSet=DECIS:MDS_TEST(1.0)", "DECIS:MDS_TEST"],
+    )
+    def test_fetch_metadata_report_rejects_anything_but_provider_reference(
+        self, fmr_client, report_id
+    ):
+        with pytest.raises(
+            ValueError, match=r"report_id must be 'PROVIDER:ID\(VERSION\)'; got"
+        ):
+            fmr_client.fetch_metadata_report(report_id)
+
+    def test_fetch_metadata_report_rejects_wildcards(self, fmr_client):
+        with pytest.raises(ValueError, match="must identify a single artefact"):
+            fmr_client.fetch_metadata_report("DECIS:MDS_TEST(*)")
+
+    def test_fetch_metadata_reports_accepts_urn_of_its_type(
+        self, monkeypatch, fmr_client
+    ):
+        calls = _patch_getter(monkeypatch, fmr_client, "get_reports", [])
+
+        fmr_client.fetch_metadata_reports(DSD_URN, "datastructure")
+
+        assert calls == [call("datastructure", "WB", "DSD_TEST", "1.0")]
+
+    def test_fetch_metadata_reports_rejects_urn_of_another_type(self, fmr_client):
+        with pytest.raises(ValueError, match="is a DataStructure URN, but a Dataflow"):
+            fmr_client.fetch_metadata_reports(DSD_URN, "dataflow")
+
+    def test_fetch_metadata_reports_rejects_unsupported_type(self, fmr_client):
+        with pytest.raises(ValueError, match="artefact_type must be one of"):
+            fmr_client.fetch_metadata_reports("WB:DF_TEST(1.0)", "Dataflow")
 
 
 class TestFmrClientPutStructures:

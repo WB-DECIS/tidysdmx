@@ -17,6 +17,7 @@ from typing import NamedTuple
 
 import pytest
 from pysdmx.model import (
+    Agency,
     Categorisation,
     Category,
     CategoryScheme,
@@ -26,11 +27,15 @@ from pysdmx.model import (
     Concept,
     ConceptScheme,
     Dataflow,
+    DataflowInfo,
+    DataProvider,
     DataStructureDefinition,
     HierarchicalCode,
     Hierarchy,
     Metadataflow,
+    MetadataProvider,
     MetadataProvisionAgreement,
+    MetadataReport,
     MetadataStructure,
     MultiRepresentationMap,
     ProvisionAgreement,
@@ -63,6 +68,14 @@ CODELIST_FUSION_JSON: bytes = (
     b'"urn":"urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",'
     b'"names":[{"locale":"en","value":"Test codelist"}],'
     b'"items":[{"id":"A","names":[{"locale":"en","value":"Code A"}]}]}]}'
+)
+
+# The smallest Fusion-JSON metadata provider scheme pysdmx's reader accepts.
+METADATA_PROVIDERS_URL = f"{REGISTRY_ENDPOINT}/structure/metadataproviderscheme/WB/"
+METADATA_PROVIDERS_FUSION_JSON: bytes = (
+    b'{"MetadataProviderScheme":[{"id":"METADATA_PROVIDERS","agencyId":"WB",'
+    b'"names":[{"locale":"en","value":"Metadata providers"}],'
+    b'"items":[{"id":"DECIS","names":[{"locale":"en","value":"DECIS"}]}]}]}'
 )
 
 DSD_URN = "urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=WB:DSD_TEST(1.0)"
@@ -328,3 +341,30 @@ def transformation_scheme() -> TransformationScheme:
         vtl_version="2.1",
         items=[Transformation(id="T1", expression="DS_1", result="DS_r")],
     )
+
+
+@pytest.fixture
+def dataflow_info() -> DataflowInfo:
+    return DataflowInfo(
+        id="DF_TEST", components=Components([]), agency=Agency("WB"), name="Test"
+    )
+
+
+@pytest.fixture
+def agency() -> Agency:
+    return Agency(id="WB.DECIS", name="Development Data Group")
+
+
+@pytest.fixture
+def data_provider() -> DataProvider:
+    return DataProvider(id="WB", name="World Bank")
+
+
+@pytest.fixture
+def metadata_provider() -> MetadataProvider:
+    return MetadataProvider(id="DECIS", name="DECIS")
+
+
+@pytest.fixture
+def metadata_report() -> MetadataReport:
+    return MetadataReport(id="MDS_TEST", agency="WB", name="Test metadata report")

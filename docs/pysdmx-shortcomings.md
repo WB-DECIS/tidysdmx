@@ -136,3 +136,25 @@ introduced this register.
 | **tidysdmx workaround** | `tidysdmx.fmr._check_single` accepts only characters an SDMX agency, ID or version can hold (`[A-Za-z0-9_@$.+~-]`) and raises `ValueError` naming the offending part. It also stops the colon splits on which `parse_artefact_id` and `parse_urn` disagree. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_characters_pysdmx_does_not_escape` covers it. |
 | **Proposed upstream change** | Percent-encode each path segment (`urllib.parse.quote(segment, safe="")`) rather than replacing a fixed set of characters in the joined path. |
 | **Remove when** | Released. The allow-list may stay as early input validation, but no longer guards correctness. |
+
+## PYSDMX-READ-03 — `get_metadata_providers` is annotated with the wrong class
+
+| | |
+|---|---|
+| **Symptom** | `RegistryClient.get_metadata_providers` (and its async twin) is annotated `-> Sequence[DataProvider]`, but its readers build `MetadataProvider` objects, which are siblings of `DataProvider`, not subclasses. A type checker believes the wrong class, and typeguard rejects the real return value against the annotation. |
+| **pysdmx location** | `api/fmr/__init__.py:437-457` (annotation and body); readers `io/json/fusion/messages/org.py:198-215`, `io/json/sdmxjson2/messages/provider.py:135-166`. |
+| **Impact** | Wrapping the getter with its own annotation fails at runtime under typeguard; code that trusts the annotation reaches for `DataProvider` attributes on a `MetadataProvider`. |
+| **tidysdmx workaround** | `FmrClient.fetch_metadata_providers` is annotated `-> Sequence[MetadataProvider]` and returns pysdmx's result through `cast("Sequence[MetadataProvider]", ...)`. The cast flags itself: with `warn_redundant_casts` on, mypy reports it as redundant once pysdmx fixes the annotation. `tests/test_fmr.py::TestFmrClientQueries::test_pysdmx_getter_returns_the_query_type[fetch_metadata_providers]` pins the wrong annotation as a strict `xfail`, so the fix upstream fails the suite. |
+| **Proposed upstream change** | Annotate both clients' `get_metadata_providers` as `-> Sequence[MetadataProvider]`. |
+| **Remove when** | Released. Drop the cast and the `xfail` marker. |
+
+## PYSDMX-READ-04 — `get_dataflow_details` re-filters on the version string
+
+| | |
+|---|---|
+| **Symptom** | After the registry has answered, the dataflow-details reader keeps only the dataflows matching the agency, ID and *requested version string*. `+` keeps only versions matching `X.Y.Z`, so a dataflow at version `1.0` is dropped; any other string, such as a SemVer wildcard `1.+.0`, is compared literally and never matches. Both raise `NotFound("No matching dataflow")` although the registry returned the dataflow. With `~`, the first match in the payload wins, not the highest version. |
+| **pysdmx location** | `io/json/fusion/messages/dataflow.py:53-71` (`__filter`) and `:85-99`; the SDMX-JSON reader filters the same way (`io/json/sdmxjson2/messages/dataflow.py:191-196`). |
+| **Impact** | `fetch_dataflow_info` fails for version selectors that `fetch_dataflow` handles. |
+| **tidysdmx workaround** | None in code: `FmrClient.fetch_dataflow_info`'s docstring and the user guide tell callers to pass an exact version. |
+| **Proposed upstream change** | Trust the registry's version resolution: filter on agency and ID only and keep the highest version, or drop the filter for version selectors. |
+| **Remove when** | Released. Remove the caveat from the docstring and the user guide. |
