@@ -390,6 +390,8 @@ agency, id, version = parse_artefact_id("WB:WDI(1.0.0)")
 
 `parse_artefact_id` is tidysdmx's own parser. pysdmx's public parsers (`parse_urn`, `parse_short_urn`, `parse_maintainable_urn`) all expect a `Type=` prefix; `pysdmx.util.parse_flow_urn` accepts this form but is not in `pysdmx.util.__all__`, raises `pysdmx.errors.Invalid` rather than `ValueError`, and always reports the type as `Dataflow`.
 
+`FmrClient`'s fetch methods take either form: `parse_artefact_id` splits `"AGENCY:ID(VERSION)"`, pysdmx's `parse_urn` a full or short URN, whose class must match what is fetched.
+
 Full URNs: pysdmx has parsers but **no URN builder**, so `tidysdmx.gen_urn` builds them. For an artefact you already hold, prefer `f"urn:sdmx:org.sdmx.infomodel.<package>.{artefact.short_urn}"`, which gets the SDMX class name right.
 
 ---
@@ -401,7 +403,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
 | **Fetch schema** | `RegistryClient.get_schema()` | `fetch_schema()` — URL building and ID parsing |
-| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_categorisation()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_metadataflows()`, `get_metadata_structures()`, `get_metadata_provision_agreement()`, `get_mapping()`, `get_code_map()`, `get_vtl_transformation_scheme()` — separate agency, id and version; dataflows, DSDs, metadataflows and MSDs only as lists | `FmrClient.fetch_artefact()`, driven by one table of the 14 getters, and one typed `fetch_*` method per type that calls it — one `"AGENCY:ID(VERSION)"` string, a single result, URNs and wildcards refused |
+| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_categorisation()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_metadataflows()`, `get_metadata_structures()`, `get_metadata_provision_agreement()`, `get_mapping()`, `get_code_map()`, `get_vtl_transformation_scheme()` — separate agency, id and version; dataflows, DSDs, metadataflows and MSDs only as lists | `FmrClient.fetch_artefact()`, driven by one table of the 14 getters, and one typed `fetch_*` method per type that calls it — one `"AGENCY:ID(VERSION)"` string or URN, a single result, wildcards refused |
 | **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Components.dimensions`, `Component.required`, `Component.enumeration`, `Hierarchy.all_codes()` | `extract_validation_info()`, `get_codelist_ids()`, `extract_component_ids()` |
 | **Column validation** | The schema's rules (no DataFrame validator exists in pysdmx) | `validate_dataset_local()` and the individual `validate_*` checks |

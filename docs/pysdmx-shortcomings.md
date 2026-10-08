@@ -7,8 +7,10 @@ the pysdmx code involved (line numbers are for the **published 1.20.0
 wheel**), the impact, the tidysdmx workaround, the proposed upstream change and
 the trigger that lets us delete the workaround.
 
-IDs are `PYSDMX-AUTH-nn` so they cannot collide with the `PYSDMX-nn` findings
-in `docs/reviews/2026-06-architecture-review.md`. Code comments cite these IDs.
+IDs are `PYSDMX-AUTH-nn` for the authentication gaps `FmrClient` works around
+and `PYSDMX-READ-nn` for the read-side gaps its `fetch_*` methods guard
+against, so they cannot collide with the `PYSDMX-nn` findings in
+`docs/reviews/2026-06-architecture-review.md`. Code comments cite these IDs.
 
 **Verified against:** pysdmx 1.20.0 (PyPI, 2026-09-18); first written against
 1.19.0. Between the two, only `api/fmr/maintenance.py` moved (1.20 added the
@@ -112,3 +114,25 @@ introduced this register.
 | **tidysdmx workaround** | `FmrClient` takes the registry root once and derives `registry_endpoint` for reads and the root for writes. |
 | **Proposed upstream change** | Accept the registry root on `RegistryClient` and append the API path, or document one convention for both clients. |
 | **Remove when** | Released — the single-root convenience stays regardless. |
+
+## PYSDMX-READ-01 — Single-artefact readers silently keep the first match
+
+| | |
+|---|---|
+| **Symptom** | The getters that return one artefact take the first one in the response and drop the rest without a word. A query that matches several — `version="*"`, a wildcard or comma-list agency or ID, a SemVer wildcard such as `1.*.0` — returns an arbitrary one. The organisation-scheme getters do the same across schemes: `get_agencies("*")` returns only the first agency scheme's items. A `200` response with an empty list raises `IndexError` rather than `NotFound`. |
+| **pysdmx location** | Fusion-JSON readers: `io/json/fusion/messages/code.py:108-110` (`Codelist[0]`, `ValueList[0]`), `:285` (`Hierarchy[0]`), `concept.py:91`, `category.py:163`, `map.py:230` (`StructureMap[0]`), `:240` (`RepresentationMap[0]`), `vtl.py:479`. Client: `api/fmr/__init__.py:414, 435, 457` (`schemes[0].items`), `:501, 523, 741, 832`. The SDMX-JSON readers under `io/json/sdmxjson2/messages/` take `[0]` at the same places. |
+| **Impact** | A reference that is not specific enough fetches the wrong artefact, silently. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_single` refuses `*` and `,` in the agency, ID and version of every fetch; `~`, `+` and SemVer `+` forms select one version and stay allowed. `_exactly_one` narrows the four list getters (dataflows, data structures, metadataflows, metadata structures) and raises when they return none or several. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_wildcards_and_lists` covers the guard. |
+| **Proposed upstream change** | Raise `Invalid` from a single-artefact getter when the response holds more than one artefact, and `NotFound` when it holds none. |
+| **Remove when** | Released. Then the `*`/`,` check in `_check_single` goes; `_exactly_one` stays for the list getters. |
+
+## PYSDMX-READ-02 — Path segments are put into the URL unescaped
+
+| | |
+|---|---|
+| **Symptom** | The REST service escapes only `[ ] : + * ,` in the query path. Any other reserved character in an agency, ID or version changes the URL's meaning: `get_codes("WB", "CL?X", "1.0")` requests path `/structure/codelist/WB/CL` with query string `X/1.0`, a different artefact. `#` and `/` do the same. |
+| **pysdmx location** | `api/qb/service.py:420-428` (`_sanitize_query`), called from `:183, 202, 336, 354`. |
+| **Impact** | A stray character in a reference — a pasted URL fragment, a space — fetches the wrong artefact, or nothing, without an error that points at the cause. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_single` accepts only characters an SDMX agency, ID or version can hold (`[A-Za-z0-9_@$.+~-]`) and raises `ValueError` naming the offending part. It also stops the colon splits on which `parse_artefact_id` and `parse_urn` disagree. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_characters_pysdmx_does_not_escape` covers it. |
+| **Proposed upstream change** | Percent-encode each path segment (`urllib.parse.quote(segment, safe="")`) rather than replacing a fixed set of characters in the joined path. |
+| **Remove when** | Released. The allow-list may stay as early input validation, but no longer guards correctness. |

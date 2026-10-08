@@ -21,6 +21,7 @@ import pytest
 from msgspec import structs
 from pysdmx.api.fmr import RegistryClient
 from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
+from pysdmx.api.qb import StructureType
 from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
 from pysdmx.model import (
@@ -47,6 +48,7 @@ from tests.fixtures.fxtr_fmr import (
     AGENCIES_URL,
     CODELIST_FUSION_JSON,
     CODELIST_URL,
+    DATAFLOW_URN,
     DSD_URN,
     FMR_ROOT,
     FMR_SCOPE,
@@ -780,6 +782,19 @@ class TestFmrClientArtefactTable:
             case.artefact_type: _classes(case.result_type) for case in _FETCH_CASES
         }
 
+    @pytest.mark.parametrize("artefact_type", get_args(ArtefactType))
+    def test_urn_classes_name_the_artefact_type(self, artefact_type):
+        # A value list is read through the codelist getter (get_codes falls
+        # back to it), so its URN class belongs to the codelist type.
+        expected = (
+            {artefact_type, "valuelist"}
+            if artefact_type == "codelist"
+            else {artefact_type}
+        )
+        urn_classes = _ARTEFACT_SPECS[artefact_type].urn_classes
+
+        assert {StructureType.from_type(name).value for name in urn_classes} == expected
+
     def test_registry_artefact_covers_every_result_type(self):
         result_classes = frozenset().union(
             *(_classes(case.result_type) for case in _FETCH_CASES)
@@ -819,15 +834,74 @@ class TestFmrClientFetchArtefact:
         [
             "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",
             "Codelist=WB:CL_TEST(1.0)",
+            "urn:sdmx:org.sdmx.infomodel.codelist.ValueList=WB:CL_TEST(1.0)",
         ],
     )
-    def test_fetch_artefact_rejects_urn(self, fmr_client, artefact_id):
-        with pytest.raises(ValueError, match="not a URN"):
+    def test_fetch_artefact_accepts_codelist_and_value_list_urns(
+        self, monkeypatch, fmr_client, codelist, artefact_id
+    ):
+        calls = _patch_getter(monkeypatch, fmr_client, "get_codes", codelist)
+
+        fmr_client.fetch_artefact(artefact_id, "codelist")
+
+        assert calls == [call("WB", "CL_TEST", "1.0")]
+
+    def test_fetch_artefact_rejects_urn_of_another_type(self, fmr_client):
+        with pytest.raises(
+            ValueError,
+            match="is a Dataflow URN, but a Codelist or ValueList URN is expected",
+        ):
+            fmr_client.fetch_artefact(DATAFLOW_URN, "codelist")
+
+    def test_fetch_artefact_rejects_item_urn(self, fmr_client):
+        item_urn = "urn:sdmx:org.sdmx.infomodel.codelist.Code=WB:CL_TEST(1.0).A"
+
+        with pytest.raises(ValueError, match="not the Code 'A' inside one"):
+            fmr_client.fetch_artefact(item_urn, "codelist")
+
+    @pytest.mark.parametrize(
+        "artefact_id",
+        ["Codelist=WB:CL_TEST", "=WB:CL_TEST(1.0)", "Codelist=CL_TEST(1.0)"],
+    )
+    def test_fetch_artefact_rejects_unparseable_urn(self, fmr_client, artefact_id):
+        with pytest.raises(
+            ValueError,
+            match=r"must be 'AGENCY:ID\(VERSION\)' or the URN of a Codelist or",
+        ):
+            fmr_client.fetch_artefact(artefact_id, "codelist")
+
+    def test_fetch_artefact_matches_urn_class_case_sensitively(self, fmr_client):
+        with pytest.raises(ValueError, match="is a codelist URN"):
+            fmr_client.fetch_artefact("codelist=WB:CL_TEST(1.0)", "codelist")
+
+    @pytest.mark.parametrize(
+        "artefact_id",
+        [
+            "WB:CL?X(1.0)",
+            "WB:CL#X(1.0)",
+            "WB:CL/X(1.0)",
+            "WB:CL X(1.0)",
+            "WB:SUB:CL_TEST(1.0)",
+            "Codelist=WB:SUB:CL_TEST(1.0)",
+            "WB:CL_TEST(1.0 )",
+        ],
+    )
+    def test_fetch_artefact_rejects_characters_pysdmx_does_not_escape(
+        self, fmr_client, artefact_id
+    ):
+        with pytest.raises(ValueError, match="not a valid SDMX agency, ID or version"):
             fmr_client.fetch_artefact(artefact_id, "codelist")
 
     @pytest.mark.parametrize(
         "artefact_id",
-        ["WB:CL_TEST(*)", "WB:*(1.0)", "*:CL_TEST(1.0)", "WB:CL_A,CL_B(1.0)"],
+        [
+            "WB:CL_TEST(*)",
+            "WB:*(1.0)",
+            "*:CL_TEST(1.0)",
+            "WB:CL_A,CL_B(1.0)",
+            "WB:CL_TEST(1.*.0)",
+            "Codelist=WB:CL_TEST(*)",
+        ],
     )
     def test_fetch_artefact_rejects_wildcards_and_lists(self, fmr_client, artefact_id):
         with pytest.raises(ValueError, match="must identify a single artefact"):
@@ -847,7 +921,7 @@ class TestFmrClientFetchArtefact:
     def test_fetch_artefact_rejects_malformed_artefact_id(
         self, fmr_client, artefact_id
     ):
-        with pytest.raises(ValueError, match=r"agency:id\(version\)"):
+        with pytest.raises(ValueError, match=r"must be 'AGENCY:ID\(VERSION\)'"):
             fmr_client.fetch_artefact(artefact_id, "codelist")
 
     def test_fetch_artefact_propagates_pysdmx_not_found(self, monkeypatch, fmr_client):
@@ -891,9 +965,44 @@ class TestFmrClientTypedFetchers:
         assert fetched is multi_representation_map
 
     @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
-    def test_typed_fetcher_rejects_urn(self, fmr_client, case):
-        with pytest.raises(ValueError, match="not a URN"):
-            getattr(fmr_client, case.method)(DSD_URN)
+    def test_typed_fetcher_accepts_the_short_urn_pysdmx_gives(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        artefact, calls = _patch_case(monkeypatch, request, fmr_client, case)
+
+        getattr(fmr_client, case.method)(artefact.short_urn)
+
+        assert calls == [call("WB", artefact.id, artefact.version)]
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_fetcher_accepts_full_urn(
+        self, monkeypatch, request, fmr_client, case
+    ):
+        artefact, calls = _patch_case(monkeypatch, request, fmr_client, case)
+
+        getattr(fmr_client, case.method)(
+            f"urn:sdmx:org.sdmx.infomodel.x.{artefact.short_urn}"
+        )
+
+        assert calls == [call("WB", artefact.id, artefact.version)]
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_fetcher_rejects_urn_of_another_type(self, fmr_client, case):
+        other = "Dataflow" if case.artefact_type != "dataflow" else "Codelist"
+
+        with pytest.raises(ValueError, match=f"is a {other} URN"):
+            getattr(fmr_client, case.method)(f"{other}=WB:X_TEST(1.0)")
+
+    def test_fetch_data_structure_definition_follows_dataflow_structure(
+        self, monkeypatch, fmr_client, dataflow, data_structure_definition
+    ):
+        calls = _patch_getter(
+            monkeypatch, fmr_client, "get_data_structures", [data_structure_definition]
+        )
+
+        fmr_client.fetch_data_structure_definition(dataflow.structure)
+
+        assert calls == [call("WB", "DSD_TEST", "1.0")]
 
 
 class TestFmrClientFetchCodelist:
@@ -965,16 +1074,25 @@ class TestFmrClientFetchSchema:
         assert calls == [("dataflow", "WB", "WDI", "1.0.0")]
 
     def test_fetch_schema_rejects_malformed_artefact_id(self, fmr_client):
-        with pytest.raises(ValueError, match=r"agency:id\(version\)"):
+        with pytest.raises(ValueError, match=r"must be 'AGENCY:ID\(VERSION\)'"):
             fmr_client.fetch_schema("WDI", "dataflow")
 
     def test_fetch_schema_rejects_unknown_context(self, fmr_client):
         with pytest.raises(TypeCheckError, match=r'argument "context"'):
             fmr_client.fetch_schema("WB:WDI(1.0.0)", "codelist")
 
-    def test_fetch_schema_rejects_urn(self, fmr_client):
-        with pytest.raises(ValueError, match="not a URN"):
-            fmr_client.fetch_schema(DSD_URN, "datastructure")
+    def test_fetch_schema_accepts_urn_of_its_context(
+        self, monkeypatch, fmr_client, sdmx_schema
+    ):
+        calls = _patch_getter(monkeypatch, fmr_client, "get_schema", sdmx_schema)
+
+        fmr_client.fetch_schema(DSD_URN, "datastructure")
+
+        assert calls == [call("datastructure", "WB", "DSD_TEST", "1.0")]
+
+    def test_fetch_schema_rejects_urn_of_another_context(self, fmr_client):
+        with pytest.raises(ValueError, match="is a DataStructure URN, but a Dataflow"):
+            fmr_client.fetch_schema(DSD_URN, "dataflow")
 
 
 class TestFmrClientPutStructures:

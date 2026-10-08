@@ -27,7 +27,7 @@ codelist = client.fetch_codelist("WB:CL_REF_AREA(1.0)")
 
 ## 2. Fetch artefacts
 
-Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string and goes through the client, so it works the same with or without a token provider. There is one method per artefact type, and `fetch_artefact` for when the type is data, read from a configuration file for instance:
+Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string or as its URN, and goes through the client, so it works the same with or without a token provider. There is one method per artefact type, and `fetch_artefact` for when the type is data, read from a configuration file for instance:
 
 | `artefact_type` | Method | Returns |
 |---|---|---|
@@ -69,17 +69,16 @@ members = {group.id: [code.id for code in group.codes] for group in groups.codes
 
 `fetch_hierarchy` reads SDMX 3.0 hierarchies; pysdmx has no reader for SDMX 2.1 hierarchical codelists.
 
-The version may be `~` for the latest version or `+` for the latest stable one, as in `"WB:CL_REF_AREA(~)"`. Wildcards (`*`) and lists (`,`) are refused: they would match several artefacts, and pysdmx would silently keep the first.
+The version may be `~` for the latest version or `+` for the latest stable one, as in `"WB:CL_REF_AREA(~)"`. Wildcards (`*`) and lists (`,`) are refused: they would match several artefacts, and pysdmx would silently keep the first. So is any character an SDMX identifier cannot hold, such as `?`, `#`, `/` or a space: pysdmx puts the identifier into the URL unescaped, so it would query a different artefact.
 
-The registry gives references between artefacts as URNs, such as `Dataflow.structure` or `ProvisionAgreement.dataflow`. The fetch methods take `AGENCY:ID(VERSION)` only, so turn a URN into one with pysdmx:
+The registry gives references between artefacts as URNs, such as `Dataflow.structure` or `ProvisionAgreement.dataflow`. Every fetch method takes one directly, full (`urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=WB:IFPRI_ASTI(1.0)`) or short (`DataStructure=WB:IFPRI_ASTI(1.0)`):
 
 ```python
-from pysdmx.util import parse_urn
-
 dataflow = client.fetch_dataflow("WB:DF_IFPRI_ASTI(1.0)")
-ref = parse_urn(dataflow.structure)
-dsd = client.fetch_data_structure_definition(f"{ref.agency}:{ref.id}({ref.version})")
+dsd = client.fetch_data_structure_definition(dataflow.structure)
 ```
+
+The URN must name the class the method fetches — exactly as URNs spell it, `DataStructure` for a data structure definition — so a dataflow's URN passed to `fetch_codelist` raises `ValueError` instead of fetching something else. A URN of an item inside an artefact, such as a `Code`, is refused too. `fetch_codelist` takes a `ValueList` URN as well as a `Codelist` one.
 
 ## 3. Sign in with Azure (Entra ID)
 
@@ -190,8 +189,11 @@ client.put_structures(artefacts, action=StructureAction.Append)
 `ValueError: base_url must not embed credentials`
 : A `user:password@` component in the registry URL is rejected, so a password can never end up in a `repr()` or a traceback. Authenticate with a token provider instead.
 
-`ValueError: artefact_id must be 'AGENCY:ID(VERSION)', not a URN`
-: The fetch methods do not take URNs. Convert one with `pysdmx.util.parse_urn`, as shown in section 2.
+`ValueError: artefact_id is a Dataflow URN, but a Codelist or ValueList URN is expected here`
+: The URN names a different class from the one the method fetches. Call the method for that class, or `fetch_artefact` with the matching `artefact_type`.
+
+`ValueError: artefact_id 'WB:CL?X(1.0)' holds 'CL?X', which is not a valid SDMX agency, ID or version`
+: The reference holds a character no SDMX identifier has — often a stray space or a pasted URL fragment. pysdmx would put it into the URL unescaped and query a different artefact, so it is refused before any request.
 
 `pysdmx.errors.NotFound: Not found`
 : Nothing matches the agency, id and version. A codelist that does not exist costs two requests, because pysdmx then looks for a value list of that id, so the message names the value-list query.

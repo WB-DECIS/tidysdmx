@@ -113,8 +113,9 @@ reference columns and rejects every column that is not a schema component.
   `client.registry` is pysdmx's `RegistryClient`, `client.maintenance` its
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
   Anything with `get_token() -> BearerToken` works as a `token_provider`.
-  Its `fetch_*` methods take `"AGENCY:ID(VERSION)"`, never a URN (convert one
-  with `pysdmx.util.parse_urn`), and return pysdmx objects unchanged.
+  Its `fetch_*` methods take `"AGENCY:ID(VERSION)"` or a full or short URN of
+  the matching class (so `client.fetch_data_structure_definition(dataflow.structure)`
+  works), refuse wildcards and lists, and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
   `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
   and `fix_sdmx_xml_datatype_tags` are retained for compatibility only; each names

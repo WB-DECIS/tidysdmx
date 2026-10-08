@@ -19,7 +19,7 @@ This module fills exactly that gap:
 - :class:`FmrClient` owns one registry and one token cache, and hands out
   pysdmx clients that send a fresh token on every request, reads included.
   Its ``fetch_*`` methods read artefacts and schemas given as
-  ``"AGENCY:ID(VERSION)"``, with or without a token.
+  ``"AGENCY:ID(VERSION)"`` or as a URN, with or without a token.
 
 ``FmrClient`` is the package's first stateful object. Hold one per registry
 and reuse it; the token cache lives on it.
@@ -29,10 +29,12 @@ Everything pysdmx offers stays available: ``FmrClient.registry`` *is* a
 ``RegistryMaintenanceClient``. Where this module has to reach into pysdmx
 internals to get a token onto the wire, it does so through guarded, tested
 seams that are registered as temporary workarounds in
-``docs/pysdmx-shortcomings.md`` (``PYSDMX-AUTH-nn``).
+``docs/pysdmx-shortcomings.md`` (``PYSDMX-AUTH-nn``); the read-side gaps its
+fetch methods guard against are registered there too (``PYSDMX-READ-nn``).
 """
 
 import logging
+import re
 import threading
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
@@ -55,7 +57,7 @@ import httpx
 from pysdmx.api.fmr import API_VERSION, RegistryClient
 from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
 from pysdmx.api.qb import ApiVersion, RefMetaFormat, RestService, SchemaFormat
-from pysdmx.errors import NotFound
+from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
 from pysdmx.model import (
     Categorisation,
@@ -65,6 +67,7 @@ from pysdmx.model import (
     Dataflow,
     DataStructureDefinition,
     Hierarchy,
+    ItemReference,
     Metadataflow,
     MetadataProvisionAgreement,
     MetadataStructure,
@@ -76,6 +79,7 @@ from pysdmx.model import (
     TransformationScheme,
 )
 from pysdmx.model.__base import MaintainableArtefact
+from pysdmx.util import parse_urn
 from typeguard import typechecked
 
 from .tidysdmx import parse_artefact_id
@@ -153,6 +157,10 @@ _BUILD_AUTH_ATTR: Final[str] = "_RegistryMaintenanceClient__build_auth"
 _SEAM_DOC: Final[str] = "docs/pysdmx-shortcomings.md"
 _BOOTSTRAP_VALUE: Final[str] = "<supplied per request>"
 _SCOPE_EXAMPLE: Final[str] = "api://<fmr-app-id>/.default"
+# What an agency, ID or version may hold. pysdmx puts all three into the URL
+# path escaping only "[]:+*,", so anything else ("?", "#", "/", spaces) would
+# silently query a different resource (PYSDMX-READ-02).
+_REFERENCE_PART: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_@$.+~-]+")
 
 
 def _utcnow() -> datetime:
@@ -619,28 +627,88 @@ def _normalise_root(base_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
-def _split_artefact_id(artefact_id: str) -> tuple[str, str, str]:
-    """Split ``"AGENCY:ID(VERSION)"`` for a fetch, refusing URNs and wildcards.
+def _parse_reference(
+    reference: str,
+    urn_classes: frozenset[str],
+    *,
+    argument: str = "artefact_id",
+    form: str = "AGENCY:ID(VERSION)",
+) -> tuple[str, str, str]:
+    """Split an artefact reference into agency, ID and version for a fetch.
 
-    ``parse_artefact_id`` reads a URN as agency ``"urn"`` instead of failing,
-    and pysdmx's single-artefact readers keep the first of several matches
-    without a word (``Codelist[0]``), so both are stopped before any request.
-    SDMX identifiers never contain ``=``, which every URN does.
+    ``reference`` is ``form`` or the full or short URN of an artefact whose
+    SDMX class is one of ``urn_classes``. SDMX identifiers never contain ``=``,
+    which every URN does. ``parse_artefact_id`` alone would read a URN as
+    agency ``"urn"``, and pysdmx's single-artefact readers keep the first of
+    several matches without a word (PYSDMX-READ-01), so both are stopped
+    before any request.
     """
-    if "=" in artefact_id:
+    if "=" in reference:
+        parts = _split_urn(reference, urn_classes, argument=argument, form=form)
+    else:
+        try:
+            parts = parse_artefact_id(reference)
+        except ValueError as err:
+            raise ValueError(
+                _malformed_message(reference, urn_classes, argument, form)
+            ) from err
+    _check_single(parts, reference, argument=argument)
+    return parts
+
+
+def _split_urn(
+    urn: str, urn_classes: frozenset[str], *, argument: str, form: str
+) -> tuple[str, str, str]:
+    """Return the agency, ID and version of the URN of one whole artefact."""
+    try:
+        ref = parse_urn(urn)
+    except Invalid as err:
+        raise ValueError(_malformed_message(urn, urn_classes, argument, form)) from err
+    if not ref.sdmx_type:
+        raise ValueError(_malformed_message(urn, urn_classes, argument, form))
+    if isinstance(ref, ItemReference):
         raise ValueError(
-            "artefact_id must be 'AGENCY:ID(VERSION)', not a URN; got "
-            f"{artefact_id!r}. pysdmx.util.parse_urn gives the agency, id and "
-            "version of a URN such as Dataflow.structure."
+            f"{argument} must reference a whole artefact, not the {ref.sdmx_type} "
+            f"{ref.item_id!r} inside one; got {urn!r}"
         )
-    agency, id_part, version = parse_artefact_id(artefact_id)
-    if any(char in part for part in (agency, id_part, version) for char in "*,"):
+    if ref.sdmx_type not in urn_classes:
         raise ValueError(
-            "artefact_id must identify a single artefact; wildcards ('*') and "
-            f"lists (',') are not supported, got {artefact_id!r}. For the latest "
+            f"{argument} is a {ref.sdmx_type} URN, but {_classes_text(urn_classes)} "
+            f"URN is expected here; got {urn!r}"
+        )
+    return ref.agency, ref.id, ref.version
+
+
+def _check_single(
+    parts: tuple[str, str, str], reference: str, *, argument: str
+) -> None:
+    """Refuse a reference that would not select exactly one artefact."""
+    if any(char in part for part in parts for char in "*,"):
+        raise ValueError(
+            f"{argument} must identify a single artefact; wildcards ('*') and "
+            f"lists (',') are not supported, got {reference!r}. For the latest "
             "version, use '~' (or '+' for the latest stable one)."
         )
-    return agency, id_part, version
+    for part in parts:
+        if not _REFERENCE_PART.fullmatch(part):
+            raise ValueError(
+                f"{argument} {reference!r} holds {part!r}, which is not a valid "
+                "SDMX agency, ID or version"
+            )
+
+
+def _classes_text(urn_classes: frozenset[str]) -> str:
+    """Name SDMX classes for a message: ``"a Codelist or ValueList"``."""
+    return "a " + " or ".join(sorted(urn_classes))
+
+
+def _malformed_message(
+    reference: str, urn_classes: frozenset[str], argument: str, form: str
+) -> str:
+    return (
+        f"{argument} must be {form!r} or the URN of {_classes_text(urn_classes)}; "
+        f"got {reference!r}"
+    )
 
 
 def _exactly_one(
@@ -668,29 +736,48 @@ class _ArtefactSpec:
     Attributes:
         getter: The ``RegistryClient`` method that reads it, called with the
             agency, ID and version.
+        urn_classes: The SDMX classes a URN of it names, exactly as URNs spell
+            them (``"DataStructure="``, not the REST ``datastructure``).
         listed: Whether that getter returns a list, which ``fetch_artefact``
             narrows to the single artefact requested.
     """
 
     getter: str
+    urn_classes: frozenset[str]
     listed: bool = False
 
 
 _ARTEFACT_SPECS: Final[dict[ArtefactType, _ArtefactSpec]] = {
-    "codelist": _ArtefactSpec("get_codes"),
-    "hierarchy": _ArtefactSpec("get_hierarchy"),
-    "conceptscheme": _ArtefactSpec("get_concepts"),
-    "categoryscheme": _ArtefactSpec("get_categories"),
-    "categorisation": _ArtefactSpec("get_categorisation"),
-    "dataflow": _ArtefactSpec("get_dataflows", listed=True),
-    "datastructure": _ArtefactSpec("get_data_structures", listed=True),
-    "provisionagreement": _ArtefactSpec("get_provision_agreement"),
-    "metadataflow": _ArtefactSpec("get_metadataflows", listed=True),
-    "metadatastructure": _ArtefactSpec("get_metadata_structures", listed=True),
-    "metadataprovisionagreement": _ArtefactSpec("get_metadata_provision_agreement"),
-    "structuremap": _ArtefactSpec("get_mapping"),
-    "representationmap": _ArtefactSpec("get_code_map"),
-    "transformationscheme": _ArtefactSpec("get_vtl_transformation_scheme"),
+    "codelist": _ArtefactSpec("get_codes", frozenset({"Codelist", "ValueList"})),
+    "hierarchy": _ArtefactSpec("get_hierarchy", frozenset({"Hierarchy"})),
+    "conceptscheme": _ArtefactSpec("get_concepts", frozenset({"ConceptScheme"})),
+    "categoryscheme": _ArtefactSpec("get_categories", frozenset({"CategoryScheme"})),
+    "categorisation": _ArtefactSpec(
+        "get_categorisation", frozenset({"Categorisation"})
+    ),
+    "dataflow": _ArtefactSpec("get_dataflows", frozenset({"Dataflow"}), listed=True),
+    "datastructure": _ArtefactSpec(
+        "get_data_structures", frozenset({"DataStructure"}), listed=True
+    ),
+    "provisionagreement": _ArtefactSpec(
+        "get_provision_agreement", frozenset({"ProvisionAgreement"})
+    ),
+    "metadataflow": _ArtefactSpec(
+        "get_metadataflows", frozenset({"Metadataflow"}), listed=True
+    ),
+    "metadatastructure": _ArtefactSpec(
+        "get_metadata_structures", frozenset({"MetadataStructure"}), listed=True
+    ),
+    "metadataprovisionagreement": _ArtefactSpec(
+        "get_metadata_provision_agreement", frozenset({"MetadataProvisionAgreement"})
+    ),
+    "structuremap": _ArtefactSpec("get_mapping", frozenset({"StructureMap"})),
+    "representationmap": _ArtefactSpec(
+        "get_code_map", frozenset({"RepresentationMap"})
+    ),
+    "transformationscheme": _ArtefactSpec(
+        "get_vtl_transformation_scheme", frozenset({"TransformationScheme"})
+    ),
 }
 """The pysdmx getter behind each artefact type, for :meth:`FmrClient.fetch_artefact`."""
 
@@ -727,11 +814,15 @@ class FmrClient:
     :class:`TokenProvider`, cached, refreshed before it expires, and sent on
     every request — reads included.
 
-    Reads take an ``"AGENCY:ID(VERSION)"`` string: :meth:`fetch_artefact` for
-    any supported artefact type, one typed method per type
-    (:meth:`fetch_codelist`, :meth:`fetch_hierarchy`, :meth:`fetch_dataflow`,
-    ...) and :meth:`fetch_schema`. They behave the same whether or not a token
-    provider is set.
+    Reads take an ``"AGENCY:ID(VERSION)"`` string or the artefact's URN, full
+    (``urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_X(1.0)``) or short
+    (``Codelist=WB:CL_X(1.0)``), so the URNs pysdmx returns as references, such
+    as ``Dataflow.structure``, can be passed straight back:
+    :meth:`fetch_artefact` for any supported artefact type, one typed method per
+    type (:meth:`fetch_codelist`, :meth:`fetch_hierarchy`,
+    :meth:`fetch_dataflow`, ...) and :meth:`fetch_schema`. A URN must name the
+    class being fetched. They behave the same whether or not a token provider is
+    set.
 
     This is the package's first stateful object: hold one instance per
     registry and reuse it; the token cache lives on it. When a token provider
@@ -934,9 +1025,10 @@ class FmrClient:
         type of this method is exact too.
 
         Args:
-            artefact_id: The artefact identifier, ``"AGENCY:ID(VERSION)"``,
-                e.g. ``"WB:CL_REF_AREA(1.0)"``. The version may be ``~`` for
-                the latest or ``+`` for the latest stable one.
+            artefact_id: The artefact identifier or URN, ``"AGENCY:ID(VERSION)"``,
+                e.g. ``"WB:CL_REF_AREA(1.0)"``, or its full or short URN. The
+                version may be ``~`` for the latest or ``+`` for the latest
+                stable one.
             artefact_type: The SDMX REST resource name of the artefact, one
                 of ``"codelist"``, ``"hierarchy"``, ``"conceptscheme"``,
                 ``"categoryscheme"``, ``"categorisation"``, ``"dataflow"``,
@@ -952,17 +1044,18 @@ class FmrClient:
 
         Raises:
             ValueError: If ``artefact_type`` is not one of the values above;
-                if ``artefact_id`` is not ``agency:id(version)``, is a URN, or
-                holds a wildcard or a list; or if a dataflow, data structure,
-                metadataflow or metadata structure reference matches several
-                versions.
+                if ``artefact_id`` is neither ``AGENCY:ID(VERSION)`` nor the URN
+                of a whole artefact of that type, holds a wildcard or a list, or
+                holds a character no SDMX identifier has; or if a dataflow, data
+                structure, metadataflow or metadata structure reference matches
+                several versions.
             pysdmx.errors.NotFound: If the registry has no such artefact.
             pysdmx.errors.PysdmxError: Any other registry or connection
                 failure: ``Invalid`` (any other 4xx, 401 and 403 included),
                 ``InternalError`` or ``Unavailable``.
         """
         spec = _artefact_spec(artefact_type)
-        agency, id_part, version = _split_artefact_id(artefact_id)
+        agency, id_part, version = _parse_reference(artefact_id, spec.urn_classes)
         fetch = getattr(self.registry, spec.getter)
         if spec.listed:
             found: Sequence[RegistryArtefact] = fetch(agency, id_part, version)
@@ -971,10 +1064,10 @@ class FmrClient:
         return artefact
 
     def fetch_codelist(self, artefact_id: str) -> Codelist:
-        """Fetch a codelist given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a codelist by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The codelist identifier, e.g.
+            artefact_id: The codelist identifier or URN, e.g.
                 ``"WB:CL_REF_AREA(1.0)"``. The version may be ``~`` (latest) or
                 ``+`` (latest stable).
 
@@ -992,11 +1085,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "codelist")
 
     def fetch_hierarchy(self, artefact_id: str) -> Hierarchy:
-        """Fetch a hierarchy given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a hierarchy by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The hierarchy identifier. The version may be ``~``
-                (latest) or ``+`` (latest stable).
+            artefact_id: The hierarchy identifier or URN. The version may be
+                ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The SDMX 3.0 hierarchy, each code's name and validity resolved from
@@ -1011,11 +1104,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "hierarchy")
 
     def fetch_concept_scheme(self, artefact_id: str) -> ConceptScheme:
-        """Fetch a concept scheme given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a concept scheme by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The concept scheme identifier. The version may be ``~``
-                (latest) or ``+`` (latest stable).
+            artefact_id: The concept scheme identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The concept scheme with its concepts.
@@ -1029,11 +1122,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "conceptscheme")
 
     def fetch_category_scheme(self, artefact_id: str) -> CategoryScheme:
-        """Fetch a category scheme given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a category scheme by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The category scheme identifier. The version may be
-                ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The category scheme identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The category scheme with its categories.
@@ -1047,11 +1140,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "categoryscheme")
 
     def fetch_categorisation(self, artefact_id: str) -> Categorisation:
-        """Fetch a categorisation given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a categorisation by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The categorisation identifier. The version may be ``~``
-                (latest) or ``+`` (latest stable).
+            artefact_id: The categorisation identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The categorisation. Its ``source`` is the URN of the categorised
@@ -1066,10 +1159,10 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "categorisation")
 
     def fetch_dataflow(self, artefact_id: str) -> Dataflow:
-        """Fetch a dataflow given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a dataflow by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The dataflow identifier, e.g.
+            artefact_id: The dataflow identifier or URN, e.g.
                 ``"WB:DF_IFPRI_ASTI(1.0)"``. The version may be ``~`` (latest)
                 or ``+`` (latest stable).
 
@@ -1088,10 +1181,10 @@ class FmrClient:
     def fetch_data_structure_definition(
         self, artefact_id: str
     ) -> DataStructureDefinition:
-        """Fetch a data structure definition given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a data structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The data structure definition identifier, e.g.
+            artefact_id: The data structure definition identifier or URN, e.g.
                 ``"WB:IFPRI_ASTI(1.0)"``. The version may be ``~`` (latest) or
                 ``+`` (latest stable).
 
@@ -1109,11 +1202,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "datastructure")
 
     def fetch_provision_agreement(self, artefact_id: str) -> ProvisionAgreement:
-        """Fetch a provision agreement given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a provision agreement by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The provision agreement identifier. The version may be
-                ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The provision agreement identifier or URN. The version
+                may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The provision agreement. Its ``dataflow`` and ``provider`` are URNs.
@@ -1128,11 +1221,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "provisionagreement")
 
     def fetch_metadataflow(self, artefact_id: str) -> Metadataflow:
-        """Fetch a metadataflow given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a metadataflow by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The metadataflow identifier. The version may be ``~``
-                (latest) or ``+`` (latest stable).
+            artefact_id: The metadataflow identifier or URN. The version may be
+                ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The metadataflow. Its ``structure`` is the URN of its metadata
@@ -1147,11 +1240,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "metadataflow")
 
     def fetch_metadata_structure(self, artefact_id: str) -> MetadataStructure:
-        """Fetch a metadata structure definition given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a metadata structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The metadata structure definition identifier. The
-                version may be ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The metadata structure definition identifier or URN.
+                The version may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The metadata structure definition, with its components and the
@@ -1169,10 +1262,10 @@ class FmrClient:
     def fetch_metadata_provision_agreement(
         self, artefact_id: str
     ) -> MetadataProvisionAgreement:
-        """Fetch a metadata provision agreement given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a metadata provision agreement by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The metadata provision agreement identifier. The
+            artefact_id: The metadata provision agreement identifier or URN. The
                 version may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
@@ -1189,10 +1282,10 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "metadataprovisionagreement")
 
     def fetch_structure_map(self, artefact_id: str) -> StructureMap:
-        """Fetch a structure map given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a structure map by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The structure map identifier, e.g.
+            artefact_id: The structure map identifier or URN, e.g.
                 ``"WB:SM_IFPRI_ASTI_TO_DATA360(~)"``. The version may be ``~``
                 (latest) or ``+`` (latest stable).
 
@@ -1212,11 +1305,11 @@ class FmrClient:
     def fetch_representation_map(
         self, artefact_id: str
     ) -> RepresentationMap | MultiRepresentationMap:
-        """Fetch a representation map given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a representation map by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The representation map identifier. The version may be
-                ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The representation map identifier or URN. The version
+                may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The representation map. One with several sources or targets comes
@@ -1232,11 +1325,11 @@ class FmrClient:
         return self.fetch_artefact(artefact_id, "representationmap")
 
     def fetch_transformation_scheme(self, artefact_id: str) -> TransformationScheme:
-        """Fetch a VTL transformation scheme given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a VTL transformation scheme by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The VTL transformation scheme identifier. The version
-                may be ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The VTL transformation scheme identifier or URN. The
+                version may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The VTL transformation scheme with its transformations.
@@ -1255,13 +1348,14 @@ class FmrClient:
         artefact_id: str,
         context: Literal["dataflow", "datastructure", "provisionagreement"],
     ) -> Schema:
-        """Fetch the schema of an artefact given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch the schema of an artefact by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Unlike the module-level :func:`tidysdmx.fetch_schema`, this goes
         through the client's registry root, token and settings.
 
         Args:
-            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``.
+            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``, or
+                its URN, which must name the class ``context`` gives.
             context: Whether the artefact is a dataflow, a data structure or a
                 provision agreement.
 
@@ -1269,12 +1363,14 @@ class FmrClient:
             The resolved schema, with codelists and data types attached.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                artefact of the ``context`` type (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such artefact.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
+        agency, id_part, version = _parse_reference(
+            artefact_id, _ARTEFACT_SPECS[context].urn_classes
+        )
         return self.registry.get_schema(context, agency, id_part, version)
 
     def put_structures(
