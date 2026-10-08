@@ -190,6 +190,8 @@ client.put_structures(artefacts, action=StructureAction.Append)
 
 `Replace` is the default, as in pysdmx. Uploads always need a token provider; without one, `client.maintenance` raises `ValueError`.
 
+Pass `header=` a `pysdmx.model.message.Header` to name the sender or give the message its own ID. Without one, pysdmx sends a default header whose `id` and `prepared` time are fixed when pysdmx is imported, so every upload from one process carries the same message ID.
+
 ## 7. How refresh works
 
 - The token is acquired on the first request, not when the client is built, so constructing a client or reading `client.maintenance` never triggers a sign-in.

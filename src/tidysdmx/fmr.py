@@ -85,6 +85,7 @@ from pysdmx.model import (
     TransformationScheme,
 )
 from pysdmx.model.__base import MaintainableArtefact
+from pysdmx.model.message import Header
 from pysdmx.util import parse_urn
 from typeguard import typechecked
 
@@ -1572,6 +1573,7 @@ class FmrClient:
         artefacts: Sequence[MaintainableArtefact],
         *,
         action: StructureAction = StructureAction.Replace,
+        header: Header | None = None,
     ) -> None:
         """Upload maintainable artefacts to the registry.
 
@@ -1584,11 +1586,16 @@ class FmrClient:
                 data structures, structure maps, ...
             action: How the registry treats metadata that already exists:
                 ``Append``, ``Merge`` or ``Replace`` (the default).
+            header: The SDMX message header to send, e.g. to name the sender
+                or give the message its own ID. Without one, pysdmx builds a
+                default header whose ``id`` and ``prepared`` time are fixed
+                when pysdmx is imported, so every upload in a process shares
+                them.
 
         Raises:
             ValueError: If the client was created without a token provider.
         """
-        self.maintenance.put_structures(artefacts, action=action)
+        self.maintenance.put_structures(artefacts, header=header, action=action)
 
     def _build_maintenance(self) -> RegistryMaintenanceClient:
         if self._cache is None:

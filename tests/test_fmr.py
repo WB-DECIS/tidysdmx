@@ -2,6 +2,7 @@
 
 import dataclasses
 import inspect
+import json
 import sys
 import threading
 import types
@@ -49,6 +50,7 @@ from pysdmx.model import (
     StructureMap,
     TransformationScheme,
 )
+from pysdmx.model.message import Header
 from typeguard import TypeCheckError
 
 from tests.fixtures.fxtr_fmr import (
@@ -1399,6 +1401,17 @@ class TestFmrClientPutStructures:
         fmr_client.put_structures([codelist], action=StructureAction.Append)
 
         assert respx_mock.calls[0].request.headers["Action"] == "Append"
+
+    def test_put_structures_sends_the_given_header(
+        self, respx_mock, fmr_client, codelist
+    ):
+        _mock_upload(respx_mock)
+
+        fmr_client.put_structures([codelist], header=Header(id="HDR_TEST"))
+
+        assert (
+            json.loads(respx_mock.calls[0].request.content)["meta"]["id"] == "HDR_TEST"
+        )
 
     def test_put_structures_requires_token_provider(self, codelist):
         with pytest.raises(ValueError, match="token_provider"):
