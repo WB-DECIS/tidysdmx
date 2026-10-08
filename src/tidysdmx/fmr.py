@@ -34,7 +34,6 @@ seams that are registered as temporary workarounds in
 
 import logging
 import threading
-import warnings
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1015,36 +1014,6 @@ class FmrClient:
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
         agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_schema(context, agency, id_part, version)
-
-    def get_schema(
-        self,
-        artefact_id: str,
-        context: Literal["dataflow", "datastructure", "provisionagreement"],
-    ) -> Schema:
-        """Fetch the schema of an artefact given as ``"AGENCY:ID(VERSION)"``.
-
-        .. deprecated::
-            Use :meth:`FmrClient.fetch_schema` instead.
-
-        Args:
-            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``.
-            context: Whether the artefact is a dataflow, a data structure or a
-                provision agreement.
-
-        Returns:
-            The resolved schema, with codelists and data types attached.
-
-        Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``.
-        """
-        warnings.warn(
-            "FmrClient.get_schema is deprecated and will be removed in a future "
-            "release. Please use FmrClient.fetch_schema instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
-        agency, id_part, version = parse_artefact_id(artefact_id)
         return self.registry.get_schema(context, agency, id_part, version)
 
     def put_structures(

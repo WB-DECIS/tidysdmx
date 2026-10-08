@@ -117,8 +117,7 @@ reference columns and rejects every column that is not a schema component.
   with `pysdmx.util.parse_urn`), and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
   `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
-  `fix_sdmx_xml_datatype_tags` and the `FmrClient.get_schema` method (use
-  `FmrClient.fetch_schema`) are retained for compatibility only; each names
+  and `fix_sdmx_xml_datatype_tags` are retained for compatibility only; each names
   its replacement in its docstring (pysdmx now writes SDMX-ML data types
   correctly, so `fix_sdmx_xml_datatype_tags` is simply dropped). The `valid`
   argument of `validate_dataset_local` is deprecated too: pass `schema`.

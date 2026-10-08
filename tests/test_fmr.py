@@ -848,49 +848,6 @@ class TestFmrClientFetchSchema:
             fmr_client.fetch_schema(DSD_URN, "datastructure")
 
 
-class TestFmrClientGetSchema:
-    # get_schema is deprecated in favour of fetch_schema and emits FutureWarning
-    # by design, so every test here would trip `filterwarnings = ["error"]`.
-    # Scoped to the class rather than ignored globally: the suppression goes
-    # when the alias is removed, instead of quietly outliving it.
-    pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
-
-    def test_get_schema_parses_artefact_id_and_delegates(
-        self, monkeypatch, fmr_client, sdmx_schema
-    ):
-        calls = []
-
-        def fake_get_schema(context, agency, id, version):
-            calls.append((context, agency, id, version))
-            return sdmx_schema
-
-        monkeypatch.setattr(fmr_client.registry, "get_schema", fake_get_schema)
-
-        schema = fmr_client.get_schema("WB:WDI(1.0.0)", "dataflow")
-
-        assert schema is sdmx_schema
-        assert calls == [("dataflow", "WB", "WDI", "1.0.0")]
-
-    def test_get_schema_rejects_malformed_artefact_id(self, fmr_client):
-        with pytest.raises(ValueError, match=r"agency:id\(version\)"):
-            fmr_client.get_schema("WDI", "dataflow")
-
-    def test_get_schema_rejects_unknown_context(self, fmr_client):
-        with pytest.raises(TypeCheckError):
-            fmr_client.get_schema("WB:WDI(1.0.0)", "codelist")
-
-    @pytest.mark.filterwarnings("default::FutureWarning")
-    def test_get_schema_emits_future_warning(
-        self, monkeypatch, fmr_client, sdmx_schema
-    ):
-        monkeypatch.setattr(
-            fmr_client.registry, "get_schema", lambda *_args: sdmx_schema
-        )
-
-        with pytest.warns(FutureWarning, match=r"use FmrClient\.fetch_schema"):
-            fmr_client.get_schema("WB:WDI(1.0.0)", "dataflow")
-
-
 class TestFmrClientPutStructures:
     def test_put_structures_delegates_with_default_action(
         self, respx_mock, fmr_client, codelist
