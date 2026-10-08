@@ -603,7 +603,7 @@ class TestMapStructuresRejectsUnusableMaps:
         df = pd.DataFrame({"SEX_RAW": ["F"]})
         cmap = ComponentMap(source="SEX_RAW", target="SEX", values=self.REP_MAP_URN)
 
-        with pytest.raises(TypeError, match=r"RegistryClient\.get_mapping"):
+        with pytest.raises(TypeError, match=r"FmrClient\.fetch_structure_map"):
             apply_component_map(df, cmap)
 
     def test_multi_component_map_with_urn_values_raises(self):

@@ -253,7 +253,7 @@ result_df = map_structures(df, smap)
 `map_structures` raises `TypeError` in two cases:
 
 - the `StructureMap` holds any other map type — in practice a `DatePatternMap`, which tidysdmx can build (`build_date_pattern_map`) but not apply;
-- a `ComponentMap` or `MultiComponentMap` references its representation map by URN string instead of embedding it, so there are no value maps to apply. Fetch the structure map with pysdmx's `RegistryClient.get_mapping()`, which resolves the representation maps, rather than passing one whose `values` is still a URN.
+- a `ComponentMap` or `MultiComponentMap` references its representation map by URN string instead of embedding it, so there are no value maps to apply. Fetch the structure map with `FmrClient.fetch_structure_map()` (pysdmx's `RegistryClient.get_mapping()` underneath), which resolves the representation maps, rather than passing one whose `values` is still a URN; `FmrClient.fetch_representation_map()` takes that URN directly.
 
 **pysdmx view vs tidysdmx view:**
 
