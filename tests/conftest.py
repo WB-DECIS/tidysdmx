@@ -18,6 +18,7 @@ hence ``__all__``.
 
 from tests.fixtures.fxtr_dummy_data import ifpri_asti_df, sample_df, sdmx_df
 from tests.fixtures.fxtr_fmr import (
+    categorisation,
     category_scheme,
     codelist,
     concept_scheme,
@@ -26,10 +27,16 @@ from tests.fixtures.fxtr_fmr import (
     fake_clock,
     fmr_client,
     hierarchy,
+    metadata_provision_agreement,
+    metadata_structure,
+    metadataflow,
+    multi_representation_map,
     provision_agreement,
+    representation_map,
     rotating_provider,
     static_provider,
     structure_map,
+    transformation_scheme,
 )
 from tests.fixtures.fxtr_mapping import api_params_sm, ifpri_asti_sm
 from tests.fixtures.fxtr_schemas import (
@@ -45,6 +52,7 @@ from tests.fixtures.fxtr_structures import (
 __all__ = [
     "api_params_schema",
     "api_params_sm",
+    "categorisation",
     "category_scheme",
     "codelist",
     "concept_scheme",
@@ -56,13 +64,19 @@ __all__ = [
     "ifpri_asti_df",
     "ifpri_asti_schema",
     "ifpri_asti_sm",
+    "metadata_provision_agreement",
+    "metadata_structure",
+    "metadataflow",
+    "multi_representation_map",
     "multi_value_map_df",
     "provision_agreement",
+    "representation_map",
     "rotating_provider",
     "sample_df",
     "sdmx_df",
     "sdmx_schema",
     "static_provider",
     "structure_map",
+    "transformation_scheme",
     "value_map_df_mandatory_cols",
 ]

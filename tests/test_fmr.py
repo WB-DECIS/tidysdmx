@@ -5,15 +5,41 @@ import sys
 import threading
 import types
 from datetime import UTC, datetime, timedelta
-from typing import NamedTuple, get_args
+from typing import (
+    Any,
+    NamedTuple,
+    Union,
+    get_args,
+    get_origin,
+    get_overloads,
+    get_type_hints,
+)
+from unittest.mock import call
 
 import httpx
 import pytest
+from msgspec import structs
 from pysdmx.api.fmr import RegistryClient
 from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
 from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
-from pysdmx.model import Components, Dataflow, DataStructureDefinition
+from pysdmx.model import (
+    Categorisation,
+    CategoryScheme,
+    Codelist,
+    ConceptScheme,
+    Dataflow,
+    DataStructureDefinition,
+    Hierarchy,
+    Metadataflow,
+    MetadataProvisionAgreement,
+    MetadataStructure,
+    MultiRepresentationMap,
+    ProvisionAgreement,
+    RepresentationMap,
+    StructureMap,
+    TransformationScheme,
+)
 from typeguard import TypeCheckError
 
 from tests.fixtures.fxtr_fmr import (
@@ -33,9 +59,9 @@ from tests.fixtures.fxtr_fmr import (
     NotABearerTokenProvider,
     SequenceTokenProvider,
 )
-from tidysdmx import ArtefactType
+from tidysdmx import ArtefactType, RegistryArtefact
 from tidysdmx.fmr import (
-    _FETCHERS,
+    _ARTEFACT_SPECS,
     DEFAULT_REFRESH_MARGIN,
     AzureTokenProvider,
     BearerToken,
@@ -53,39 +79,51 @@ class _FetchCase(NamedTuple):
     """One artefact type and how FmrClient fetches it.
 
     ``method`` is the typed FmrClient method, ``getter`` the pysdmx getter behind
-    it, and ``fixture`` the fixture holding what that getter returns.
+    it, ``fixture`` the fixture holding what that getter returns, and
+    ``result_type`` the class (or union) the typed method returns.
     """
 
     artefact_type: str
     method: str
     getter: str
     fixture: str
-    listed: bool  # pysdmx returns a list for this type
+    result_type: Any
+    listed: bool = False  # pysdmx returns a list for this type
 
 
 _FETCH_CASES = [
-    _FetchCase("codelist", "fetch_codelist", "get_codes", "codelist", False),
-    _FetchCase("hierarchy", "fetch_hierarchy", "get_hierarchy", "hierarchy", False),
+    _FetchCase("codelist", "fetch_codelist", "get_codes", "codelist", Codelist),
+    _FetchCase("hierarchy", "fetch_hierarchy", "get_hierarchy", "hierarchy", Hierarchy),
     _FetchCase(
         "conceptscheme",
         "fetch_concept_scheme",
         "get_concepts",
         "concept_scheme",
-        False,
+        ConceptScheme,
     ),
     _FetchCase(
         "categoryscheme",
         "fetch_category_scheme",
         "get_categories",
         "category_scheme",
-        False,
+        CategoryScheme,
     ),
-    _FetchCase("dataflow", "fetch_dataflow", "get_dataflows", "dataflow", True),
+    _FetchCase(
+        "categorisation",
+        "fetch_categorisation",
+        "get_categorisation",
+        "categorisation",
+        Categorisation,
+    ),
+    _FetchCase(
+        "dataflow", "fetch_dataflow", "get_dataflows", "dataflow", Dataflow, True
+    ),
     _FetchCase(
         "datastructure",
         "fetch_data_structure_definition",
         "get_data_structures",
         "data_structure_definition",
+        DataStructureDefinition,
         True,
     ),
     _FetchCase(
@@ -93,13 +131,63 @@ _FETCH_CASES = [
         "fetch_provision_agreement",
         "get_provision_agreement",
         "provision_agreement",
-        False,
+        ProvisionAgreement,
     ),
     _FetchCase(
-        "structuremap", "fetch_structure_map", "get_mapping", "structure_map", False
+        "metadataflow",
+        "fetch_metadataflow",
+        "get_metadataflows",
+        "metadataflow",
+        Metadataflow,
+        True,
+    ),
+    _FetchCase(
+        "metadatastructure",
+        "fetch_metadata_structure",
+        "get_metadata_structures",
+        "metadata_structure",
+        MetadataStructure,
+        True,
+    ),
+    _FetchCase(
+        "metadataprovisionagreement",
+        "fetch_metadata_provision_agreement",
+        "get_metadata_provision_agreement",
+        "metadata_provision_agreement",
+        MetadataProvisionAgreement,
+    ),
+    _FetchCase(
+        "structuremap",
+        "fetch_structure_map",
+        "get_mapping",
+        "structure_map",
+        StructureMap,
+    ),
+    _FetchCase(
+        "representationmap",
+        "fetch_representation_map",
+        "get_code_map",
+        "representation_map",
+        RepresentationMap | MultiRepresentationMap,
+    ),
+    _FetchCase(
+        "transformationscheme",
+        "fetch_transformation_scheme",
+        "get_vtl_transformation_scheme",
+        "transformation_scheme",
+        TransformationScheme,
     ),
 ]
 _FETCH_CASE_IDS = [case.artefact_type for case in _FETCH_CASES]
+_LISTED_CASES = [case for case in _FETCH_CASES if case.listed]
+_LISTED_CASE_IDS = [case.artefact_type for case in _LISTED_CASES]
+
+
+def _classes(hint: Any) -> frozenset[Any]:
+    """The classes a type hint admits: the members of a union, else the hint."""
+    if get_origin(hint) in (Union, types.UnionType):
+        return frozenset(get_args(hint))
+    return frozenset([hint])
 
 
 def _mock_agencies(respx_mock):
@@ -124,8 +212,8 @@ def _patch_getter(monkeypatch, client, getter, result):
     """Replace one pysdmx getter on ``client.registry``; return its calls."""
     calls = []
 
-    def fake_getter(agency, id, version):
-        calls.append((agency, id, version))
+    def fake_getter(*args, **kwargs):
+        calls.append(call(*args, **kwargs))
         return result
 
     monkeypatch.setattr(client.registry, getter, fake_getter)
@@ -650,14 +738,57 @@ class TestFmrClientMaintenance:
             FmrClient(FMR_ROOT, token_provider=rotating_provider)
 
 
-class TestFmrClientFetchArtefact:
-    def test_fetch_artefact_covers_every_artefact_type(self):
-        assert set(_FETCHERS) == set(get_args(ArtefactType))
+class TestFmrClientArtefactTable:
+    """The spec table, the overloads, the typed methods and pysdmx agree."""
 
-    def test_fetch_artefact_cases_cover_every_artefact_type(self):
+    def test_specs_cover_every_artefact_type(self):
+        assert set(_ARTEFACT_SPECS) == set(get_args(ArtefactType))
+
+    def test_cases_cover_every_artefact_type(self):
         # Keeps the parametrised tests below honest when a type is added.
         assert set(_FETCH_CASE_IDS) == set(get_args(ArtefactType))
 
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_spec_names_the_pysdmx_getter(self, case):
+        spec = _ARTEFACT_SPECS[case.artefact_type]
+
+        assert (spec.getter, spec.listed) == (case.getter, case.listed)
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_pysdmx_getter_returns_the_case_type(self, case):
+        hint = get_type_hints(getattr(RegistryClient, case.getter))["return"]
+        if case.listed:
+            (hint,) = get_args(hint)
+
+        assert _classes(hint) == _classes(case.result_type)
+
+    @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
+    def test_typed_method_returns_the_case_type(self, case):
+        hint = get_type_hints(getattr(FmrClient, case.method))["return"]
+
+        assert _classes(hint) == _classes(case.result_type)
+
+    def test_overloads_match_the_cases(self):
+        returns = {}
+        for stub in get_overloads(FmrClient.fetch_artefact):
+            hints = get_type_hints(stub)
+            # A Literal overload names one type; the str catch-all has no args.
+            for artefact_type in get_args(hints["artefact_type"]):
+                returns[artefact_type] = _classes(hints["return"])
+
+        assert returns == {
+            case.artefact_type: _classes(case.result_type) for case in _FETCH_CASES
+        }
+
+    def test_registry_artefact_covers_every_result_type(self):
+        result_classes = frozenset().union(
+            *(_classes(case.result_type) for case in _FETCH_CASES)
+        )
+
+        assert result_classes == _classes(RegistryArtefact)
+
+
+class TestFmrClientFetchArtefact:
     @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
     def test_fetch_artefact_dispatches_by_type(
         self, monkeypatch, request, fmr_client, case
@@ -668,10 +799,20 @@ class TestFmrClientFetchArtefact:
 
         assert fetched is artefact
 
-    @pytest.mark.parametrize("artefact_type", ["schema", "valuelist", "Codelist"])
+    @pytest.mark.parametrize(
+        "artefact_type", ["valuelist", "Codelist", "codelists", ""]
+    )
     def test_fetch_artefact_rejects_unsupported_type(self, fmr_client, artefact_type):
-        with pytest.raises(TypeCheckError, match=r'argument "artefact_type"'):
+        with pytest.raises(ValueError, match="artefact_type must be one of"):
             fmr_client.fetch_artefact("WB:CL_TEST(1.0)", artefact_type)
+
+    def test_fetch_artefact_points_schema_to_fetch_schema(self, fmr_client):
+        with pytest.raises(ValueError, match="use fetch_schema"):
+            fmr_client.fetch_artefact("WB:WDI(1.0)", "schema")
+
+    def test_fetch_artefact_rejects_non_string_type(self, fmr_client):
+        with pytest.raises(TypeCheckError, match=r'argument "artefact_type"'):
+            fmr_client.fetch_artefact("WB:CL_TEST(1.0)", None)
 
     @pytest.mark.parametrize(
         "artefact_id",
@@ -700,7 +841,7 @@ class TestFmrClientFetchArtefact:
 
         fmr_client.fetch_artefact(f"WB:CL_TEST({version})", "codelist")
 
-        assert calls == [("WB", "CL_TEST", version)]
+        assert calls == [call("WB", "CL_TEST", version)]
 
     @pytest.mark.parametrize("artefact_id", ["CL_TEST", "WB:CL_TEST", "WB:(1.0)"])
     def test_fetch_artefact_rejects_malformed_artefact_id(
@@ -738,7 +879,16 @@ class TestFmrClientTypedFetchers:
 
         getattr(fmr_client, case.method)("WB.GGH:X_TEST(1.2.0)")
 
-        assert calls == [("WB.GGH", "X_TEST", "1.2.0")]
+        assert calls == [call("WB.GGH", "X_TEST", "1.2.0")]
+
+    def test_fetch_representation_map_returns_multi_representation_map(
+        self, monkeypatch, fmr_client, multi_representation_map
+    ):
+        _patch_getter(monkeypatch, fmr_client, "get_code_map", multi_representation_map)
+
+        fetched = fmr_client.fetch_representation_map("WB:MRM_TEST(1.0)")
+
+        assert fetched is multi_representation_map
 
     @pytest.mark.parametrize("case", _FETCH_CASES, ids=_FETCH_CASE_IDS)
     def test_typed_fetcher_rejects_urn(self, fmr_client, case):
@@ -771,51 +921,30 @@ class TestFmrClientFetchCodelist:
         assert respx_mock.calls[0].request.headers["Authorization"] == "Bearer t1"
 
 
-class TestFmrClientFetchDataflow:
-    def test_fetch_dataflow_raises_not_found_when_registry_returns_none(
-        self, monkeypatch, fmr_client
+class TestFmrClientListedFetchers:
+    """pysdmx only lists these types; FmrClient returns the one requested."""
+
+    @pytest.mark.parametrize("case", _LISTED_CASES, ids=_LISTED_CASE_IDS)
+    def test_listed_fetcher_raises_not_found_when_registry_returns_none(
+        self, monkeypatch, fmr_client, case
     ):
-        _patch_getter(monkeypatch, fmr_client, "get_dataflows", [])
+        _patch_getter(monkeypatch, fmr_client, case.getter, [])
 
-        with pytest.raises(NotFound, match="no dataflow for 'WB:DF_TEST"):
-            fmr_client.fetch_dataflow("WB:DF_TEST(1.0)")
+        with pytest.raises(NotFound, match=f"no {case.artefact_type} for 'WB:X_TEST"):
+            getattr(fmr_client, case.method)("WB:X_TEST(1.0)")
 
-    def test_fetch_dataflow_rejects_several_matches(
-        self, monkeypatch, fmr_client, dataflow
+    @pytest.mark.parametrize("case", _LISTED_CASES, ids=_LISTED_CASE_IDS)
+    def test_listed_fetcher_rejects_several_matches(
+        self, monkeypatch, request, fmr_client, case
     ):
-        newer = Dataflow(
-            id="DF_TEST", agency="WB", version="2.0", name="Newer", structure=DSD_URN
-        )
-        _patch_getter(monkeypatch, fmr_client, "get_dataflows", [dataflow, newer])
+        artefact = request.getfixturevalue(case.fixture)
+        newer = structs.replace(artefact, version="2.0")
+        _patch_getter(monkeypatch, fmr_client, case.getter, [artefact, newer])
 
-        with pytest.raises(ValueError, match=r"matches 2 dataflow .*1\.0, 2\.0"):
-            fmr_client.fetch_dataflow("WB:DF_TEST(1+.0)")
-
-
-class TestFmrClientFetchDataStructureDefinition:
-    def test_fetch_data_structure_definition_raises_not_found_when_none(
-        self, monkeypatch, fmr_client
-    ):
-        _patch_getter(monkeypatch, fmr_client, "get_data_structures", [])
-
-        with pytest.raises(NotFound, match="no datastructure for 'WB:DSD_TEST"):
-            fmr_client.fetch_data_structure_definition("WB:DSD_TEST(1.0)")
-
-    def test_fetch_data_structure_definition_rejects_several_matches(
-        self, monkeypatch, fmr_client, data_structure_definition
-    ):
-        newer = DataStructureDefinition(
-            id="DSD_TEST", agency="WB", version="2.0", components=Components([])
-        )
-        _patch_getter(
-            monkeypatch,
-            fmr_client,
-            "get_data_structures",
-            [data_structure_definition, newer],
-        )
-
-        with pytest.raises(ValueError, match="matches 2 datastructure"):
-            fmr_client.fetch_data_structure_definition("WB:DSD_TEST(1+.0)")
+        with pytest.raises(
+            ValueError, match=rf"matches 2 {case.artefact_type} .*1\.0, 2\.0"
+        ):
+            getattr(fmr_client, case.method)("WB:X_TEST(1+.0)")
 
 
 class TestFmrClientFetchSchema:

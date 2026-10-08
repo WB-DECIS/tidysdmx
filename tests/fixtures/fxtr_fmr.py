@@ -17,6 +17,7 @@ from typing import NamedTuple
 
 import pytest
 from pysdmx.model import (
+    Categorisation,
     Category,
     CategoryScheme,
     Code,
@@ -28,8 +29,15 @@ from pysdmx.model import (
     DataStructureDefinition,
     HierarchicalCode,
     Hierarchy,
+    Metadataflow,
+    MetadataProvisionAgreement,
+    MetadataStructure,
+    MultiRepresentationMap,
     ProvisionAgreement,
+    RepresentationMap,
     StructureMap,
+    Transformation,
+    TransformationScheme,
 )
 
 from tidysdmx.fmr import BearerToken, FmrClient, StaticTokenProvider
@@ -63,6 +71,20 @@ SOURCE_DATAFLOW_URN = (
     "urn:sdmx:org.sdmx.infomodel.datastructure.Dataflow=WB:DF_SOURCE(1.0)"
 )
 PROVIDER_URN = "urn:sdmx:org.sdmx.infomodel.base.DataProvider=WB:DATA_PROVIDERS(1.0).WB"
+CATEGORY_URN = (
+    "urn:sdmx:org.sdmx.infomodel.categoryscheme.Category=WB:CAT_TEST(1.0).ECO"
+)
+CODELIST_URN = "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)"
+OTHER_CODELIST_URN = "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_OTHER(1.0)"
+MSD_URN = (
+    "urn:sdmx:org.sdmx.infomodel.metadatastructure.MetadataStructure=WB:MSD_TEST(1.0)"
+)
+METADATAFLOW_URN = (
+    "urn:sdmx:org.sdmx.infomodel.metadatastructure.Metadataflow=WB:MDF_TEST(1.0)"
+)
+METADATA_PROVIDER_URN = (
+    "urn:sdmx:org.sdmx.infomodel.base.MetadataProvider=WB:METADATA_PROVIDERS(1.0).DECIS"
+)
 
 NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
@@ -232,4 +254,77 @@ def structure_map() -> StructureMap:
         source=SOURCE_DATAFLOW_URN,
         target=DATAFLOW_URN,
         maps=[],
+    )
+
+
+@pytest.fixture
+def categorisation() -> Categorisation:
+    return Categorisation(
+        id="CAT_DF_TEST",
+        agency="WB",
+        name="Test categorisation",
+        source=DATAFLOW_URN,
+        target=CATEGORY_URN,
+    )
+
+
+@pytest.fixture
+def metadataflow() -> Metadataflow:
+    return Metadataflow(
+        id="MDF_TEST",
+        agency="WB",
+        name="Test metadataflow",
+        structure=MSD_URN,
+        targets=[DATAFLOW_URN],
+    )
+
+
+@pytest.fixture
+def metadata_structure() -> MetadataStructure:
+    return MetadataStructure(id="MSD_TEST", agency="WB", name="Test MSD")
+
+
+@pytest.fixture
+def metadata_provision_agreement() -> MetadataProvisionAgreement:
+    return MetadataProvisionAgreement(
+        id="MPA_TEST",
+        agency="WB",
+        name="Test metadata provision agreement",
+        metadataflow=METADATAFLOW_URN,
+        metadata_provider=METADATA_PROVIDER_URN,
+    )
+
+
+@pytest.fixture
+def representation_map() -> RepresentationMap:
+    return RepresentationMap(
+        id="RM_TEST",
+        agency="WB",
+        name="Test representation map",
+        source=CODELIST_URN,
+        target=OTHER_CODELIST_URN,
+        maps=[],
+    )
+
+
+@pytest.fixture
+def multi_representation_map() -> MultiRepresentationMap:
+    return MultiRepresentationMap(
+        id="MRM_TEST",
+        agency="WB",
+        name="Test multi-representation map",
+        source=[CODELIST_URN, OTHER_CODELIST_URN],
+        target=[OTHER_CODELIST_URN],
+        maps=[],
+    )
+
+
+@pytest.fixture
+def transformation_scheme() -> TransformationScheme:
+    return TransformationScheme(
+        id="TS_TEST",
+        agency="WB",
+        name="Test transformation scheme",
+        vtl_version="2.1",
+        items=[Transformation(id="T1", expression="DS_1", result="DS_r")],
     )

@@ -35,12 +35,18 @@ Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string and goes throu
 | `"hierarchy"` | `fetch_hierarchy` | `Hierarchy` |
 | `"conceptscheme"` | `fetch_concept_scheme` | `ConceptScheme` |
 | `"categoryscheme"` | `fetch_category_scheme` | `CategoryScheme` |
+| `"categorisation"` | `fetch_categorisation` | `Categorisation` |
 | `"dataflow"` | `fetch_dataflow` | `Dataflow` |
 | `"datastructure"` | `fetch_data_structure_definition` | `DataStructureDefinition` |
 | `"provisionagreement"` | `fetch_provision_agreement` | `ProvisionAgreement` |
-| `"structuremap"` | `fetch_structure_map` | `StructureMap` |
+| `"metadataflow"` | `fetch_metadataflow` | `Metadataflow` |
+| `"metadatastructure"` | `fetch_metadata_structure` | `MetadataStructure` |
+| `"metadataprovisionagreement"` | `fetch_metadata_provision_agreement` | `MetadataProvisionAgreement` |
+| `"structuremap"` | `fetch_structure_map` | `StructureMap`, representation maps embedded |
+| `"representationmap"` | `fetch_representation_map` | `RepresentationMap`, or `MultiRepresentationMap` when it has several sources or targets |
+| `"transformationscheme"` | `fetch_transformation_scheme` | `TransformationScheme` |
 
-Each method calls the pysdmx `RegistryClient` getter for that artefact and returns pysdmx's object unchanged. A schema is not an artefact: `fetch_schema` takes the context as well, as in section 1.
+Each typed method is a one-line call to `fetch_artefact`, which calls the pysdmx `RegistryClient` getter for that artefact and returns pysdmx's object unchanged. pysdmx only lists dataflows, data structures, metadataflows and metadata structures; for those, `fetch_artefact` returns the one artefact requested, raising `NotFound` when there is none and `ValueError` when several versions match. An `artefact_type` outside the table raises `ValueError` naming the valid values. A schema is not an artefact: `fetch_schema` takes the context as well, as in section 1.
 
 ```python
 from tidysdmx import FmrClient
