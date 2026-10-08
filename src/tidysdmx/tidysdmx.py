@@ -69,7 +69,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
 
     .. deprecated::
-        Use :func:`fetch_schema` instead.
+        Use :meth:`tidysdmx.FmrClient.fetch_schema` instead.
 
     Args:
         fmr_params: Base URL and endpoints to access FMR's API.
@@ -85,7 +85,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """
     warnings.warn(
         "fetch_dsd_schema is deprecated and will be removed in a future release. "
-        "Please use fetch_schema instead.",
+        "Please use FmrClient.fetch_schema instead.",
         FutureWarning,
         stacklevel=2,
     )
@@ -96,7 +96,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
 
     client = fmr.RegistryClient(base_url, format=structure_format)
 
-    agency, id_part, version = parse_dsd_id(dsd_id)
+    agency, id_part, version = parse_artefact_id(dsd_id)
     return client.get_schema("datastructure", agency, id_part, version)
 
 
