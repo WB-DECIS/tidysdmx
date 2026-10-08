@@ -14,6 +14,7 @@ from tidysdmx.tidysdmx import (
     _extract_artefact_type,
     create_keys_dict,
     fetch_dsd_schema,
+    fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
     standardize_indicator_id,
@@ -41,6 +42,43 @@ def _patch_get_schema(monkeypatch, schema):
 
 
 _FMR_PARAMS = {"qa": {"url": "https://fmr.example.org"}}
+
+
+class TestFetchSchema:
+    # fetch_schema is deprecated in favour of FmrClient.fetch_schema and emits
+    # FutureWarning by design, so every test here would trip
+    # `filterwarnings = ["error"]`. Scoped to the class rather than ignored
+    # globally: the suppression goes when the function is removed (backlog A4).
+    pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+
+    @pytest.mark.filterwarnings("default::FutureWarning")
+    def test_fetch_schema_emits_future_warning_naming_fmr_client(
+        self, monkeypatch, sdmx_schema
+    ):
+        _patch_get_schema(monkeypatch, sdmx_schema)
+
+        with pytest.warns(
+            FutureWarning, match=r"Please use FmrClient\.fetch_schema.*/FMR"
+        ):
+            fetch_schema("https://fmr.example.org", "WB:WDI(1.0.0)", "dataflow")
+
+    def test_fetch_schema_keeps_its_url_rule(self, monkeypatch, sdmx_schema):
+        # Deprecated, not changed: any path in base_url is still replaced by
+        # /FMR/sdmx/v2, which is why it is not delegated to FmrClient.
+        calls = _patch_get_schema(monkeypatch, sdmx_schema)
+
+        fetch_schema("https://fmr.example.org/registry", "WB:WDI(1.0.0)", "dataflow")
+
+        assert calls == [
+            ("https://fmr.example.org/FMR/sdmx/v2", "dataflow", "WB", "WDI", "1.0.0")
+        ]
+
+    def test_fetch_schema_returns_pysdmx_schema(self, monkeypatch, sdmx_schema):
+        _patch_get_schema(monkeypatch, sdmx_schema)
+
+        schema = fetch_schema("https://fmr.example.org", "WB:WDI(1.0.0)", "dataflow")
+
+        assert schema is sdmx_schema
 
 
 class TestFetchDsdSchema:

@@ -16,7 +16,7 @@ DataFrame-driven artefact builders, dataset validation, and publish-readiness
 checks.
 
 Everything public is re-exported from the top-level package, so
-`from tidysdmx import fetch_schema` is the supported import path. Reaching into
+`from tidysdmx import FmrClient` is the supported import path. Reaching into
 submodules (`tidysdmx.structures`, `tidysdmx.tidysdmx`) is not part of the
 public contract.
 
@@ -34,20 +34,18 @@ The canonical flow is fetch → build a map → apply it → standardise → val
 import pandas as pd
 
 from tidysdmx import (
+    FmrClient,
     build_structure_map_from_template_wb,
-    fetch_schema,
     map_structures,
     parse_mapping_template_wb,
     standardize_output,
     validate_dataset_local,
 )
 
-# 1. Fetch the target schema from an FMR registry.
-schema = fetch_schema(
-    base_url="https://fmr.example.org",
-    artefact_id="WB:WDI(1.0.0)",
-    context="dataflow",
-)
+# 1. Fetch the target schema from an FMR registry (the registry root, /FMR
+#    included; add token_provider=... for a registry behind single sign-on).
+client = FmrClient("https://fmr.example.org/FMR")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
 
 # 2. Read an Excel mapping template and turn it into a pysdmx StructureMap.
 sheets = parse_mapping_template_wb("mapping_template.xlsx")
@@ -78,7 +76,7 @@ reference columns and rejects every column that is not a schema component.
 
 | Task | Functions |
 |---|---|
-| Fetch schemas from FMR | `fetch_schema`, `parse_artefact_id` |
+| Fetch schemas from FMR | `FmrClient.fetch_schema`; `parse_artefact_id` splits an `"AGENCY:ID(VERSION)"` string |
 | Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_categorisation`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_metadataflow`, `fetch_metadata_structure`, `fetch_metadata_provision_agreement`, `fetch_structure_map`, `fetch_representation_map`, `fetch_transformation_scheme`; `ArtefactType` lists the type names, `RegistryArtefact` is what `fetch_artefact` returns |
 | Other registry reads (every pysdmx `RegistryClient` getter is wrapped) | `FmrClient.fetch_schema`, `fetch_dataflow_info`, `fetch_agencies`, `fetch_data_providers`, `fetch_metadata_providers`, `fetch_metadata_report`, `fetch_metadata_reports` |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
@@ -117,8 +115,9 @@ reference columns and rejects every column that is not a schema component.
   Its `fetch_*` methods take `"AGENCY:ID(VERSION)"` or a full or short URN of
   the matching class (so `client.fetch_data_structure_definition(dataflow.structure)`
   works), refuse wildcards and lists, and return pysdmx objects unchanged.
-- **Deprecated functions emit `FutureWarning`.** `fetch_dsd_schema`,
-  `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
+- **Deprecated functions emit `FutureWarning`.** `fetch_schema` (use
+  `FmrClient(root).fetch_schema`, where `root` includes `/FMR`),
+  `fetch_dsd_schema`, `parse_dsd_id`, `standardize_data_for_upload`, `add_sdmx_reference_cols`,
   and `fix_sdmx_xml_datatype_tags` are retained for compatibility only; each names
   its replacement in its docstring (pysdmx now writes SDMX-ML data types
   correctly, so `fix_sdmx_xml_datatype_tags` is simply dropped). The `valid`

@@ -1381,8 +1381,8 @@ class FmrClient:
     ) -> Schema:
         """Fetch the schema of an artefact by ``"AGENCY:ID(VERSION)"`` or URN.
 
-        Unlike the module-level :func:`tidysdmx.fetch_schema`, this goes
-        through the client's registry root, token and settings.
+        This replaces the deprecated module-level :func:`tidysdmx.fetch_schema`:
+        it goes through the client's registry root, token and settings.
 
         Args:
             artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``, or

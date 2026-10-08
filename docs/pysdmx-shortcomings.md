@@ -110,7 +110,7 @@ introduced this register.
 |---|---|
 | **Symptom** | `RegistryClient` must be given `https://host/FMR/sdmx/v2` (it strips only a trailing slash), whereas `RegistryMaintenanceClient` wants `https://host/FMR` (it strips `/sdmx/v2` itself). |
 | **pysdmx location** | `api/fmr/__init__.py:84-86` vs `api/fmr/maintenance.py:235-241`. |
-| **Impact** | Callers carry two URLs per registry; tidysdmx's `fetch_schema` papered over it by hard-coding `/FMR/sdmx/v2/` (review finding PYSDMX-04). |
+| **Impact** | Callers carry two URLs per registry; tidysdmx's module-level `fetch_schema` papered over it by hard-coding `/FMR/sdmx/v2/` (review finding PYSDMX-04), and is now deprecated in favour of `FmrClient.fetch_schema`. |
 | **tidysdmx workaround** | `FmrClient` takes the registry root once and derives `registry_endpoint` for reads and the root for writes. |
 | **Proposed upstream change** | Accept the registry root on `RegistryClient` and append the API path, or document one convention for both clients. |
 | **Remove when** | Released — the single-root convenience stays regardless. |
