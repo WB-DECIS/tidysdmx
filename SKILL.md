@@ -77,7 +77,7 @@ reference columns and rejects every column that is not a schema component.
 | Task | Functions |
 |---|---|
 | Fetch schemas from FMR | `FmrClient.fetch_schema`; `parse_artefact_id` splits an `"AGENCY:ID(VERSION)"` string |
-| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_categorisation`, `fetch_dataflow`, `fetch_data_structure_definition`, `fetch_provision_agreement`, `fetch_metadataflow`, `fetch_metadata_structure`, `fetch_metadata_provision_agreement`, `fetch_structure_map`, `fetch_representation_map`, `fetch_transformation_scheme`; `ArtefactType` lists the type names, `RegistryArtefact` is what `fetch_artefact` returns |
+| Fetch artefacts from FMR (any client, signed in or not) | `FmrClient.fetch_artefact`, `fetch_codelist`, `fetch_hierarchy`, `fetch_concept_scheme`, `fetch_category_scheme`, `fetch_categorisation`, `fetch_dataflow`, `fetch_dsd`, `fetch_provision_agreement`, `fetch_metadataflow`, `fetch_msd`, `fetch_metadata_provision_agreement`, `fetch_structure_map`, `fetch_representation_map`, `fetch_transformation_scheme`; `ArtefactType` lists the type names, `RegistryArtefact` is what `fetch_artefact` returns |
 | Other registry reads (every pysdmx `RegistryClient` getter is wrapped) | `FmrClient.fetch_schema`, `fetch_dataflow_info`, `fetch_agencies`, `fetch_data_providers`, `fetch_metadata_providers`, `fetch_metadata_report`, `fetch_metadata_reports` |
 | Connect to FMR with authentication and token refresh | `FmrClient`, `AzureTokenProvider`, `StaticTokenProvider`, `TokenProvider`, `BearerToken` |
 | Describe a tidy DataFrame as SDMX structures | `create_schema_from_table` — returns `SchemaComponents(dsd, concept_scheme, codelists)`; `.dsd.to_schema()` gives the pysdmx `Schema` that validation takes |
@@ -113,7 +113,7 @@ reference columns and rejects every column that is not a schema component.
   `RegistryMaintenanceClient`, both sending a bearer token that refreshes itself.
   Anything with `get_token() -> BearerToken` works as a `token_provider`.
   Its `fetch_*` methods take `"AGENCY:ID(VERSION)"` or a full or short URN of
-  the matching class (so `client.fetch_data_structure_definition(dataflow.structure)`
+  the matching class (so `client.fetch_dsd(dataflow.structure)`
   works), refuse wildcards and lists, and return pysdmx objects unchanged.
 - **Deprecated functions emit `FutureWarning`.** `fetch_schema` (use
   `FmrClient(root).fetch_schema`, where `root` includes `/FMR`),

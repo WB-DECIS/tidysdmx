@@ -134,7 +134,7 @@ _FETCH_CASES = [
     ),
     _FetchCase(
         "datastructure",
-        "fetch_data_structure_definition",
+        "fetch_dsd",
         "get_data_structures",
         "data_structure_definition",
         DataStructureDefinition,
@@ -157,7 +157,7 @@ _FETCH_CASES = [
     ),
     _FetchCase(
         "metadatastructure",
-        "fetch_metadata_structure",
+        "fetch_msd",
         "get_metadata_structures",
         "metadata_structure",
         MetadataStructure,
@@ -1101,14 +1101,14 @@ class TestFmrClientTypedFetchers:
         with pytest.raises(ValueError, match=f"is a {other} URN"):
             getattr(fmr_client, case.method)(f"{other}=WB:X_TEST(1.0)")
 
-    def test_fetch_data_structure_definition_follows_dataflow_structure(
+    def test_fetch_dsd_follows_dataflow_structure(
         self, monkeypatch, fmr_client, dataflow, data_structure_definition
     ):
         calls = _patch_getter(
             monkeypatch, fmr_client, "get_data_structures", [data_structure_definition]
         )
 
-        fmr_client.fetch_data_structure_definition(dataflow.structure)
+        fmr_client.fetch_dsd(dataflow.structure)
 
         assert calls == [call("WB", "DSD_TEST", "1.0")]
 
@@ -1426,10 +1426,8 @@ class TestFmrClientFetchLive:
     ``-m integration``; these tests need FMR access.
     """
 
-    def test_fetch_data_structure_definition_reads_live_registry(self):
-        dsd = FmrClient(LIVE_FMR_ROOT).fetch_data_structure_definition(
-            "WB:IFPRI_ASTI(1.0)"
-        )
+    def test_fetch_dsd_reads_live_registry(self):
+        dsd = FmrClient(LIVE_FMR_ROOT).fetch_dsd("WB:IFPRI_ASTI(1.0)")
 
         assert dsd.short_urn == "DataStructure=WB:IFPRI_ASTI(1.0)"
 

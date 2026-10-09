@@ -1209,9 +1209,7 @@ class FmrClient:
         """
         return self.fetch_artefact(artefact_id, "dataflow")
 
-    def fetch_data_structure_definition(
-        self, artefact_id: str
-    ) -> DataStructureDefinition:
+    def fetch_dsd(self, artefact_id: str) -> DataStructureDefinition:
         """Fetch a data structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
@@ -1270,7 +1268,7 @@ class FmrClient:
         """
         return self.fetch_artefact(artefact_id, "metadataflow")
 
-    def fetch_metadata_structure(self, artefact_id: str) -> MetadataStructure:
+    def fetch_msd(self, artefact_id: str) -> MetadataStructure:
         """Fetch a metadata structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
