@@ -37,20 +37,18 @@ The canonical flow is fetch → build a map → apply it → standardise → val
 import pandas as pd
 
 from tidysdmx import (
+    FmrClient,
     build_structure_map_from_template_wb,
-    fetch_schema,
     map_structures,
     parse_mapping_template_wb,
     standardize_output,
     validate_dataset_local,
 )
 
-# 1. Fetch the target schema from an FMR registry.
-schema = fetch_schema(
-    base_url="https://fmr.example.org",
-    artefact_id="WB:WDI(1.0.0)",
-    context="dataflow",
-)
+# 1. Fetch the target schema from an FMR registry (the registry root, /FMR
+#    included; add token_provider=... for a registry behind single sign-on).
+client = FmrClient("https://fmr.example.org/FMR")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
 
 # 2. Read an Excel mapping template and turn it into a pysdmx StructureMap.
 sheets = parse_mapping_template_wb("mapping_template.xlsx")

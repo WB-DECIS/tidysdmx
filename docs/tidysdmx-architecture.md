@@ -69,7 +69,7 @@ The table below captures the philosophical gap at each stage of the workflow:
 
 **pysdmx view:** Instantiate a `RegistryClient` with a base URL and format, call `get_schema(context, agency, id, version)`, receive a `Schema` object. Four separate arguments, each derived from the SDMX artefact reference.
 
-**tidysdmx view:** Call `fetch_schema(base_url, artefact_id, context)` with a single artefact ID string in the `"AGENCY:ID(VERSION)"` format — the format analysts already have in their config files. tidysdmx parses it, builds the client, and returns the schema.
+**tidysdmx view:** Build one `FmrClient` from the registry root and call `client.fetch_schema(artefact_id, context)` with a single artefact ID string in the `"AGENCY:ID(VERSION)"` format — the format analysts already have in their config files — or with the artefact's URN. tidysdmx parses it, and the client supplies the endpoint, the format and, behind single sign-on, the token.
 
 ```python
 # pysdmx — developer builds the client and parses the ID manually
@@ -82,14 +82,15 @@ client = fmr.RegistryClient(
 schema = client.get_schema("dataflow", "WB", "WDI", "1.0.0")
 
 # tidysdmx — analyst passes the ID they already have
-from tidysdmx import fetch_schema
+from tidysdmx import FmrClient
 
-schema = fetch_schema(
-    base_url="https://fmr.example.com", artefact_id="WB:WDI(1.0.0)", context="dataflow"
-)
+client = FmrClient("https://fmr.example.com/FMR")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
 ```
 
-**What tidysdmx hides:** URL construction, `RegistryClient` instantiation, `StructureFormat` selection, ID string parsing. The analyst only needs to know the three things they already know: where the FMR is, what the artefact ID is, and whether it's a dataflow or a DSD.
+**What tidysdmx hides:** URL construction, `RegistryClient` instantiation, `StructureFormat` selection, ID string parsing, authentication. The analyst only needs to know the three things they already know: where the FMR is, what the artefact ID is, and whether it's a dataflow or a DSD.
+
+The module-level `fetch_schema(base_url, artefact_id, context)` that preceded `FmrClient` is deprecated. It joined `/FMR/sdmx/v2/` to the host of `base_url`, discarding any path (review finding PYSDMX-04), could not authenticate, and did not refuse wildcards. It keeps that behaviour until it is removed rather than delegating to `FmrClient`, because delegating would change the URL for callers who pass the host alone.
 
 ---
 
@@ -170,9 +171,9 @@ For non-programmers or mixed technical/non-technical teams, the mapping can be w
 **Known defect — the template writer and reader disagree (ARCH-01, open backlog item A3).** tidysdmx has a writer that generates a workbook from a schema, but the reader rejects what it writes:
 
 ```python
-from tidysdmx import fetch_schema, extract_component_ids, write_excel_mapping_template
+from tidysdmx import FmrClient, extract_component_ids, write_excel_mapping_template
 
-schema = fetch_schema(base_url, "WB:WDI(1.0.0)", "dataflow")
+schema = FmrClient(registry_root).fetch_schema("WB:WDI(1.0.0)", "dataflow")
 components = extract_component_ids(schema)
 write_excel_mapping_template(
     components, rep_maps=["REF_AREA", "INDICATOR"], output_path=Path("mapping.xlsx")
@@ -252,7 +253,7 @@ result_df = map_structures(df, smap)
 `map_structures` raises `TypeError` in two cases:
 
 - the `StructureMap` holds any other map type — in practice a `DatePatternMap`, which tidysdmx can build (`build_date_pattern_map`) but not apply;
-- a `ComponentMap` or `MultiComponentMap` references its representation map by URN string instead of embedding it, so there are no value maps to apply. Fetch the structure map with pysdmx's `RegistryClient.get_mapping()`, which resolves the representation maps, rather than passing one whose `values` is still a URN.
+- a `ComponentMap` or `MultiComponentMap` references its representation map by URN string instead of embedding it, so there are no value maps to apply. Fetch the structure map with `FmrClient.fetch_structure_map()` (pysdmx's `RegistryClient.get_mapping()` underneath), which resolves the representation maps, rather than passing one whose `values` is still a URN; `FmrClient.fetch_representation_map()` takes that URN directly.
 
 **pysdmx view vs tidysdmx view:**
 
@@ -417,7 +418,7 @@ dsd = client.fetch_artefact("WB:IFPRI_ASTI(1.0)", "datastructure")
 client.put_structures(artefacts)
 ```
 
-**What tidysdmx hides:** token acquisition and refresh, the `Authorization` header on reads (which pysdmx has no hook for), the two URL conventions, client construction, and the split of an `"AGENCY:ID(VERSION)"` string into pysdmx's three getter arguments. The `fetch_*` methods add only what pysdmx leaves to the caller: one generic `fetch_artefact` keyed by the SDMX REST resource name, a single result where pysdmx only lists (dataflows, data structures), and a refusal of URNs and wildcards, which `parse_artefact_id` and pysdmx's single-artefact readers would otherwise mishandle silently. `TokenProvider` is the only extension point: anything with `get_token() -> BearerToken` plugs in, so the design is not tied to Azure.
+**What tidysdmx hides:** token acquisition and refresh, the `Authorization` header on reads (which pysdmx has no hook for), the two URL conventions, client construction, and the split of an `"AGENCY:ID(VERSION)"` string into pysdmx's three getter arguments. The `fetch_*` methods add only what pysdmx leaves to the caller: one generic `fetch_artefact` keyed by the SDMX REST resource name and driven by one table of pysdmx getters, with each typed method a one-line call to it; a single result where pysdmx only lists (dataflows, data structures, metadataflows, metadata structures); URNs accepted as well as `"AGENCY:ID(VERSION)"`, with the URN's class checked against what is fetched; and a refusal of wildcards, lists and characters pysdmx would put into the URL unescaped, which its single-artefact readers would otherwise mishandle silently (`PYSDMX-READ-01`, `-02`). The getters that take something other than one artefact — agencies, data and metadata providers, metadata reports, dataflow summaries, schemas — have their own `fetch_*` methods under the same reference rules, so every `RegistryClient` getter is wrapped, and a test fails when pysdmx adds one that is not. `TokenProvider` is the only extension point: anything with `get_token() -> BearerToken` plugs in, so the design is not tied to Azure.
 
 **What it does not hide:** the pysdmx clients themselves. Every pysdmx method stays reachable, and the seams tidysdmx uses to get the token onto the wire are guarded, wire-tested and registered in `docs/pysdmx-shortcomings.md` so they can be deleted when upstream adds an auth hook.
 
@@ -451,7 +452,7 @@ pysdmx 1.19.0 offers no way to put an `Authorization` header on reads and no way
 
 ### Deprecation pattern
 
-Early versions of tidysdmx used function names tied to SDMX jargon (`fetch_dsd_schema`, `parse_dsd_id`, `add_sdmx_reference_cols`, `standardize_data_for_upload`). These have been deprecated in favour of names that describe the analyst's task (`fetch_schema`, `parse_artefact_id`, `standardize_output`). The renamed functions also dropped DSD-specific semantics in favour of generic artefact handling.
+Early versions of tidysdmx used function names tied to SDMX jargon (`fetch_dsd_schema`, `parse_dsd_id`, `add_sdmx_reference_cols`, `standardize_data_for_upload`). These have been deprecated in favour of names that describe the analyst's task (`fetch_schema`, `parse_artefact_id`, `standardize_output`). The renamed functions also dropped DSD-specific semantics in favour of generic artefact handling. The module-level `fetch_schema` was deprecated in turn once `FmrClient.fetch_schema` existed, so registry reads have one home.
 
 Deprecations also retire workarounds once pysdmx catches up: `fix_sdmx_xml_datatype_tags` emits a `FutureWarning` because pysdmx 1.14.0 and later write `SourceDataType`/`TargetDataType` correctly, so the call is no longer needed. Every deprecation in the package, the `valid=` argument included, warns with `FutureWarning` (shown to end users by default, unlike `DeprecationWarning`).
 
@@ -463,7 +464,7 @@ Deprecations also retire workarounds once pysdmx catches up: `fix_sdmx_xml_datat
 tidysdmx/
 ├── tidysdmx.py     ← End-to-end pipeline functions: fetch, standardize, map, output
 │                     Owns the JSON mapping format (read_mapping, map_to_sdmx)
-│                     Wraps fmr.RegistryClient (fetch_schema)
+│                     fetch_schema / fetch_dsd_schema (deprecated: FmrClient)
 │
 ├── structures.py   ← Translation layer: DataFrames → pysdmx objects
 │                     The DataFrame-driven build_*() map builders, and
@@ -506,7 +507,7 @@ tidysdmx/
 ├── fmr.py          ← Registry access with authentication
 │                     FmrClient wraps RegistryClient + RegistryMaintenanceClient
 │                     TokenProvider / AzureTokenProvider / StaticTokenProvider
-│                     Future home of fetch_schema (backlog B2)
+│                     fetch_* — one method per RegistryClient getter, all 21
 │
 ├── tidy_raw.py     ← Codelist-based row filtering
 │                     filter_tidy_raw(df, schema) — pre-processing before mapping

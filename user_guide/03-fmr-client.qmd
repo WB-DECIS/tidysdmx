@@ -25,9 +25,11 @@ codelist = client.fetch_codelist("WB:CL_REF_AREA(1.0)")
 
 `client.registry` **is** a `pysdmx.api.fmr.RegistryClient`, so every method pysdmx offers is available on it. Pass the registry root — the part before `/sdmx/v2` — and `FmrClient` derives the read and write endpoints itself. A pasted `.../sdmx/v2` URL is accepted and trimmed.
 
+Coming from the module-level `tidysdmx.fetch_schema(base_url, artefact_id, context)`? It is deprecated and emits a `FutureWarning`. Replace `fetch_schema("https://fmr.example.org", artefact_id, context)` with `FmrClient("https://fmr.example.org/FMR").fetch_schema(artefact_id, context)`: the client takes the registry root, path included, where the function always appended `/FMR/sdmx/v2/` to the host and dropped any other path.
+
 ## 2. Fetch artefacts
 
-Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string and goes through the client, so it works the same with or without a token provider. There is one method per artefact type, and `fetch_artefact` for when the type is data, read from a configuration file for instance:
+Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string or as its URN, and goes through the client, so it works the same with or without a token provider. There is one method per artefact type, and `fetch_artefact` for when the type is data, read from a configuration file for instance:
 
 | `artefact_type` | Method | Returns |
 |---|---|---|
@@ -35,12 +37,18 @@ Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string and goes throu
 | `"hierarchy"` | `fetch_hierarchy` | `Hierarchy` |
 | `"conceptscheme"` | `fetch_concept_scheme` | `ConceptScheme` |
 | `"categoryscheme"` | `fetch_category_scheme` | `CategoryScheme` |
+| `"categorisation"` | `fetch_categorisation` | `Categorisation` |
 | `"dataflow"` | `fetch_dataflow` | `Dataflow` |
-| `"datastructure"` | `fetch_data_structure_definition` | `DataStructureDefinition` |
+| `"datastructure"` | `fetch_dsd` | `DataStructureDefinition` |
 | `"provisionagreement"` | `fetch_provision_agreement` | `ProvisionAgreement` |
-| `"structuremap"` | `fetch_structure_map` | `StructureMap` |
+| `"metadataflow"` | `fetch_metadataflow` | `Metadataflow` |
+| `"metadatastructure"` | `fetch_msd` | `MetadataStructure` |
+| `"metadataprovisionagreement"` | `fetch_metadata_provision_agreement` | `MetadataProvisionAgreement` |
+| `"structuremap"` | `fetch_structure_map` | `StructureMap`, representation maps embedded |
+| `"representationmap"` | `fetch_representation_map` | `RepresentationMap`, or `MultiRepresentationMap` when it has several sources or targets |
+| `"transformationscheme"` | `fetch_transformation_scheme` | `TransformationScheme` |
 
-Each method calls the pysdmx `RegistryClient` getter for that artefact and returns pysdmx's object unchanged. A schema is not an artefact: `fetch_schema` takes the context as well, as in section 1.
+Each typed method is named after the pysdmx class it returns, except `fetch_dsd` and `fetch_msd`, which use the SDMX acronyms for data and metadata structure definitions; `fetch_dsd` returns the definition itself, not a schema like the deprecated `fetch_dsd_schema`. Each is a one-line call to `fetch_artefact`, which calls the pysdmx `RegistryClient` getter for that artefact and returns pysdmx's object unchanged. pysdmx only lists dataflows, data structures, metadataflows and metadata structures; for those, `fetch_artefact` returns the one artefact requested, raising `NotFound` when there is none and `ValueError` when several versions match. An `artefact_type` outside the table raises `ValueError` naming the valid values. A schema is not an artefact: `fetch_schema` takes the context as well, as in section 1.
 
 ```python
 from tidysdmx import FmrClient
@@ -63,17 +71,38 @@ members = {group.id: [code.id for code in group.codes] for group in groups.codes
 
 `fetch_hierarchy` reads SDMX 3.0 hierarchies; pysdmx has no reader for SDMX 2.1 hierarchical codelists.
 
-The version may be `~` for the latest version or `+` for the latest stable one, as in `"WB:CL_REF_AREA(~)"`. Wildcards (`*`) and lists (`,`) are refused: they would match several artefacts, and pysdmx would silently keep the first.
+The version may be `~` for the latest version or `+` for the latest stable one, as in `"WB:CL_REF_AREA(~)"`. Wildcards (`*`) and lists (`,`) are refused: they would match several artefacts, and pysdmx would silently keep the first. So is any character an SDMX identifier cannot hold, such as `?`, `#`, `/` or a space: pysdmx puts the identifier into the URL unescaped, so it would query a different artefact.
 
-The registry gives references between artefacts as URNs, such as `Dataflow.structure` or `ProvisionAgreement.dataflow`. The fetch methods take `AGENCY:ID(VERSION)` only, so turn a URN into one with pysdmx:
+The registry gives references between artefacts as URNs, such as `Dataflow.structure` or `ProvisionAgreement.dataflow`. Every fetch method takes one directly, full (`urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=WB:IFPRI_ASTI(1.0)`) or short (`DataStructure=WB:IFPRI_ASTI(1.0)`):
 
 ```python
-from pysdmx.util import parse_urn
-
 dataflow = client.fetch_dataflow("WB:DF_IFPRI_ASTI(1.0)")
-ref = parse_urn(dataflow.structure)
-dsd = client.fetch_data_structure_definition(f"{ref.agency}:{ref.id}({ref.version})")
+dsd = client.fetch_dsd(dataflow.structure)
 ```
+
+The URN must name the class the method fetches — exactly as URNs spell it, `DataStructure` for a data structure definition — so a dataflow's URN passed to `fetch_codelist` raises `ValueError` instead of fetching something else. A URN of an item inside an artefact, such as a `Code`, is refused too. `fetch_codelist` takes a `ValueList` URN as well as a `Codelist` one. pysdmx looks for a codelist first and for a value list only when there is none, so when a codelist and a value list share an agency, ID and version, a `ValueList` URN raises `ValueError` rather than return the codelist (PYSDMX-READ-05).
+
+### Other reads
+
+The rest of pysdmx's `RegistryClient` getters take something other than one artefact, so each has its own method. Together with the table above they cover every getter, and the same rules apply: one reference, no wildcards or lists, pysdmx's object returned unchanged.
+
+| Method | Takes | Returns |
+|---|---|---|
+| `fetch_schema(artefact_id, context)` | a dataflow, data structure or provision agreement, and which of the three it is | `Schema`, with codelists and constraints applied |
+| `fetch_dataflow_info(artefact_id, detail="all")` | a dataflow; `detail` is `"core"`, `"providers"`, `"schema"` or `"all"` | `DataflowInfo`, a discovery summary |
+| `fetch_agencies(agency)` | one agency ID, e.g. `"WB"` | the sub-agencies it maintains |
+| `fetch_data_providers(agency, with_flows=False)` | one agency ID | its `DataProvider`s, with their dataflows if `with_flows` |
+| `fetch_metadata_providers(agency, with_flows=False)` | one agency ID | its `MetadataProvider`s |
+| `fetch_metadata_report(report_id)` | a metadata set as `"PROVIDER:ID(VERSION)"` | one `MetadataReport` |
+| `fetch_metadata_reports(artefact_id, artefact_type)` | any artefact of the table above, and its type | the `MetadataReport`s attached to it |
+
+```python
+groups = client.fetch_agencies("WB")
+info = client.fetch_dataflow_info("WB:DF_IFPRI_ASTI(1.0)", detail="providers")
+reports = client.fetch_metadata_reports("WB:DF_IFPRI_ASTI(1.0)", "dataflow")
+```
+
+Pass `fetch_dataflow_info` an exact version: pysdmx matches the dataflow in the registry's answer against the version string you gave, so `+` misses a dataflow whose version is not `X.Y.Z`. `fetch_metadata_reports(..., "codelist")` searches codelists only, with no fallback to a value list.
 
 ## 3. Sign in with Azure (Entra ID)
 
@@ -163,6 +192,8 @@ client.put_structures(artefacts, action=StructureAction.Append)
 
 `Replace` is the default, as in pysdmx. Uploads always need a token provider; without one, `client.maintenance` raises `ValueError`.
 
+Pass `header=` a `pysdmx.model.message.Header` to name the sender or give the message its own ID. Without one, pysdmx sends a default header whose `id` and `prepared` time are fixed when pysdmx is imported, so every upload from one process carries the same message ID.
+
 ## 7. How refresh works
 
 - The token is acquired on the first request, not when the client is built, so constructing a client or reading `client.maintenance` never triggers a sign-in.
@@ -184,8 +215,14 @@ client.put_structures(artefacts, action=StructureAction.Append)
 `ValueError: base_url must not embed credentials`
 : A `user:password@` component in the registry URL is rejected, so a password can never end up in a `repr()` or a traceback. Authenticate with a token provider instead.
 
-`ValueError: artefact_id must be 'AGENCY:ID(VERSION)', not a URN`
-: The fetch methods do not take URNs. Convert one with `pysdmx.util.parse_urn`, as shown in section 2.
+`ValueError: artefact_id is a Dataflow URN, but a Codelist or ValueList URN is expected here`
+: The URN names a different class from the one the method fetches. Call the method for that class, or `fetch_artefact` with the matching `artefact_type`.
+
+`ValueError: artefact_id 'ValueList=WB:CL_X(1.0)' names a ValueList, but pysdmx returned 'Codelist=WB:CL_X(1.0)'`
+: The registry holds a codelist with the same agency, ID and version as the value list, and pysdmx's `get_codes` always prefers the codelist. tidysdmx cannot fetch that value list until pysdmx can ask for one directly. The same message, with the classes swapped, means a `Codelist` URN found only a value list.
+
+`ValueError: artefact_id 'WB:CL?X(1.0)' holds 'CL?X', which is not a valid SDMX agency, ID or version`
+: The reference holds a character no SDMX identifier has — often a stray space or a pasted URL fragment. pysdmx would put it into the URL unescaped and query a different artefact, so it is refused before any request.
 
 `pysdmx.errors.NotFound: Not found`
 : Nothing matches the agency, id and version. A codelist that does not exist costs two requests, because pysdmx then looks for a value list of that id, so the message names the value-list query.
@@ -205,7 +242,7 @@ from tidysdmx import AzureTokenProvider, FmrClient, build_codelist
 provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
 client = FmrClient("https://fmrqa.worldbank.org/FMR", token_provider=provider)
 
-client.registry.get_agencies("WB")
+client.fetch_agencies("WB")
 codelist = build_codelist(
     "CL_SMOKE_TEST", "WB", "Smoke test", codes=[Code(id="OK", name="Smoke test")]
 )

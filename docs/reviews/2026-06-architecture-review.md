@@ -243,10 +243,12 @@ was not counted.
   has no tests at all — so whoever adds the coverage TEST-03 asks for will hit an
   immediate failure. Re-route the internal call first, then add the test.
   Re-raised in review of PR #261.
-  *Update (2026-10): `FmrClient.get_schema` joined the deprecated set when the
-  client's methods moved to the `fetch_*` prefix. It warns and otherwise behaves
-  as before; remove it on the same schedule, along with the class-level
-  `FutureWarning` suppression on `TestFmrClientGetSchema`.*
+  *Update (2026-10): `FmrClient.get_schema` briefly joined the deprecated set
+  when the client's methods moved to the `fetch_*` prefix; it was removed before
+  `FmrClient` was ever released, so it never needs a removal schedule. The
+  module-level `fetch_schema` joined the set instead, in favour of
+  `FmrClient.fetch_schema`; remove it on the same schedule, along with the
+  class-level `FutureWarning` suppression on `TestFetchSchema`.*
   *Status:* open — the deprecated names are still in `__all__` at 0.10.0.
 - **A5** Switch `Agency`/`ItemReference` imports to public `pysdmx.model`;
   isolate the two unavoidable private imports; request upstream re-export
@@ -271,6 +273,9 @@ was not counted.
   *Update (2026-09): `tidysdmx/fmr.py` now exists and is the natural home for
   the registry slice — move `fetch_schema` there instead of creating
   `registry.py`.*
+  *Update (2026-10): superseded for the registry slice — the module-level
+  `fetch_schema` is deprecated in favour of `FmrClient.fetch_schema` rather
+  than moved; nothing registry-related is left to split out of `tidysdmx.py`.*
 - **B3** Dissolve `utils.py` → `introspection.py` + (Excel→B1) +
   `pysdmx_workarounds.py` (deleted entirely after A1). *S*
   *Status:* open.
@@ -341,7 +346,10 @@ was not counted.
   hook installation (PROD-12); file the upstream `build_urn` feature request
   (PYSDMX-02).
   *Status:* partly done — `FmrClient` (PR #264) takes the registry root once;
-  `fetch_schema` still hardcodes `/FMR/sdmx/v2/`. No upstream request filed.
+  the module-level `fetch_schema`, which still hardcodes `/FMR/sdmx/v2/`, is
+  deprecated in favour of `FmrClient.fetch_schema` (October 2026), which
+  resolves PYSDMX-04. The pre-push hook and `build_urn` items are open; no
+  upstream request filed.
 
 **D. Found in the October 2026 pysdmx 1.20 audit, not fixed there**
 - **D1** `read_mapping` → `map_to_sdmx` contract break: `read_mapping` flattens
@@ -374,6 +382,10 @@ was not counted.
   *Update (2026-09): `FmrClient` takes the registry root and derives both
   endpoints itself (see `docs/pysdmx-shortcomings.md`, PYSDMX-AUTH-08); fix
   PYSDMX-04 by delegating `fetch_schema` to it.*
+  *Update (2026-10): delegation rejected. `fetch_schema` appends `/FMR` to the
+  host, `FmrClient` takes the root as given, so delegating would change the URL
+  for callers passing the host alone. `fetch_schema` is deprecated instead
+  (see A4); the pysdmx-floor part of D10 is still open.*
 
 ## 8. Out of scope / deferred
 

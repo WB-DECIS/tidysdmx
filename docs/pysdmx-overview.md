@@ -327,7 +327,7 @@ client = RegistryClient(
 schema = client.get_schema("dataflow", "WB", "WDI", "1.0.0")  # version is required
 ```
 
-Methods tidysdmx uses or should reach for: `get_schema(context, agency, id, version)`, `get_mapping(agency, id, version="~")` (StructureMap with representation maps resolved), `get_code_map(...)` (one representation map), `get_codes(...)` (codelist, falling back to a valuelist), `get_hierarchy(...)`, `get_concepts(...)`, `get_data_structures(...)`, `get_dataflow_details(...)`. `AsyncRegistryClient` has the same methods.
+Methods tidysdmx uses or should reach for: `get_schema(context, agency, id, version)`, `get_mapping(agency, id, version="~")` (StructureMap with representation maps resolved), `get_code_map(...)` (one representation map), `get_codes(...)` (codelist, falling back to a valuelist, so a valuelist sharing a codelist's identity is unreachable: PYSDMX-READ-05), `get_hierarchy(...)`, `get_concepts(...)`, `get_data_structures(...)`, `get_dataflow_details(...)`. `FmrClient` wraps all 21 getters (§7), and `tests/test_fmr.py` fails when a pysdmx release adds one it does not wrap. `get_metadata_providers` is annotated `Sequence[DataProvider]` but returns `MetadataProvider`s (`docs/pysdmx-shortcomings.md`, PYSDMX-READ-03). `AsyncRegistryClient` has the same methods; `FmrClient` has no async counterpart yet.
 
 **Version defaults.** Since **1.15** every method's default `version` is `"~"` — the latest version, **including non-final ones**; before 1.15 it was `"+"` (latest stable). Pass an explicit version (tidysdmx always does), or `"+"` when you want only final releases. Since 1.16 semver strings work throughout.
 
@@ -390,6 +390,8 @@ agency, id, version = parse_artefact_id("WB:WDI(1.0.0)")
 
 `parse_artefact_id` is tidysdmx's own parser. pysdmx's public parsers (`parse_urn`, `parse_short_urn`, `parse_maintainable_urn`) all expect a `Type=` prefix; `pysdmx.util.parse_flow_urn` accepts this form but is not in `pysdmx.util.__all__`, raises `pysdmx.errors.Invalid` rather than `ValueError`, and always reports the type as `Dataflow`.
 
+`FmrClient`'s fetch methods take either form: `parse_artefact_id` splits `"AGENCY:ID(VERSION)"`, pysdmx's `parse_urn` a full or short URN, whose class must match what is fetched.
+
 Full URNs: pysdmx has parsers but **no URN builder**, so `tidysdmx.gen_urn` builds them. For an artefact you already hold, prefer `f"urn:sdmx:org.sdmx.infomodel.<package>.{artefact.short_urn}"`, which gets the SDMX class name right.
 
 ---
@@ -400,8 +402,9 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
-| **Fetch schema** | `RegistryClient.get_schema()` | `fetch_schema()` — URL building and ID parsing |
-| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_mapping()` — separate agency, id and version; dataflows and DSDs only as lists | `FmrClient.fetch_artefact()` and one typed `fetch_*` method per type — one `"AGENCY:ID(VERSION)"` string, a single result, URNs and wildcards refused |
+| **Fetch schema** | `RegistryClient.get_schema()` | `FmrClient.fetch_schema()` — one ID string or URN, endpoint and token from the client (the module-level `fetch_schema()` is deprecated) |
+| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_categorisation()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_metadataflows()`, `get_metadata_structures()`, `get_metadata_provision_agreement()`, `get_mapping()`, `get_code_map()`, `get_vtl_transformation_scheme()` — separate agency, id and version; dataflows, DSDs, metadataflows and MSDs only as lists | `FmrClient.fetch_artefact()`, driven by one table of the 14 getters, and one typed `fetch_*` method per type that calls it — one `"AGENCY:ID(VERSION)"` string or URN, a single result, wildcards refused |
+| **Other registry reads** | `RegistryClient.get_dataflow_details()`, `get_agencies()`, `get_providers()`, `get_metadata_providers()`, `get_report()`, `get_reports()` | `FmrClient.fetch_dataflow_info()`, `fetch_agencies()`, `fetch_data_providers()`, `fetch_metadata_providers()`, `fetch_metadata_report()`, `fetch_metadata_reports()` — same reference rules; with `fetch_schema` and the artefact fetchers they wrap every `RegistryClient` getter |
 | **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Components.dimensions`, `Component.required`, `Component.enumeration`, `Hierarchy.all_codes()` | `extract_validation_info()`, `get_codelist_ids()`, `extract_component_ids()` |
 | **Column validation** | The schema's rules (no DataFrame validator exists in pysdmx) | `validate_dataset_local()` and the individual `validate_*` checks |
@@ -418,11 +421,10 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 
 ### Extracting validation info from a Schema
 ```python
-from tidysdmx import extract_validation_info, fetch_schema
+from tidysdmx import FmrClient, extract_validation_info
 
-schema = fetch_schema(
-    base_url="https://fmr.example.com", artefact_id="WB:WDI(1.0.0)", context="dataflow"
-)
+client = FmrClient("https://fmr.example.com/FMR")
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
 
 valid = extract_validation_info(schema)
 # valid = {
@@ -517,7 +519,7 @@ result_df = map_structures(df, smap)
 
 | Don't reimplement | Use instead |
 |---|---|
-| HTTP schema fetching | `RegistryClient.get_schema()` via `fetch_schema()` or `FmrClient.fetch_schema()` |
+| HTTP schema fetching | `RegistryClient.get_schema()` via `FmrClient.fetch_schema()` |
 | Artefact fetching | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_dataflows()`, ... via `FmrClient.fetch_*()` |
 | Artefact upload | `RegistryMaintenanceClient.put_structures()` via `FmrClient.put_structures()` |
 | Resolving map references | `RegistryClient.get_mapping()` / `get_code_map()`; `pysdmx.util.find_by_urn` over objects you hold |
@@ -563,7 +565,7 @@ result_df = map_structures(df, smap)
 | `ComponentMap` / `MultiComponentMap` | Component mapping with value translation | Recodes column values |
 | `RepresentationMap` / `MultiRepresentationMap` | RepresentationMap | Built from DataFrames; URN class is always `RepresentationMap` |
 | `ValueMap` / `MultiValueMap` | RepresentationMapping | Items in a representation map's `maps` |
-| `RegistryClient` | SDMX REST client | `fetch_schema()` and `FmrClient.registry` |
+| `RegistryClient` | SDMX REST client | `FmrClient.registry`, behind every `FmrClient.fetch_*()` |
 | `RegistryMaintenanceClient` | SDMX REST maintenance client | `FmrClient.maintenance` / `put_structures()` |
 | `StructureFormat.FUSION_JSON` | FMR wire format | Format of all tidysdmx registry reads |
 

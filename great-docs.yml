@@ -122,19 +122,16 @@ reference:
     map data to dissemination schemas, validate datasets, and prepare
     data and structure maps for FMR upload.
   sections:
-    - title: FMR & Schemas
-      desc: Fetch and parse SDMX schemas from a Fusion Metadata Registry.
-      contents:
-        - fetch_schema
-        - parse_artefact_id
     - title: FMR Client
       desc: >-
         Connect to a Fusion Metadata Registry with automatic bearer-token
-        authentication, on top of pysdmx's clients.
+        authentication, on top of pysdmx's clients, and read schemas and every
+        artefact pysdmx's registry client can fetch.
       contents:
         - FmrClient
         - ArtefactType
         - RegistryArtefact
+        - parse_artefact_id
         - TokenProvider
         - BearerToken
         - StaticTokenProvider
@@ -247,6 +244,7 @@ reference:
         emits FutureWarning; the replacement is named in its docstring. Do not
         use these in new code.
       contents:
+        - fetch_schema
         - fetch_dsd_schema
         - parse_dsd_id
         - standardize_data_for_upload

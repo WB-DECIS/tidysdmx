@@ -69,7 +69,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """Fetch a DSD schema from a Fusion Metadata Registry (FMR).
 
     .. deprecated::
-        Use :func:`fetch_schema` instead.
+        Use :meth:`tidysdmx.FmrClient.fetch_schema` instead.
 
     Args:
         fmr_params: Base URL and endpoints to access FMR's API.
@@ -85,7 +85,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
     """
     warnings.warn(
         "fetch_dsd_schema is deprecated and will be removed in a future release. "
-        "Please use fetch_schema instead.",
+        "Please use FmrClient.fetch_schema instead.",
         FutureWarning,
         stacklevel=2,
     )
@@ -96,7 +96,7 @@ def fetch_dsd_schema(fmr_params: dict, env: str, dsd_id: str) -> Schema:
 
     client = fmr.RegistryClient(base_url, format=structure_format)
 
-    agency, id_part, version = parse_dsd_id(dsd_id)
+    agency, id_part, version = parse_artefact_id(dsd_id)
     return client.get_schema("datastructure", agency, id_part, version)
 
 
@@ -108,6 +108,16 @@ def fetch_schema(
 ) -> Schema:
     """Fetch the schema of a specified artefact from an SDMX registry.
 
+    .. deprecated::
+        Use :meth:`tidysdmx.FmrClient.fetch_schema` instead. ``FmrClient``
+        takes the registry root, path included —
+        ``FmrClient("https://fmr.example.org/FMR").fetch_schema(artefact_id,
+        context)`` — and adds authentication, URN references and the checks
+        that refuse wildcards.
+
+    This function joins ``/FMR/sdmx/v2/`` to the host of ``base_url``,
+    discarding any path ``base_url`` has, and reads anonymously.
+
     Args:
         base_url: The base URL of the FMR.
         artefact_id: The identifier of the artefact, typically in the format
@@ -116,7 +126,18 @@ def fetch_schema(
 
     Returns:
         The fetched schema object.
+
+    Raises:
+        ValueError: If ``artefact_id`` is not in the ``agency:id(version)``
+            format.
     """
+    warnings.warn(
+        "fetch_schema is deprecated and will be removed in a future release. "
+        "Please use FmrClient.fetch_schema instead; FmrClient takes the registry "
+        "root, path included, e.g. FmrClient('https://fmr.example.org/FMR').",
+        FutureWarning,
+        stacklevel=2,
+    )
     structure_format = StructureFormat.FUSION_JSON
     base_url = urljoin(base_url, "/FMR/sdmx/v2/")
     client = fmr.RegistryClient(base_url, format=structure_format)

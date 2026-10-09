@@ -19,7 +19,7 @@ This module fills exactly that gap:
 - :class:`FmrClient` owns one registry and one token cache, and hands out
   pysdmx clients that send a fresh token on every request, reads included.
   Its ``fetch_*`` methods read artefacts and schemas given as
-  ``"AGENCY:ID(VERSION)"``, with or without a token.
+  ``"AGENCY:ID(VERSION)"`` or as a URN, with or without a token.
 
 ``FmrClient`` is the package's first stateful object. Hold one per registry
 and reuse it; the token cache lives on it.
@@ -29,12 +29,13 @@ Everything pysdmx offers stays available: ``FmrClient.registry`` *is* a
 ``RegistryMaintenanceClient``. Where this module has to reach into pysdmx
 internals to get a token onto the wire, it does so through guarded, tested
 seams that are registered as temporary workarounds in
-``docs/pysdmx-shortcomings.md`` (``PYSDMX-AUTH-nn``).
+``docs/pysdmx-shortcomings.md`` (``PYSDMX-AUTH-nn``); the read-side gaps its
+fetch methods guard against are registered there too (``PYSDMX-READ-nn``).
 """
 
 import logging
+import re
 import threading
-import warnings
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -47,7 +48,8 @@ from typing import (
     Protocol,
     Self,
     TypeAlias,
-    TypeVar,
+    cast,
+    overload,
     runtime_checkable,
 )
 from urllib.parse import urlsplit, urlunsplit
@@ -56,20 +58,35 @@ import httpx
 from pysdmx.api.fmr import API_VERSION, RegistryClient
 from pysdmx.api.fmr.maintenance import RegistryMaintenanceClient, StructureAction
 from pysdmx.api.qb import ApiVersion, RefMetaFormat, RestService, SchemaFormat
-from pysdmx.errors import NotFound
+from pysdmx.errors import Invalid, NotFound
 from pysdmx.io.format import StructureFormat
 from pysdmx.model import (
+    Agency,
+    Categorisation,
     CategoryScheme,
     Codelist,
     ConceptScheme,
     Dataflow,
+    DataflowInfo,
+    DataProvider,
     DataStructureDefinition,
     Hierarchy,
+    ItemReference,
+    Metadataflow,
+    MetadataProvider,
+    MetadataProvisionAgreement,
+    MetadataReport,
+    MetadataStructure,
+    MultiRepresentationMap,
     ProvisionAgreement,
+    RepresentationMap,
     Schema,
     StructureMap,
+    TransformationScheme,
 )
 from pysdmx.model.__base import MaintainableArtefact
+from pysdmx.model.message import Header
+from pysdmx.util import parse_urn
 from typeguard import typechecked
 
 from .tidysdmx import parse_artefact_id
@@ -92,15 +109,23 @@ ArtefactType: TypeAlias = Literal[
     "hierarchy",
     "conceptscheme",
     "categoryscheme",
+    "categorisation",
     "dataflow",
     "datastructure",
     "provisionagreement",
+    "metadataflow",
+    "metadatastructure",
+    "metadataprovisionagreement",
     "structuremap",
+    "representationmap",
+    "transformationscheme",
 ]
 """The artefact types :meth:`FmrClient.fetch_artefact` accepts.
 
 These are SDMX REST resource names, the values of pysdmx's ``StructureType``,
 so they extend the ``context`` vocabulary of :meth:`FmrClient.fetch_schema`.
+One per pysdmx ``RegistryClient`` getter that reads a single maintainable
+artefact by agency, ID and version.
 """
 
 RegistryArtefact: TypeAlias = (
@@ -108,15 +133,23 @@ RegistryArtefact: TypeAlias = (
     | Hierarchy
     | ConceptScheme
     | CategoryScheme
+    | Categorisation
     | Dataflow
     | DataStructureDefinition
     | ProvisionAgreement
+    | Metadataflow
+    | MetadataStructure
+    | MetadataProvisionAgreement
     | StructureMap
+    | RepresentationMap
+    | MultiRepresentationMap
+    | TransformationScheme
 )
-"""What :meth:`FmrClient.fetch_artefact` returns, one class per artefact type."""
+"""What :meth:`FmrClient.fetch_artefact` returns, one class per artefact type.
 
-# The two artefact types pysdmx only fetches as a list.
-_Listed = TypeVar("_Listed", Dataflow, DataStructureDefinition)
+A representation map with several sources or targets comes back as a
+``MultiRepresentationMap``.
+"""
 
 _MAINTENANCE_PATHS: Final[tuple[str, ...]] = (
     "/ws/secure/sdmx/v2/metadata",
@@ -131,6 +164,14 @@ _BUILD_AUTH_ATTR: Final[str] = "_RegistryMaintenanceClient__build_auth"
 _SEAM_DOC: Final[str] = "docs/pysdmx-shortcomings.md"
 _BOOTSTRAP_VALUE: Final[str] = "<supplied per request>"
 _SCOPE_EXAMPLE: Final[str] = "api://<fmr-app-id>/.default"
+# What an agency, ID or version may hold. pysdmx puts all three into the URL
+# path escaping only "[]:+*,", so anything else ("?", "#", "/", spaces) would
+# silently query a different resource (PYSDMX-READ-02).
+_REFERENCE_PART: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_@$.+~-]+")
+# SDMX's nested agency ID grammar, e.g. "WB" or "WB.DEC".
+_AGENCY_ID: Final[re.Pattern[str]] = re.compile(
+    r"[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*"
+)
 
 
 def _utcnow() -> datetime:
@@ -597,33 +638,133 @@ def _normalise_root(base_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
-def _split_artefact_id(artefact_id: str) -> tuple[str, str, str]:
-    """Split ``"AGENCY:ID(VERSION)"`` for a fetch, refusing URNs and wildcards.
+def _parse_reference(
+    reference: str,
+    urn_classes: frozenset[str],
+    *,
+    argument: str = "artefact_id",
+    form: str = "AGENCY:ID(VERSION)",
+) -> tuple[str, str, str]:
+    """Split an artefact reference into agency, ID and version for a fetch.
 
-    ``parse_artefact_id`` reads a URN as agency ``"urn"`` instead of failing,
-    and pysdmx's single-artefact readers keep the first of several matches
-    without a word (``Codelist[0]``), so both are stopped before any request.
-    SDMX identifiers never contain ``=``, which every URN does.
+    ``reference`` is ``form`` or the full or short URN of an artefact whose
+    SDMX class is one of ``urn_classes``. SDMX identifiers never contain ``=``,
+    which every URN does. ``parse_artefact_id`` alone would read a URN as
+    agency ``"urn"``, and pysdmx's single-artefact readers keep the first of
+    several matches without a word (PYSDMX-READ-01), so both are stopped
+    before any request.
     """
-    if "=" in artefact_id:
+    if "=" in reference and not urn_classes:
+        raise ValueError(_malformed_message(reference, urn_classes, argument, form))
+    if "=" in reference:
+        parts = _split_urn(reference, urn_classes, argument=argument, form=form)
+    else:
+        try:
+            parts = parse_artefact_id(reference)
+        except ValueError as err:
+            raise ValueError(
+                _malformed_message(reference, urn_classes, argument, form)
+            ) from err
+    _check_single(parts, reference, argument=argument)
+    return parts
+
+
+def _split_urn(
+    urn: str, urn_classes: frozenset[str], *, argument: str, form: str
+) -> tuple[str, str, str]:
+    """Return the agency, ID and version of the URN of one whole artefact."""
+    try:
+        ref = parse_urn(urn)
+    except Invalid as err:
+        raise ValueError(_malformed_message(urn, urn_classes, argument, form)) from err
+    if not ref.sdmx_type:
+        raise ValueError(_malformed_message(urn, urn_classes, argument, form))
+    if isinstance(ref, ItemReference):
         raise ValueError(
-            "artefact_id must be 'AGENCY:ID(VERSION)', not a URN; got "
-            f"{artefact_id!r}. pysdmx.util.parse_urn gives the agency, id and "
-            "version of a URN such as Dataflow.structure."
+            f"{argument} must reference a whole artefact, not the {ref.sdmx_type} "
+            f"{ref.item_id!r} inside one; got {urn!r}"
         )
-    agency, id_part, version = parse_artefact_id(artefact_id)
-    if any(char in part for part in (agency, id_part, version) for char in "*,"):
+    if ref.sdmx_type not in urn_classes:
         raise ValueError(
-            "artefact_id must identify a single artefact; wildcards ('*') and "
-            f"lists (',') are not supported, got {artefact_id!r}. For the latest "
+            f"{argument} is a {ref.sdmx_type} URN, but {_classes_text(urn_classes)} "
+            f"URN is expected here; got {urn!r}"
+        )
+    return ref.agency, ref.id, ref.version
+
+
+def _urn_class(reference: str) -> str | None:
+    """Return the SDMX class a checked reference's URN names, else ``None``."""
+    return parse_urn(reference).sdmx_type if "=" in reference else None
+
+
+def _check_codelist_class(codelist: Codelist, artefact_id: str) -> None:
+    """Refuse a codelist whose class is not the one its URN names.
+
+    pysdmx's ``get_codes`` asks for a codelist and, only when there is none,
+    for a value list (PYSDMX-READ-05). A ValueList URN therefore gets the
+    Codelist sharing its agency, ID and version, and a Codelist URN with no
+    such codelist gets the ValueList. ``AGENCY:ID(VERSION)`` names no class,
+    so it keeps pysdmx's fallback.
+    """
+    wanted = _urn_class(artefact_id)
+    got = codelist.short_urn.partition("=")[0]
+    if wanted is not None and wanted != got:
+        raise ValueError(
+            f"artefact_id {artefact_id!r} names a {wanted}, but pysdmx returned "
+            f"{codelist.short_urn!r}: it looks for a Codelist first and for a "
+            f"ValueList only when there is none, so it cannot fetch this {wanted} "
+            "(PYSDMX-READ-05)"
+        )
+
+
+def _check_single(
+    parts: tuple[str, str, str], reference: str, *, argument: str
+) -> None:
+    """Refuse a reference that would not select exactly one artefact."""
+    if any(char in part for part in parts for char in "*,"):
+        raise ValueError(
+            f"{argument} must identify a single artefact; wildcards ('*') and "
+            f"lists (',') are not supported, got {reference!r}. For the latest "
             "version, use '~' (or '+' for the latest stable one)."
         )
-    return agency, id_part, version
+    for part in parts:
+        if not _REFERENCE_PART.fullmatch(part):
+            raise ValueError(
+                f"{argument} {reference!r} holds {part!r}, which is not a valid "
+                "SDMX agency, ID or version"
+            )
+
+
+def _classes_text(urn_classes: frozenset[str]) -> str:
+    """Name SDMX classes for a message: ``"a Codelist or ValueList"``."""
+    return "a " + " or ".join(sorted(urn_classes))
+
+
+def _malformed_message(
+    reference: str, urn_classes: frozenset[str], argument: str, form: str
+) -> str:
+    urn = f" or the URN of {_classes_text(urn_classes)}" if urn_classes else ""
+    return f"{argument} must be {form!r}{urn}; got {reference!r}"
+
+
+def _check_agency(agency: str) -> str:
+    """Return ``agency`` if it is one SDMX agency ID, else raise.
+
+    pysdmx's organisation-scheme getters keep the first scheme's items when
+    the agency matches several (PYSDMX-READ-01), so wildcards and lists are
+    refused along with anything that is not an agency ID.
+    """
+    if not _AGENCY_ID.fullmatch(agency):
+        raise ValueError(
+            "agency must be one agency ID such as 'WB' or 'WB.DEC'; wildcards, "
+            f"lists and artefact references are not supported, got {agency!r}"
+        )
+    return agency
 
 
 def _exactly_one(
-    found: Sequence[_Listed], artefact_type: ArtefactType, artefact_id: str
-) -> _Listed:
+    found: Sequence[RegistryArtefact], artefact_type: str, artefact_id: str
+) -> RegistryArtefact:
     """Return the one artefact a pysdmx list getter found for ``artefact_id``."""
     if len(found) == 1:
         return found[0]
@@ -639,6 +780,78 @@ def _exactly_one(
     )
 
 
+@dataclass(frozen=True)
+class _ArtefactSpec:
+    """How :meth:`FmrClient.fetch_artefact` reads one artefact type.
+
+    Attributes:
+        getter: The ``RegistryClient`` method that reads it, called with the
+            agency, ID and version.
+        urn_classes: The SDMX classes a URN of it names, exactly as URNs spell
+            them (``"DataStructure="``, not the REST ``datastructure``).
+        listed: Whether that getter returns a list, which ``fetch_artefact``
+            narrows to the single artefact requested.
+    """
+
+    getter: str
+    urn_classes: frozenset[str]
+    listed: bool = False
+
+
+_ARTEFACT_SPECS: Final[dict[ArtefactType, _ArtefactSpec]] = {
+    "codelist": _ArtefactSpec("get_codes", frozenset({"Codelist", "ValueList"})),
+    "hierarchy": _ArtefactSpec("get_hierarchy", frozenset({"Hierarchy"})),
+    "conceptscheme": _ArtefactSpec("get_concepts", frozenset({"ConceptScheme"})),
+    "categoryscheme": _ArtefactSpec("get_categories", frozenset({"CategoryScheme"})),
+    "categorisation": _ArtefactSpec(
+        "get_categorisation", frozenset({"Categorisation"})
+    ),
+    "dataflow": _ArtefactSpec("get_dataflows", frozenset({"Dataflow"}), listed=True),
+    "datastructure": _ArtefactSpec(
+        "get_data_structures", frozenset({"DataStructure"}), listed=True
+    ),
+    "provisionagreement": _ArtefactSpec(
+        "get_provision_agreement", frozenset({"ProvisionAgreement"})
+    ),
+    "metadataflow": _ArtefactSpec(
+        "get_metadataflows", frozenset({"Metadataflow"}), listed=True
+    ),
+    "metadatastructure": _ArtefactSpec(
+        "get_metadata_structures", frozenset({"MetadataStructure"}), listed=True
+    ),
+    "metadataprovisionagreement": _ArtefactSpec(
+        "get_metadata_provision_agreement", frozenset({"MetadataProvisionAgreement"})
+    ),
+    "structuremap": _ArtefactSpec("get_mapping", frozenset({"StructureMap"})),
+    "representationmap": _ArtefactSpec(
+        "get_code_map", frozenset({"RepresentationMap"})
+    ),
+    "transformationscheme": _ArtefactSpec(
+        "get_vtl_transformation_scheme", frozenset({"TransformationScheme"})
+    ),
+}
+"""The pysdmx getter behind each artefact type, for :meth:`FmrClient.fetch_artefact`."""
+
+
+def _artefact_spec(artefact_type: str) -> _ArtefactSpec:
+    """Return the spec for ``artefact_type``, or raise if it is not one.
+
+    ``artefact_type`` often comes from a configuration file, so it is checked
+    here rather than left to typeguard, which ``python -O`` switches off.
+    """
+    if artefact_type not in _ARTEFACT_SPECS:
+        allowed = ", ".join(repr(name) for name in _ARTEFACT_SPECS)
+        hint = (
+            " A schema is not an artefact: use fetch_schema."
+            if artefact_type == "schema"
+            else ""
+        )
+        raise ValueError(
+            f"artefact_type must be one of {allowed}; got {artefact_type!r}.{hint}"
+        )
+    return _ARTEFACT_SPECS[artefact_type]
+
+
 @typechecked
 class FmrClient:
     """One Fusion Metadata Registry, with authentication handled for you.
@@ -652,11 +865,20 @@ class FmrClient:
     :class:`TokenProvider`, cached, refreshed before it expires, and sent on
     every request — reads included.
 
-    Reads take an ``"AGENCY:ID(VERSION)"`` string: :meth:`fetch_artefact` for
-    any supported artefact type, one typed method per type
-    (:meth:`fetch_codelist`, :meth:`fetch_hierarchy`, :meth:`fetch_dataflow`,
-    ...) and :meth:`fetch_schema`. They behave the same whether or not a token
-    provider is set.
+    Reads take an ``"AGENCY:ID(VERSION)"`` string or the artefact's URN, full
+    (``urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_X(1.0)``) or short
+    (``Codelist=WB:CL_X(1.0)``), so the URNs pysdmx returns as references, such
+    as ``Dataflow.structure``, can be passed straight back:
+    :meth:`fetch_artefact` for any supported artefact type, one typed method per
+    type (:meth:`fetch_codelist`, :meth:`fetch_hierarchy`,
+    :meth:`fetch_dataflow`, ...), and :meth:`fetch_schema`,
+    :meth:`fetch_dataflow_info` and :meth:`fetch_metadata_reports`, which take
+    the artefact the same way. A URN must name the class being fetched.
+    :meth:`fetch_agencies`, :meth:`fetch_data_providers` and
+    :meth:`fetch_metadata_providers` take an agency ID, and
+    :meth:`fetch_metadata_report` a metadata set as ``"PROVIDER:ID(VERSION)"``.
+    Together they wrap every getter of pysdmx's ``RegistryClient``, and they
+    behave the same whether or not a token provider is set.
 
     This is the package's first stateful object: hold one instance per
     registry and reuse it; the token cache lives on it. When a token provider
@@ -785,125 +1007,224 @@ class FmrClient:
             self._maintenance = self._build_maintenance()
         return self._maintenance
 
+    @overload
     def fetch_artefact(
-        self, artefact_id: str, artefact_type: ArtefactType
-    ) -> RegistryArtefact:
+        self, artefact_id: str, artefact_type: Literal["codelist"]
+    ) -> Codelist: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["hierarchy"]
+    ) -> Hierarchy: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["conceptscheme"]
+    ) -> ConceptScheme: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["categoryscheme"]
+    ) -> CategoryScheme: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["categorisation"]
+    ) -> Categorisation: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["dataflow"]
+    ) -> Dataflow: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["datastructure"]
+    ) -> DataStructureDefinition: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["provisionagreement"]
+    ) -> ProvisionAgreement: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["metadataflow"]
+    ) -> Metadataflow: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["metadatastructure"]
+    ) -> MetadataStructure: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["metadataprovisionagreement"]
+    ) -> MetadataProvisionAgreement: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["structuremap"]
+    ) -> StructureMap: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["representationmap"]
+    ) -> RepresentationMap | MultiRepresentationMap: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["transformationscheme"]
+    ) -> TransformationScheme: ...
+    @overload
+    def fetch_artefact(
+        self, artefact_id: str, artefact_type: str
+    ) -> RegistryArtefact: ...
+
+    def fetch_artefact(self, artefact_id: str, artefact_type: str) -> RegistryArtefact:
         """Fetch one artefact of the given type from the registry.
 
-        The generic entry point, for when the type is data, read from a
-        configuration file for instance. When the type is known in code,
-        prefer the typed method (:meth:`fetch_codelist`,
-        :meth:`fetch_hierarchy`, ...): its return type is exact.
+        The workhorse behind every typed method (:meth:`fetch_codelist`,
+        :meth:`fetch_dataflow`, ...): it checks the type, splits the
+        reference, calls the matching pysdmx ``RegistryClient`` getter, and
+        narrows the answer of a getter that only lists to the one artefact
+        requested. Call it directly when the type is data, read from a
+        configuration file for instance. When the type is known in code, the
+        typed method reads better; with a literal ``artefact_type`` the return
+        type of this method is exact too.
 
         Args:
-            artefact_id: The artefact identifier, ``"AGENCY:ID(VERSION)"``,
-                e.g. ``"WB:CL_REF_AREA(1.0)"``. The version may be ``~`` for
-                the latest or ``+`` for the latest stable one.
-            artefact_type: The SDMX REST resource name of the artefact:
-                ``"codelist"``, ``"hierarchy"``, ``"conceptscheme"``,
-                ``"categoryscheme"``, ``"dataflow"``, ``"datastructure"``,
-                ``"provisionagreement"`` or ``"structuremap"``. A schema is
-                not an artefact: use :meth:`fetch_schema`.
+            artefact_id: The artefact identifier or URN, ``"AGENCY:ID(VERSION)"``,
+                e.g. ``"WB:CL_REF_AREA(1.0)"``, or its full or short URN. The
+                version may be ``~`` for the latest or ``+`` for the latest
+                stable one.
+            artefact_type: The SDMX REST resource name of the artefact, one
+                of ``"codelist"``, ``"hierarchy"``, ``"conceptscheme"``,
+                ``"categoryscheme"``, ``"categorisation"``, ``"dataflow"``,
+                ``"datastructure"``, ``"provisionagreement"``,
+                ``"metadataflow"``, ``"metadatastructure"``,
+                ``"metadataprovisionagreement"``, ``"structuremap"``,
+                ``"representationmap"`` or ``"transformationscheme"`` (the
+                values of :data:`ArtefactType`). A schema is not an artefact:
+                use :meth:`fetch_schema`.
 
         Returns:
             The artefact, as the pysdmx class its typed method returns.
 
         Raises:
-            typeguard.TypeCheckError: If ``artefact_type`` is not listed above.
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list; or if a dataflow or data
-                structure reference matches several versions.
+            ValueError: If ``artefact_type`` is not one of the values above;
+                if ``artefact_id`` is neither ``AGENCY:ID(VERSION)`` nor the URN
+                of a whole artefact of that type, holds a wildcard or a list, or
+                holds a character no SDMX identifier has; if a dataflow, data
+                structure, metadataflow or metadata structure reference matches
+                several versions; or if a Codelist or ValueList URN resolves to
+                the other class (PYSDMX-READ-05).
             pysdmx.errors.NotFound: If the registry has no such artefact.
             pysdmx.errors.PysdmxError: Any other registry or connection
                 failure: ``Invalid`` (any other 4xx, 401 and 403 included),
                 ``InternalError`` or ``Unavailable``.
         """
-        return _FETCHERS[artefact_type](self, artefact_id)
+        spec = _artefact_spec(artefact_type)
+        agency, id_part, version = _parse_reference(artefact_id, spec.urn_classes)
+        fetch = getattr(self.registry, spec.getter)
+        if spec.listed:
+            found: Sequence[RegistryArtefact] = fetch(agency, id_part, version)
+            return _exactly_one(found, artefact_type, artefact_id)
+        artefact: RegistryArtefact = fetch(agency, id_part, version)
+        if isinstance(artefact, Codelist):
+            _check_codelist_class(artefact, artefact_id)
+        return artefact
 
     def fetch_codelist(self, artefact_id: str) -> Codelist:
-        """Fetch a codelist given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a codelist by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The codelist identifier, e.g. ``"WB:CL_REF_AREA(1.0)"``.
-                The version may be ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The codelist identifier or URN, e.g.
+                ``"WB:CL_REF_AREA(1.0)"``. The version may be ``~`` (latest) or
+                ``+`` (latest stable).
 
         Returns:
             The codelist with its codes. A value list comes back as a
             ``Codelist`` too, with ``sdmx_type == "valuelist"``: pysdmx looks
-            for a codelist first, then for a value list.
+            for a codelist first, then for a value list. A URN gets the class
+            it names or a ``ValueError``, so a ValueList URN raises when a
+            codelist shares the value list's agency, ID and version.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                codelist (see :meth:`fetch_artefact`), or its URN names the
+                class pysdmx did not return.
             pysdmx.errors.NotFound: If the registry has no such codelist.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_codes(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "codelist")
 
     def fetch_hierarchy(self, artefact_id: str) -> Hierarchy:
-        """Fetch a hierarchy given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a hierarchy by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The hierarchy identifier. The version may be ``~``
-                (latest) or ``+`` (latest stable).
+            artefact_id: The hierarchy identifier or URN. The version may be
+                ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The SDMX 3.0 hierarchy, each code's name and validity resolved from
             the codelist it belongs to.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                hierarchy (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such hierarchy.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_hierarchy(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "hierarchy")
 
     def fetch_concept_scheme(self, artefact_id: str) -> ConceptScheme:
-        """Fetch a concept scheme given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a concept scheme by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The concept scheme identifier. The version may be
-                ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The concept scheme identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The concept scheme with its concepts.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one concept
+                scheme (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such concept scheme.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_concepts(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "conceptscheme")
 
     def fetch_category_scheme(self, artefact_id: str) -> CategoryScheme:
-        """Fetch a category scheme given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a category scheme by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The category scheme identifier. The version may be
-                ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The category scheme identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The category scheme with its categories.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                category scheme (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such category scheme.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_categories(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "categoryscheme")
 
-    def fetch_dataflow(self, artefact_id: str) -> Dataflow:
-        """Fetch a dataflow given as ``"AGENCY:ID(VERSION)"``.
+    def fetch_categorisation(self, artefact_id: str) -> Categorisation:
+        """Fetch a categorisation by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The dataflow identifier, e.g.
+            artefact_id: The categorisation identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The categorisation. Its ``source`` is the URN of the categorised
+            artefact and its ``target`` the URN of the category.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                categorisation (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such categorisation.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "categorisation")
+
+    def fetch_dataflow(self, artefact_id: str) -> Dataflow:
+        """Fetch a dataflow by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The dataflow identifier or URN, e.g.
                 ``"WB:DF_IFPRI_ASTI(1.0)"``. The version may be ``~`` (latest)
                 or ``+`` (latest stable).
 
@@ -912,23 +1233,18 @@ class FmrClient:
             definition; :meth:`fetch_schema` gives the resolved components.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list; or if it matches several
-                dataflows.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                dataflow (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such dataflow.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        found = self.registry.get_dataflows(agency, id_part, version)
-        return _exactly_one(found, "dataflow", artefact_id)
+        return self.fetch_artefact(artefact_id, "dataflow")
 
-    def fetch_data_structure_definition(
-        self, artefact_id: str
-    ) -> DataStructureDefinition:
-        """Fetch a data structure definition given as ``"AGENCY:ID(VERSION)"``.
+    def fetch_dsd(self, artefact_id: str) -> DataStructureDefinition:
+        """Fetch a data structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The data structure identifier, e.g.
+            artefact_id: The data structure definition identifier or URN, e.g.
                 ``"WB:IFPRI_ASTI(1.0)"``. The version may be ``~`` (latest) or
                 ``+`` (latest stable).
 
@@ -937,71 +1253,169 @@ class FmrClient:
             concepts and codelists they use.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list; or if it matches several
-                data structures.
-            pysdmx.errors.NotFound: If the registry has no such data structure.
+            ValueError: If ``artefact_id`` does not identify exactly one data
+                structure definition (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such data structure
+                definition.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        found = self.registry.get_data_structures(agency, id_part, version)
-        return _exactly_one(found, "datastructure", artefact_id)
+        return self.fetch_artefact(artefact_id, "datastructure")
 
     def fetch_provision_agreement(self, artefact_id: str) -> ProvisionAgreement:
-        """Fetch a provision agreement given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch a provision agreement by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The provision agreement identifier. The version may
-                be ``~`` (latest) or ``+`` (latest stable).
+            artefact_id: The provision agreement identifier or URN. The version
+                may be ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
             The provision agreement. Its ``dataflow`` and ``provider`` are URNs.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
-            pysdmx.errors.NotFound: If the registry has no such agreement.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                provision agreement (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such provision
+                agreement.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_provision_agreement(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "provisionagreement")
 
-    def fetch_structure_map(self, artefact_id: str) -> StructureMap:
-        """Fetch a structure map given as ``"AGENCY:ID(VERSION)"``.
-
-        Its representation maps come embedded, as
-        :func:`tidysdmx.map_structures` needs; ``map_structures`` does not apply
-        ``DatePatternMap`` rules and raises ``TypeError`` on one.
+    def fetch_metadataflow(self, artefact_id: str) -> Metadataflow:
+        """Fetch a metadataflow by ``"AGENCY:ID(VERSION)"`` or URN.
 
         Args:
-            artefact_id: The structure map identifier, e.g.
-                ``"WB:SM_IFPRI_ASTI_TO_DATA360(~)"``. The version may be
+            artefact_id: The metadataflow identifier or URN. The version may be
                 ``~`` (latest) or ``+`` (latest stable).
 
         Returns:
-            The structure map, with the representation maps it uses.
+            The metadataflow. Its ``structure`` is the URN of its metadata
+            structure and its ``targets`` the URNs of what it describes.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                metadataflow (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such metadataflow.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "metadataflow")
+
+    def fetch_msd(self, artefact_id: str) -> MetadataStructure:
+        """Fetch a metadata structure definition by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The metadata structure definition identifier or URN.
+                The version may be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The metadata structure definition, with its components and the
+            concepts and codelists they use.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                metadata structure definition (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such metadata
+                structure definition.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "metadatastructure")
+
+    def fetch_metadata_provision_agreement(
+        self, artefact_id: str
+    ) -> MetadataProvisionAgreement:
+        """Fetch a metadata provision agreement by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The metadata provision agreement identifier or URN. The
+                version may be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The metadata provision agreement. Its ``metadataflow`` and
+            ``metadata_provider`` are URNs.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                metadata provision agreement (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such metadata
+                provision agreement.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "metadataprovisionagreement")
+
+    def fetch_structure_map(self, artefact_id: str) -> StructureMap:
+        """Fetch a structure map by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The structure map identifier or URN, e.g.
+                ``"WB:SM_IFPRI_ASTI_TO_DATA360(~)"``. The version may be ``~``
+                (latest) or ``+`` (latest stable).
+
+        Returns:
+            The structure map, with the representation maps it uses embedded,
+            as :func:`tidysdmx.map_structures` needs; ``map_structures`` does
+            not apply ``DatePatternMap`` rules and raises ``TypeError`` on one.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                structure map (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such structure map.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
-        return self.registry.get_mapping(agency, id_part, version)
+        return self.fetch_artefact(artefact_id, "structuremap")
+
+    def fetch_representation_map(
+        self, artefact_id: str
+    ) -> RepresentationMap | MultiRepresentationMap:
+        """Fetch a representation map by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The representation map identifier or URN. The version
+                may be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The representation map. One with several sources or targets comes
+            back as a ``MultiRepresentationMap``.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one
+                representation map (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such representation
+                map.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "representationmap")
+
+    def fetch_transformation_scheme(self, artefact_id: str) -> TransformationScheme:
+        """Fetch a VTL transformation scheme by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The VTL transformation scheme identifier or URN. The
+                version may be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The VTL transformation scheme with its transformations.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one VTL
+                transformation scheme (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such VTL
+                transformation scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "transformationscheme")
 
     def fetch_schema(
         self,
         artefact_id: str,
         context: Literal["dataflow", "datastructure", "provisionagreement"],
     ) -> Schema:
-        """Fetch the schema of an artefact given as ``"AGENCY:ID(VERSION)"``.
+        """Fetch the schema of an artefact by ``"AGENCY:ID(VERSION)"`` or URN.
 
-        Unlike the module-level :func:`tidysdmx.fetch_schema`, this goes
-        through the client's registry root, token and settings.
+        This replaces the deprecated module-level :func:`tidysdmx.fetch_schema`:
+        it goes through the client's registry root, token and settings.
 
         Args:
-            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``.
+            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``, or
+                its URN, which must name the class ``context`` gives.
             context: Whether the artefact is a dataflow, a data structure or a
                 provision agreement.
 
@@ -1009,49 +1423,191 @@ class FmrClient:
             The resolved schema, with codelists and data types attached.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``, is a
-                URN, or holds a wildcard or a list.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                artefact of the ``context`` type (see :meth:`fetch_artefact`).
             pysdmx.errors.NotFound: If the registry has no such artefact.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        agency, id_part, version = _split_artefact_id(artefact_id)
+        agency, id_part, version = _parse_reference(
+            artefact_id, _ARTEFACT_SPECS[context].urn_classes
+        )
         return self.registry.get_schema(context, agency, id_part, version)
 
-    def get_schema(
+    def fetch_dataflow_info(
         self,
         artefact_id: str,
-        context: Literal["dataflow", "datastructure", "provisionagreement"],
-    ) -> Schema:
-        """Fetch the schema of an artefact given as ``"AGENCY:ID(VERSION)"``.
+        detail: Literal["all", "core", "providers", "schema"] = "all",
+    ) -> DataflowInfo:
+        """Fetch what the registry knows about a dataflow, for discovery.
 
-        .. deprecated::
-            Use :meth:`FmrClient.fetch_schema` instead.
+        Unlike :meth:`fetch_dataflow`, which returns the ``Dataflow`` artefact,
+        this returns pysdmx's ``DataflowInfo`` summary: the dataflow's name and
+        description with, as ``detail`` asks, the organisations providing data
+        for it and its schema. ``"all"`` and ``"schema"`` cost two extra
+        requests, for the schema.
 
         Args:
-            artefact_id: The artefact identifier, e.g. ``"WB:WDI(1.0.0)"``.
-            context: Whether the artefact is a dataflow, a data structure or a
-                provision agreement.
+            artefact_id: The dataflow identifier, e.g.
+                ``"WB:DF_IFPRI_ASTI(1.0)"``, or its URN. Prefer an exact
+                version: pysdmx matches the dataflow in the registry's answer
+                against the version string, so ``+`` misses a dataflow whose
+                version is not ``X.Y.Z`` and a SemVer wildcard such as
+                ``1.+.0`` never matches (PYSDMX-READ-04).
+            detail: ``"core"`` for the dataflow only, ``"providers"`` to add
+                its data providers, ``"schema"`` to add its schema, ``"all"``
+                for both.
 
         Returns:
-            The resolved schema, with codelists and data types attached.
+            The dataflow summary.
 
         Raises:
-            ValueError: If ``artefact_id`` is not ``agency:id(version)``.
+            ValueError: If ``artefact_id`` does not identify exactly one
+                dataflow (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such dataflow, or
+                pysdmx finds none matching the requested version in the
+                registry's answer.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
-        warnings.warn(
-            "FmrClient.get_schema is deprecated and will be removed in a future "
-            "release. Please use FmrClient.fetch_schema instead.",
-            FutureWarning,
-            stacklevel=2,
+        agency, id_part, version = _parse_reference(
+            artefact_id, _ARTEFACT_SPECS["dataflow"].urn_classes
         )
-        agency, id_part, version = parse_artefact_id(artefact_id)
-        return self.registry.get_schema(context, agency, id_part, version)
+        return self.registry.get_dataflow_details(agency, id_part, version, detail)
+
+    def fetch_agencies(self, agency: str) -> Sequence[Agency]:
+        """Fetch the sub-agencies an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose agency scheme to read, e.g.
+                ``"WB"``.
+
+        Returns:
+            The agencies in its scheme, their IDs qualified with ``agency``
+            (``"WB.DECIS"``).
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no agency scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.registry.get_agencies(_check_agency(agency))
+
+    def fetch_data_providers(
+        self, agency: str, *, with_flows: bool = False
+    ) -> Sequence[DataProvider]:
+        """Fetch the data providers an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose data provider scheme to read,
+                e.g. ``"WB"``.
+            with_flows: Also fill each provider's ``dataflows`` with the
+                dataflows it provides data for, read from its provision
+                agreements.
+
+        Returns:
+            The data providers in its scheme.
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no data provider
+                scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.registry.get_providers(_check_agency(agency), with_flows)
+
+    def fetch_metadata_providers(
+        self, agency: str, *, with_flows: bool = False
+    ) -> Sequence[MetadataProvider]:
+        """Fetch the metadata providers an agency maintains.
+
+        Args:
+            agency: The ID of the agency whose metadata provider scheme to
+                read, e.g. ``"WB"``.
+            with_flows: Also fill each provider's ``dataflows`` with references
+                to the metadataflows it provides reports for, read from its
+                metadata provision agreements.
+
+        Returns:
+            The metadata providers in its scheme.
+
+        Raises:
+            ValueError: If ``agency`` is not one agency ID: a wildcard, a list
+                or an artefact reference.
+            pysdmx.errors.NotFound: If the agency maintains no metadata
+                provider scheme.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        providers = self.registry.get_metadata_providers(
+            _check_agency(agency), with_flows
+        )
+        # pysdmx annotates Sequence[DataProvider] but returns MetadataProvider
+        # objects (PYSDMX-READ-03); mypy reports this cast as redundant once
+        # the annotation is fixed upstream.
+        return cast("Sequence[MetadataProvider]", providers)
+
+    def fetch_metadata_report(self, report_id: str) -> MetadataReport:
+        """Fetch a reference metadata report given as ``"PROVIDER:ID(VERSION)"``.
+
+        Args:
+            report_id: The metadata provider's ID, the metadata set ID and its
+                version, e.g. ``"DECIS:MDS_QUALITY(1.0)"``. The version may be
+                ``~`` (latest) or ``+`` (latest stable). URNs are not accepted
+                here.
+
+        Returns:
+            The metadata report.
+
+        Raises:
+            ValueError: If ``report_id`` is not ``PROVIDER:ID(VERSION)``, or
+                holds a wildcard, a list or a character no SDMX identifier has.
+            pysdmx.errors.NotFound: If the registry has no such report.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        provider, id_part, version = _parse_reference(
+            report_id, frozenset(), argument="report_id", form="PROVIDER:ID(VERSION)"
+        )
+        return self.registry.get_report(provider, id_part, version)
+
+    def fetch_metadata_reports(
+        self, artefact_id: str, artefact_type: str
+    ) -> Sequence[MetadataReport]:
+        """Fetch the reference metadata reports attached to an artefact.
+
+        Args:
+            artefact_id: The artefact the reports describe, as
+                ``"AGENCY:ID(VERSION)"`` or its URN, e.g.
+                ``"WB:DF_IFPRI_ASTI(1.0)"``.
+            artefact_type: The artefact's type, one of the values of
+                :data:`ArtefactType`. ``"codelist"`` searches codelists only:
+                unlike :meth:`fetch_codelist`, there is no fallback to a value
+                list of the same ID. With a ValueList URN, it searches value
+                lists instead.
+
+        Returns:
+            The reports attached to the artefact.
+
+        Raises:
+            ValueError: If ``artefact_type`` is not an :data:`ArtefactType`
+                value, or ``artefact_id`` does not identify exactly one
+                artefact of that type (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no reports for it.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        spec = _artefact_spec(artefact_type)
+        agency, id_part, version = _parse_reference(artefact_id, spec.urn_classes)
+        # The REST resource tells a value list from a codelist; ArtefactType
+        # does not, so the URN's class decides (PYSDMX-READ-05).
+        is_value_list = _urn_class(artefact_id) == "ValueList"
+        resource = "valuelist" if is_value_list else artefact_type
+        return self.registry.get_reports(resource, agency, id_part, version)
 
     def put_structures(
         self,
         artefacts: Sequence[MaintainableArtefact],
         *,
         action: StructureAction = StructureAction.Replace,
+        header: Header | None = None,
     ) -> None:
         """Upload maintainable artefacts to the registry.
 
@@ -1064,11 +1620,16 @@ class FmrClient:
                 data structures, structure maps, ...
             action: How the registry treats metadata that already exists:
                 ``Append``, ``Merge`` or ``Replace`` (the default).
+            header: The SDMX message header to send, e.g. to name the sender
+                or give the message its own ID. Without one, pysdmx builds a
+                default header whose ``id`` and ``prepared`` time are fixed
+                when pysdmx is imported, so every upload in a process shares
+                them.
 
         Raises:
             ValueError: If the client was created without a token provider.
         """
-        self.maintenance.put_structures(artefacts, action=action)
+        self.maintenance.put_structures(artefacts, header=header, action=action)
 
     def _build_maintenance(self) -> RegistryMaintenanceClient:
         if self._cache is None:
@@ -1104,16 +1665,3 @@ class FmrClient:
             f"{type(self).__name__}(base_url={self._base_url!r}, "
             f"authenticated={self.is_authenticated})"
         )
-
-
-_FETCHERS: Final[dict[ArtefactType, Callable[[FmrClient, str], RegistryArtefact]]] = {
-    "codelist": FmrClient.fetch_codelist,
-    "hierarchy": FmrClient.fetch_hierarchy,
-    "conceptscheme": FmrClient.fetch_concept_scheme,
-    "categoryscheme": FmrClient.fetch_category_scheme,
-    "dataflow": FmrClient.fetch_dataflow,
-    "datastructure": FmrClient.fetch_data_structure_definition,
-    "provisionagreement": FmrClient.fetch_provision_agreement,
-    "structuremap": FmrClient.fetch_structure_map,
-}
-"""The typed method behind each artefact type, for :meth:`FmrClient.fetch_artefact`."""

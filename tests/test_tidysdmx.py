@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
+from pysdmx.api.fmr import RegistryClient
 from pysdmx.model import Components, Schema
 from typeguard import TypeCheckError
 
@@ -12,6 +13,8 @@ from tidysdmx.tidysdmx import (
     _add_sdmx_reference_cols,
     _extract_artefact_type,
     create_keys_dict,
+    fetch_dsd_schema,
+    fetch_schema,
     parse_artefact_id,
     parse_dsd_id,
     standardize_indicator_id,
@@ -20,6 +23,95 @@ from tidysdmx.tidysdmx import (
     vectorized_lookup_ordered_v1,
     vectorized_lookup_ordered_v2,
 )
+
+
+def _patch_get_schema(monkeypatch, schema):
+    """Replace RegistryClient.get_schema for every client; return its calls.
+
+    The module-level fetchers build their own pysdmx client, so the getter is
+    patched on the class, and each call records the endpoint it went to.
+    """
+    calls = []
+
+    def fake_get_schema(self, context, agency, id, version):
+        calls.append((self.api_endpoint, context, agency, id, version))
+        return schema
+
+    monkeypatch.setattr(RegistryClient, "get_schema", fake_get_schema)
+    return calls
+
+
+_FMR_PARAMS = {"qa": {"url": "https://fmr.example.org"}}
+
+
+class TestFetchSchema:
+    # fetch_schema is deprecated in favour of FmrClient.fetch_schema and emits
+    # FutureWarning by design, so every test here would trip
+    # `filterwarnings = ["error"]`. Scoped to the class rather than ignored
+    # globally: the suppression goes when the function is removed (backlog A4).
+    pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
+
+    @pytest.mark.filterwarnings("default::FutureWarning")
+    def test_fetch_schema_emits_future_warning_naming_fmr_client(
+        self, monkeypatch, sdmx_schema
+    ):
+        _patch_get_schema(monkeypatch, sdmx_schema)
+
+        with pytest.warns(
+            FutureWarning, match=r"Please use FmrClient\.fetch_schema.*/FMR"
+        ):
+            fetch_schema("https://fmr.example.org", "WB:WDI(1.0.0)", "dataflow")
+
+    def test_fetch_schema_keeps_its_url_rule(self, monkeypatch, sdmx_schema):
+        # Deprecated, not changed: any path in base_url is still replaced by
+        # /FMR/sdmx/v2, which is why it is not delegated to FmrClient.
+        calls = _patch_get_schema(monkeypatch, sdmx_schema)
+
+        fetch_schema("https://fmr.example.org/registry", "WB:WDI(1.0.0)", "dataflow")
+
+        assert calls == [
+            ("https://fmr.example.org/FMR/sdmx/v2", "dataflow", "WB", "WDI", "1.0.0")
+        ]
+
+    def test_fetch_schema_returns_pysdmx_schema(self, monkeypatch, sdmx_schema):
+        _patch_get_schema(monkeypatch, sdmx_schema)
+
+        schema = fetch_schema("https://fmr.example.org", "WB:WDI(1.0.0)", "dataflow")
+
+        assert schema is sdmx_schema
+
+
+class TestFetchDsdSchema:
+    def test_fetch_dsd_schema_warns_once_naming_fmr_client(
+        self, monkeypatch, sdmx_schema
+    ):
+        _patch_get_schema(monkeypatch, sdmx_schema)
+
+        with pytest.warns(FutureWarning) as record:
+            fetch_dsd_schema(_FMR_PARAMS, "qa", "WB:DSD_TEST(1.0)")
+
+        assert [str(w.message) for w in record] == [
+            "fetch_dsd_schema is deprecated and will be removed in a future "
+            "release. Please use FmrClient.fetch_schema instead."
+        ]
+
+    @pytest.mark.filterwarnings("ignore::FutureWarning")
+    def test_fetch_dsd_schema_still_fetches_the_data_structure_schema(
+        self, monkeypatch, sdmx_schema
+    ):
+        calls = _patch_get_schema(monkeypatch, sdmx_schema)
+
+        fetch_dsd_schema(_FMR_PARAMS, "qa", "WB:DSD_TEST(1.0)")
+
+        assert calls == [
+            (
+                "https://fmr.example.org/FMR/sdmx/v2",
+                "datastructure",
+                "WB",
+                "DSD_TEST",
+                "1.0",
+            )
+        ]
 
 
 class TestParseDsdId:

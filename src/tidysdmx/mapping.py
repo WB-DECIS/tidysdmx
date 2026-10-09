@@ -158,8 +158,9 @@ def _unresolved_values_error(kind: str, source: object, urn: str) -> TypeError:
         f"The {kind} for source {source!r} references its representation map "
         f"by URN ({urn!r}) instead of embedding it, so there are no value maps "
         "to apply. Pass a StructureMap whose maps embed their representation "
-        "maps, e.g. one fetched with pysdmx's RegistryClient.get_mapping(), "
-        "which resolves them."
+        "maps, e.g. one fetched with FmrClient.fetch_structure_map(), which "
+        "resolves them; FmrClient.fetch_representation_map(urn) fetches the one "
+        "this map references."
     )
 
 

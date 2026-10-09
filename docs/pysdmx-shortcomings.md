@@ -7,8 +7,10 @@ the pysdmx code involved (line numbers are for the **published 1.20.0
 wheel**), the impact, the tidysdmx workaround, the proposed upstream change and
 the trigger that lets us delete the workaround.
 
-IDs are `PYSDMX-AUTH-nn` so they cannot collide with the `PYSDMX-nn` findings
-in `docs/reviews/2026-06-architecture-review.md`. Code comments cite these IDs.
+IDs are `PYSDMX-AUTH-nn` for the authentication gaps `FmrClient` works around
+and `PYSDMX-READ-nn` for the read-side gaps its `fetch_*` methods guard
+against, so they cannot collide with the `PYSDMX-nn` findings in
+`docs/reviews/2026-06-architecture-review.md`. Code comments cite these IDs.
 
 **Verified against:** pysdmx 1.20.0 (PyPI, 2026-09-18); first written against
 1.19.0. Between the two, only `api/fmr/maintenance.py` moved (1.20 added the
@@ -108,7 +110,62 @@ introduced this register.
 |---|---|
 | **Symptom** | `RegistryClient` must be given `https://host/FMR/sdmx/v2` (it strips only a trailing slash), whereas `RegistryMaintenanceClient` wants `https://host/FMR` (it strips `/sdmx/v2` itself). |
 | **pysdmx location** | `api/fmr/__init__.py:84-86` vs `api/fmr/maintenance.py:235-241`. |
-| **Impact** | Callers carry two URLs per registry; tidysdmx's `fetch_schema` papered over it by hard-coding `/FMR/sdmx/v2/` (review finding PYSDMX-04). |
+| **Impact** | Callers carry two URLs per registry; tidysdmx's module-level `fetch_schema` papered over it by hard-coding `/FMR/sdmx/v2/` (review finding PYSDMX-04), and is now deprecated in favour of `FmrClient.fetch_schema`. |
 | **tidysdmx workaround** | `FmrClient` takes the registry root once and derives `registry_endpoint` for reads and the root for writes. |
 | **Proposed upstream change** | Accept the registry root on `RegistryClient` and append the API path, or document one convention for both clients. |
 | **Remove when** | Released — the single-root convenience stays regardless. |
+
+## PYSDMX-READ-01 — Single-artefact readers silently keep the first match
+
+| | |
+|---|---|
+| **Symptom** | The getters that return one artefact take the first one in the response and drop the rest without a word. A query that matches several — `version="*"`, a wildcard or comma-list agency or ID, a SemVer wildcard such as `1.*.0` — returns an arbitrary one. The organisation-scheme getters do the same across schemes: `get_agencies("*")` returns only the first agency scheme's items. A `200` response with an empty list raises `IndexError` rather than `NotFound`. |
+| **pysdmx location** | Fusion-JSON readers: `io/json/fusion/messages/code.py:108-110` (`Codelist[0]`, `ValueList[0]`), `:285` (`Hierarchy[0]`), `concept.py:91`, `category.py:163`, `map.py:230` (`StructureMap[0]`), `:240` (`RepresentationMap[0]`), `vtl.py:479`. Client: `api/fmr/__init__.py:414, 435, 457` (`schemes[0].items`), `:501, 523, 741, 832`. The SDMX-JSON readers under `io/json/sdmxjson2/messages/` take `[0]` at the same places. |
+| **Impact** | A reference that is not specific enough fetches the wrong artefact, silently. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_single` refuses `*` and `,` in the agency, ID and version of every fetch; `~`, `+` and SemVer `+` forms select one version and stay allowed. `_exactly_one` narrows the four list getters (dataflows, data structures, metadataflows, metadata structures) and raises when they return none or several. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_wildcards_and_lists` covers the guard. |
+| **Proposed upstream change** | Raise `Invalid` from a single-artefact getter when the response holds more than one artefact, and `NotFound` when it holds none. |
+| **Remove when** | Released. Then the `*`/`,` check in `_check_single` goes; `_exactly_one` stays for the list getters. |
+
+## PYSDMX-READ-02 — Path segments are put into the URL unescaped
+
+| | |
+|---|---|
+| **Symptom** | The REST service escapes only `[ ] : + * ,` in the query path. Any other reserved character in an agency, ID or version changes the URL's meaning: `get_codes("WB", "CL?X", "1.0")` requests path `/structure/codelist/WB/CL` with query string `X/1.0`, a different artefact. `#` and `/` do the same. |
+| **pysdmx location** | `api/qb/service.py:420-428` (`_sanitize_query`), called from `:183, 202, 336, 354`. |
+| **Impact** | A stray character in a reference — a pasted URL fragment, a space — fetches the wrong artefact, or nothing, without an error that points at the cause. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_single` accepts only characters an SDMX agency, ID or version can hold (`[A-Za-z0-9_@$.+~-]`) and raises `ValueError` naming the offending part. It also stops the colon splits on which `parse_artefact_id` and `parse_urn` disagree. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_characters_pysdmx_does_not_escape` covers it. |
+| **Proposed upstream change** | Percent-encode each path segment (`urllib.parse.quote(segment, safe="")`) rather than replacing a fixed set of characters in the joined path. |
+| **Remove when** | Released. The allow-list may stay as early input validation, but no longer guards correctness. |
+
+## PYSDMX-READ-03 — `get_metadata_providers` is annotated with the wrong class
+
+| | |
+|---|---|
+| **Symptom** | `RegistryClient.get_metadata_providers` (and its async twin) is annotated `-> Sequence[DataProvider]`, but its readers build `MetadataProvider` objects, which are siblings of `DataProvider`, not subclasses. A type checker believes the wrong class, and typeguard rejects the real return value against the annotation. |
+| **pysdmx location** | `api/fmr/__init__.py:437-457` (annotation and body); readers `io/json/fusion/messages/org.py:198-215`, `io/json/sdmxjson2/messages/provider.py:135-166`. |
+| **Impact** | Wrapping the getter with its own annotation fails at runtime under typeguard; code that trusts the annotation reaches for `DataProvider` attributes on a `MetadataProvider`. |
+| **tidysdmx workaround** | `FmrClient.fetch_metadata_providers` is annotated `-> Sequence[MetadataProvider]` and returns pysdmx's result through `cast("Sequence[MetadataProvider]", ...)`. The cast flags itself: with `warn_redundant_casts` on, mypy reports it as redundant once pysdmx fixes the annotation. `tests/test_fmr.py::TestFmrClientQueries::test_pysdmx_getter_returns_the_query_type[fetch_metadata_providers]` pins the wrong annotation as a strict `xfail`, so the fix upstream fails the suite. |
+| **Proposed upstream change** | Annotate both clients' `get_metadata_providers` as `-> Sequence[MetadataProvider]`. |
+| **Remove when** | Released. Drop the cast and the `xfail` marker. |
+
+## PYSDMX-READ-04 — `get_dataflow_details` re-filters on the version string
+
+| | |
+|---|---|
+| **Symptom** | After the registry has answered, the dataflow-details reader keeps only the dataflows matching the agency, ID and *requested version string*. `+` keeps only versions matching `X.Y.Z`, so a dataflow at version `1.0` is dropped; any other string, such as a SemVer wildcard `1.+.0`, is compared literally and never matches. Both raise `NotFound("No matching dataflow")` although the registry returned the dataflow. With `~`, the first match in the payload wins, not the highest version. |
+| **pysdmx location** | `io/json/fusion/messages/dataflow.py:53-71` (`__filter`) and `:85-99`; the SDMX-JSON reader filters the same way (`io/json/sdmxjson2/messages/dataflow.py:191-196`). |
+| **Impact** | `fetch_dataflow_info` fails for version selectors that `fetch_dataflow` handles. |
+| **tidysdmx workaround** | None in code: `FmrClient.fetch_dataflow_info`'s docstring and the user guide tell callers to pass an exact version. |
+| **Proposed upstream change** | Trust the registry's version resolution: filter on agency and ID only and keep the highest version, or drop the filter for version selectors. |
+| **Remove when** | Released. Remove the caveat from the docstring and the user guide. |
+
+## PYSDMX-READ-05 — `get_codes` reaches a value list only when no codelist shares its identity
+
+| | |
+|---|---|
+| **Symptom** | `RegistryClient.get_codes` queries `codelist` and, only on `NotFound`, `valuelist`. A Codelist and a ValueList may share an agency, ID and version, since URNs are unique per class, and then the ValueList cannot be fetched: the Codelist comes back instead. A codelist reference with no codelist behind it silently comes back as the ValueList. The getter takes no argument naming the class. |
+| **pysdmx location** | `api/fmr/__init__.py:543-550` (`get_codes`), async twin `:1112-1119`; queries `:228-236` (`_codes_cl_q`, `_codes_vl_q`). |
+| **Impact** | A ValueList URN passed to a wrapper that delegates to `get_codes` fetches a different artefact with no error. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_codelist_class` compares the class a URN names with the `short_urn` of what pysdmx returned and raises `ValueError` on a mismatch; `AGENCY:ID(VERSION)` names no class and keeps pysdmx's fallback. `FmrClient.fetch_metadata_reports` sends a ValueList URN to the `valuelist` resource rather than `codelist`. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_refuses_codelist_of_the_other_class` and `TestFmrClientQueries::test_fetch_metadata_reports_searches_the_class_a_urn_names` cover both. |
+| **Proposed upstream change** | A `get_value_list` getter, or an `sdmx_type` argument on `get_codes` that queries one class without the fallback. |
+| **Remove when** | Released. Route ValueList URNs to it, so they fetch the value list instead of raising, and drop `_check_codelist_class`. |
