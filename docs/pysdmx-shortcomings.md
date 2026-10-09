@@ -158,3 +158,14 @@ introduced this register.
 | **tidysdmx workaround** | None in code: `FmrClient.fetch_dataflow_info`'s docstring and the user guide tell callers to pass an exact version. |
 | **Proposed upstream change** | Trust the registry's version resolution: filter on agency and ID only and keep the highest version, or drop the filter for version selectors. |
 | **Remove when** | Released. Remove the caveat from the docstring and the user guide. |
+
+## PYSDMX-READ-05 — `get_codes` reaches a value list only when no codelist shares its identity
+
+| | |
+|---|---|
+| **Symptom** | `RegistryClient.get_codes` queries `codelist` and, only on `NotFound`, `valuelist`. A Codelist and a ValueList may share an agency, ID and version, since URNs are unique per class, and then the ValueList cannot be fetched: the Codelist comes back instead. A codelist reference with no codelist behind it silently comes back as the ValueList. The getter takes no argument naming the class. |
+| **pysdmx location** | `api/fmr/__init__.py:543-550` (`get_codes`), async twin `:1112-1119`; queries `:228-236` (`_codes_cl_q`, `_codes_vl_q`). |
+| **Impact** | A ValueList URN passed to a wrapper that delegates to `get_codes` fetches a different artefact with no error. |
+| **tidysdmx workaround** | `tidysdmx.fmr._check_codelist_class` compares the class a URN names with the `short_urn` of what pysdmx returned and raises `ValueError` on a mismatch; `AGENCY:ID(VERSION)` names no class and keeps pysdmx's fallback. `FmrClient.fetch_metadata_reports` sends a ValueList URN to the `valuelist` resource rather than `codelist`. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_refuses_codelist_of_the_other_class` and `TestFmrClientQueries::test_fetch_metadata_reports_searches_the_class_a_urn_names` cover both. |
+| **Proposed upstream change** | A `get_value_list` getter, or an `sdmx_type` argument on `get_codes` that queries one class without the fallback. |
+| **Remove when** | Released. Route ValueList URNs to it, so they fetch the value list instead of raising, and drop `_check_codelist_class`. |

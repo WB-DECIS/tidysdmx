@@ -692,6 +692,31 @@ def _split_urn(
     return ref.agency, ref.id, ref.version
 
 
+def _urn_class(reference: str) -> str | None:
+    """Return the SDMX class a checked reference's URN names, else ``None``."""
+    return parse_urn(reference).sdmx_type if "=" in reference else None
+
+
+def _check_codelist_class(codelist: Codelist, artefact_id: str) -> None:
+    """Refuse a codelist whose class is not the one its URN names.
+
+    pysdmx's ``get_codes`` asks for a codelist and, only when there is none,
+    for a value list (PYSDMX-READ-05). A ValueList URN therefore gets the
+    Codelist sharing its agency, ID and version, and a Codelist URN with no
+    such codelist gets the ValueList. ``AGENCY:ID(VERSION)`` names no class,
+    so it keeps pysdmx's fallback.
+    """
+    wanted = _urn_class(artefact_id)
+    got = codelist.short_urn.partition("=")[0]
+    if wanted is not None and wanted != got:
+        raise ValueError(
+            f"artefact_id {artefact_id!r} names a {wanted}, but pysdmx returned "
+            f"{codelist.short_urn!r}: it looks for a Codelist first and for a "
+            f"ValueList only when there is none, so it cannot fetch this {wanted} "
+            "(PYSDMX-READ-05)"
+        )
+
+
 def _check_single(
     parts: tuple[str, str, str], reference: str, *, argument: str
 ) -> None:
@@ -1077,9 +1102,10 @@ class FmrClient:
             ValueError: If ``artefact_type`` is not one of the values above;
                 if ``artefact_id`` is neither ``AGENCY:ID(VERSION)`` nor the URN
                 of a whole artefact of that type, holds a wildcard or a list, or
-                holds a character no SDMX identifier has; or if a dataflow, data
+                holds a character no SDMX identifier has; if a dataflow, data
                 structure, metadataflow or metadata structure reference matches
-                several versions.
+                several versions; or if a Codelist or ValueList URN resolves to
+                the other class (PYSDMX-READ-05).
             pysdmx.errors.NotFound: If the registry has no such artefact.
             pysdmx.errors.PysdmxError: Any other registry or connection
                 failure: ``Invalid`` (any other 4xx, 401 and 403 included),
@@ -1092,6 +1118,8 @@ class FmrClient:
             found: Sequence[RegistryArtefact] = fetch(agency, id_part, version)
             return _exactly_one(found, artefact_type, artefact_id)
         artefact: RegistryArtefact = fetch(agency, id_part, version)
+        if isinstance(artefact, Codelist):
+            _check_codelist_class(artefact, artefact_id)
         return artefact
 
     def fetch_codelist(self, artefact_id: str) -> Codelist:
@@ -1105,11 +1133,14 @@ class FmrClient:
         Returns:
             The codelist with its codes. A value list comes back as a
             ``Codelist`` too, with ``sdmx_type == "valuelist"``: pysdmx looks
-            for a codelist first, then for a value list.
+            for a codelist first, then for a value list. A URN gets the class
+            it names or a ``ValueError``, so a ValueList URN raises when a
+            codelist shares the value list's agency, ID and version.
 
         Raises:
             ValueError: If ``artefact_id`` does not identify exactly one
-                codelist (see :meth:`fetch_artefact`).
+                codelist (see :meth:`fetch_artefact`), or its URN names the
+                class pysdmx did not return.
             pysdmx.errors.NotFound: If the registry has no such codelist.
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
@@ -1550,7 +1581,8 @@ class FmrClient:
             artefact_type: The artefact's type, one of the values of
                 :data:`ArtefactType`. ``"codelist"`` searches codelists only:
                 unlike :meth:`fetch_codelist`, there is no fallback to a value
-                list of the same ID.
+                list of the same ID. With a ValueList URN, it searches value
+                lists instead.
 
         Returns:
             The reports attached to the artefact.
@@ -1564,7 +1596,11 @@ class FmrClient:
         """
         spec = _artefact_spec(artefact_type)
         agency, id_part, version = _parse_reference(artefact_id, spec.urn_classes)
-        return self.registry.get_reports(artefact_type, agency, id_part, version)
+        # The REST resource tells a value list from a codelist; ArtefactType
+        # does not, so the URN's class decides (PYSDMX-READ-05).
+        is_value_list = _urn_class(artefact_id) == "ValueList"
+        resource = "valuelist" if is_value_list else artefact_type
+        return self.registry.get_reports(resource, agency, id_part, version)
 
     def put_structures(
         self,

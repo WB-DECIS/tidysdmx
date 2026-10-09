@@ -80,7 +80,7 @@ dataflow = client.fetch_dataflow("WB:DF_IFPRI_ASTI(1.0)")
 dsd = client.fetch_dsd(dataflow.structure)
 ```
 
-The URN must name the class the method fetches — exactly as URNs spell it, `DataStructure` for a data structure definition — so a dataflow's URN passed to `fetch_codelist` raises `ValueError` instead of fetching something else. A URN of an item inside an artefact, such as a `Code`, is refused too. `fetch_codelist` takes a `ValueList` URN as well as a `Codelist` one.
+The URN must name the class the method fetches — exactly as URNs spell it, `DataStructure` for a data structure definition — so a dataflow's URN passed to `fetch_codelist` raises `ValueError` instead of fetching something else. A URN of an item inside an artefact, such as a `Code`, is refused too. `fetch_codelist` takes a `ValueList` URN as well as a `Codelist` one. pysdmx looks for a codelist first and for a value list only when there is none, so when a codelist and a value list share an agency, ID and version, a `ValueList` URN raises `ValueError` rather than return the codelist (PYSDMX-READ-05).
 
 ### Other reads
 
@@ -217,6 +217,9 @@ Pass `header=` a `pysdmx.model.message.Header` to name the sender or give the me
 
 `ValueError: artefact_id is a Dataflow URN, but a Codelist or ValueList URN is expected here`
 : The URN names a different class from the one the method fetches. Call the method for that class, or `fetch_artefact` with the matching `artefact_type`.
+
+`ValueError: artefact_id 'ValueList=WB:CL_X(1.0)' names a ValueList, but pysdmx returned 'Codelist=WB:CL_X(1.0)'`
+: The registry holds a codelist with the same agency, ID and version as the value list, and pysdmx's `get_codes` always prefers the codelist. tidysdmx cannot fetch that value list until pysdmx can ask for one directly. The same message, with the classes swapped, means a `Codelist` URN found only a value list.
 
 `ValueError: artefact_id 'WB:CL?X(1.0)' holds 'CL?X', which is not a valid SDMX agency, ID or version`
 : The reference holds a character no SDMX identifier has — often a stray space or a pasted URL fragment. pysdmx would put it into the URL unescaped and query a different artefact, so it is refused before any request.

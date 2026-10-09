@@ -938,21 +938,52 @@ class TestFmrClientFetchArtefact:
             fmr_client.fetch_artefact("WB:CL_TEST(1.0)", None)
 
     @pytest.mark.parametrize(
-        "artefact_id",
+        ("artefact_id", "sdmx_type"),
         [
-            "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",
-            "Codelist=WB:CL_TEST(1.0)",
-            "urn:sdmx:org.sdmx.infomodel.codelist.ValueList=WB:CL_TEST(1.0)",
+            (
+                "urn:sdmx:org.sdmx.infomodel.codelist.Codelist=WB:CL_TEST(1.0)",
+                "codelist",
+            ),
+            ("Codelist=WB:CL_TEST(1.0)", "codelist"),
+            (
+                "urn:sdmx:org.sdmx.infomodel.codelist.ValueList=WB:CL_TEST(1.0)",
+                "valuelist",
+            ),
         ],
     )
     def test_fetch_artefact_accepts_codelist_and_value_list_urns(
-        self, monkeypatch, fmr_client, codelist, artefact_id
+        self, monkeypatch, fmr_client, codelist, artefact_id, sdmx_type
     ):
-        calls = _patch_getter(monkeypatch, fmr_client, "get_codes", codelist)
+        found = structs.replace(codelist, sdmx_type=sdmx_type)
+        calls = _patch_getter(monkeypatch, fmr_client, "get_codes", found)
 
         fmr_client.fetch_artefact(artefact_id, "codelist")
 
         assert calls == [call("WB", "CL_TEST", "1.0")]
+
+    @pytest.mark.parametrize(
+        ("artefact_id", "sdmx_type"),
+        [
+            ("ValueList=WB:CL_TEST(1.0)", "codelist"),
+            ("Codelist=WB:CL_TEST(1.0)", "valuelist"),
+        ],
+    )
+    def test_fetch_artefact_refuses_codelist_of_the_other_class(
+        self, monkeypatch, fmr_client, codelist, artefact_id, sdmx_type
+    ):
+        found = structs.replace(codelist, sdmx_type=sdmx_type)
+        _patch_getter(monkeypatch, fmr_client, "get_codes", found)
+
+        with pytest.raises(ValueError, match=r"pysdmx returned .*PYSDMX-READ-05"):
+            fmr_client.fetch_artefact(artefact_id, "codelist")
+
+    def test_fetch_artefact_keeps_value_list_fallback_without_urn(
+        self, monkeypatch, fmr_client, codelist
+    ):
+        value_list = structs.replace(codelist, sdmx_type="valuelist")
+        _patch_getter(monkeypatch, fmr_client, "get_codes", value_list)
+
+        assert fmr_client.fetch_artefact("WB:CL_TEST(1.0)", "codelist") is value_list
 
     def test_fetch_artefact_rejects_urn_of_another_type(self, fmr_client):
         with pytest.raises(
@@ -1372,6 +1403,23 @@ class TestFmrClientQueries:
         fmr_client.fetch_metadata_reports(DSD_URN, "datastructure")
 
         assert calls == [call("datastructure", "WB", "DSD_TEST", "1.0")]
+
+    @pytest.mark.parametrize(
+        ("artefact_id", "resource"),
+        [
+            ("ValueList=WB:CL_TEST(1.0)", "valuelist"),
+            ("Codelist=WB:CL_TEST(1.0)", "codelist"),
+            ("WB:CL_TEST(1.0)", "codelist"),
+        ],
+    )
+    def test_fetch_metadata_reports_searches_the_class_a_urn_names(
+        self, monkeypatch, fmr_client, artefact_id, resource
+    ):
+        calls = _patch_getter(monkeypatch, fmr_client, "get_reports", [])
+
+        fmr_client.fetch_metadata_reports(artefact_id, "codelist")
+
+        assert calls == [call(resource, "WB", "CL_TEST", "1.0")]
 
     def test_fetch_metadata_reports_rejects_urn_of_another_type(self, fmr_client):
         with pytest.raises(ValueError, match="is a DataStructure URN, but a Dataflow"):
