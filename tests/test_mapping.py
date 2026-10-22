@@ -490,7 +490,9 @@ class TestApplyMultiComponentMap:
 
         result = apply_multi_component_map(df, mcm)
         # "COL"/"one" matches both rules; the first stored rule wins.
-        assert list(result["URBANISATION"]) == ["C_", "_L", None]
+        # "COL"/"three" matches neither and stays unmapped.
+        assert result["URBANISATION"].iloc[:2].tolist() == ["C_", "_L"]
+        assert pd.isna(result["URBANISATION"].iloc[2])
 
 
 @pytest.mark.integration
