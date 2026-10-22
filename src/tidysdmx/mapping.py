@@ -27,6 +27,11 @@ _SUPPORTED_MAP_TYPES: tuple[type, ...] = (
     MultiComponentMap,
 )
 
+# Rows stringified at a time when equal source values must be told apart by
+# their printed form (see _print_form_key), so that the strings held at once
+# stay bounded however long the column is.
+_PRINT_FORM_CHUNK_ROWS: int = 2**20
+
 
 def _progress_level(verbose: bool) -> int:
     """Return the log level for progress messages (INFO when verbose)."""
@@ -260,8 +265,11 @@ def apply_component_map(
     target column.
 
     Each distinct source value is matched once and the result broadcast to
-    every row, so the cost grows with the number of rows only through one
-    hashing pass; value-map matching grows with the number of distinct values.
+    every row, so value-map matching grows with the number of distinct values
+    rather than rows. Values count as distinct by printed form as well as by
+    equality, because a regex matches ``str(value)``: 1 and 1.0 compare equal
+    but are matched apart. In object columns holding non-string values, that
+    takes one ``str()`` call per such row.
 
     Args:
         df: Source data.
@@ -287,20 +295,21 @@ def apply_component_map(
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
 
     # Resolve each distinct source value once, then broadcast the result back
-    # to every row by its factorize code: matching then costs one hash pass
-    # over the rows plus work proportional to the number of distinct values,
-    # instead of a Python-level regex call per row. Missing values get code -1,
-    # which take() fills with NaN, so they stay unmapped.
-    codes, uniques = pd.factorize(df[source_col])
+    # to every row by its code: matching then costs a few hashing passes over
+    # the rows plus work proportional to the number of distinct values,
+    # instead of a Python-level regex call per row. Missing values form a
+    # group of their own, which stays unmapped.
+    source = df[source_col]
+    codes, positions = _distinct_rows([source])
     literal_mapping, regex_maps, resolved = _resolve_component_values(
-        pd.Series(uniques), rep_map
+        source.iloc[positions].reset_index(drop=True), rep_map
     )
 
     # dtype= keeps the resolved dtype: an object result (the regex path) would
     # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
     result_df = df.copy(deep=False)
     result_df[target_col] = pd.Series(
-        pd.api.extensions.take(resolved.array, codes, allow_fill=True),
+        pd.api.extensions.take(resolved.array, codes),
         index=df.index,
         dtype=resolved.dtype,
     )
@@ -370,6 +379,108 @@ def _resolve_component_values(
     return literal_mapping, regex_maps, mapped
 
 
+def _distinct_rows(sources: Sequence[pd.Series]) -> tuple[np.ndarray, np.ndarray]:
+    """Number the distinct combinations of source values, row by row.
+
+    Values are grouped by equality and, where equal values can print
+    differently, by printed form too, since a regex value map matches
+    ``str(value)`` (see ``_print_form_key``). All missing values of a source
+    form one group.
+
+    Args:
+        sources: The source columns, aligned row by row.
+
+    Returns:
+        ``codes``, numbering each row's combination densely from 0, and
+        ``positions``, the first row of each combination, so that
+        ``codes[positions[i]] == i``.
+
+    Raises:
+        ValueError: If ``sources`` is empty.
+    """
+    codes: np.ndarray | None = None
+    for source in sources:
+        value_codes, uniques = pd.factorize(source)
+        value_codes[value_codes < 0] = len(uniques)
+        keys = [(value_codes, len(uniques) + 1)]
+        print_form = _print_form_key(source, value_codes, uniques)
+        if print_form is not None:
+            keys.append(print_form)
+        for key, n_keys in keys:
+            # codes and key are both at most len(source), so the pair number
+            # stays below (len(source) + 1) ** 2, far inside int64.
+            codes = key if codes is None else pd.factorize(codes * n_keys + key)[0]
+    if codes is None:
+        raise ValueError("A map needs at least one source column to group by.")
+
+    first = pd.Series(codes).drop_duplicates()
+    positions = np.empty(len(first), dtype=np.intp)
+    positions[first.to_numpy()] = first.index.to_numpy()
+    return codes, positions
+
+
+def _print_form_key(
+    source: pd.Series, codes: np.ndarray, uniques: pd.Index
+) -> tuple[np.ndarray, int] | None:
+    """Tell apart values of ``source`` that compare equal but print differently.
+
+    Grouping by equality alone would match 1, 1.0 and True (or 0.0 and -0.0)
+    once, through whichever came first, but a regex value map matches
+    ``str(value)``, which differs between them. Only float columns holding
+    -0.0, and object or complex columns holding non-string values, can hold
+    such values.
+
+    Args:
+        source: A source column.
+        codes: ``source``'s factorize codes, with missing values at
+            ``len(uniques)``.
+        uniques: ``source``'s distinct values, from ``pd.factorize``.
+
+    Returns:
+        A key for each row and the key's number of distinct values, or None
+        when no two equal values of ``source`` print differently.
+    """
+    if source.dtype.kind == "f":
+        values = source.to_numpy(dtype=np.float64, na_value=np.nan)
+        negative_zero = (values == 0) & np.signbit(values)
+        if not negative_zero.any():
+            return None
+        return negative_zero.astype(np.intp), 2
+
+    if not (pd.api.types.is_object_dtype(source.dtype) or source.dtype.kind == "c"):
+        return None
+    if pd.api.types.infer_dtype(uniques, skipna=True) == "string":
+        return None
+    # A string equals only strings, which print as themselves, so only rows
+    # whose group holds a non-string need their printed form. The missing
+    # values' code, len(uniques), is never split.
+    split = np.fromiter(
+        (not isinstance(value, str) for value in uniques),
+        dtype=bool,
+        count=len(uniques),
+    )
+    rows = np.flatnonzero(np.append(split, False)[codes])
+
+    # Stringify in chunks, merging each chunk's distinct forms into one
+    # numbering. np.frompyfunc(str) leaves them Python strings, where
+    # Series.map(str) would convert them to the "str" dtype and make that
+    # merge slow.
+    to_str = np.frompyfunc(str, 1, 1)
+    values = source.to_numpy()
+    key = np.zeros(len(source), dtype=np.intp)
+    forms: dict[str, int] = {}
+    for start in range(0, len(rows), _PRINT_FORM_CHUNK_ROWS):
+        chunk = rows[start : start + _PRINT_FORM_CHUNK_ROWS]
+        chunk_codes, chunk_forms = pd.factorize(to_str(values[chunk]))
+        ids = np.fromiter(
+            (forms.setdefault(form, len(forms) + 1) for form in chunk_forms),
+            dtype=np.intp,
+            count=len(chunk_forms),
+        )
+        key[chunk] = ids[chunk_codes]
+    return key, len(forms) + 1
+
+
 @typechecked
 def apply_multi_component_map(
     df: pd.DataFrame,
@@ -393,7 +504,9 @@ def apply_multi_component_map(
 
     Each distinct combination of source values is matched once and the result
     broadcast to every row, so rule matching grows with the number of
-    distinct combinations rather than the number of rows.
+    distinct combinations rather than the number of rows. As in
+    ``apply_component_map``, values that compare equal but print differently
+    (1 and 1.0) count as distinct.
 
     Args:
         df: Source data.
@@ -409,6 +522,7 @@ def apply_multi_component_map(
         KeyError: If a source column is not in ``df``.
         TypeError: If ``multi_component_map.values`` is a URN string rather
             than an embedded MultiRepresentationMap.
+        ValueError: If ``multi_component_map`` lists no source columns.
     """
     source_cols = list(multi_component_map.source)
     target_col = multi_component_map.target[0]
@@ -430,21 +544,16 @@ def apply_multi_component_map(
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
     # Resolve each distinct combination of source values once, then broadcast
-    # back to every row by its group code. Evaluating the rules over all rows
+    # back to every row by its code. Evaluating the rules over all rows
     # instead held one row-length mask per rule, which ran out of memory on
-    # large frames. dropna=False keeps rows with a missing value in their own
-    # groups, which the rules then leave unmapped.
-    # Group by the source Series themselves, not by label: a label can also
-    # name an index level (ambiguous to groupby) or appear twice in
-    # source_cols.
+    # large frames. Rows with a missing value land in combinations of their
+    # own, which the rules then leave unmapped. Each source is taken as a
+    # Series, so a label that also names an index level, or appears twice in
+    # source_cols, is no problem.
     sources = [df[col] for col in source_cols]
-    codes = sources[0].groupby(sources, sort=False, dropna=False).ngroup().to_numpy()
-    first_rows = pd.Series(codes).drop_duplicates()
-    positions = first_rows.index.to_numpy()[
-        np.argsort(first_rows.to_numpy(), kind="stable")
-    ]
+    codes, positions = _distinct_rows(sources)
     # Gather only the source columns, one row per combination: element i of
-    # each Series belongs to the combination with group code i.
+    # each Series belongs to the combination with code i.
     combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]
     resolved = _resolve_multi_values(combinations, rules)
 
