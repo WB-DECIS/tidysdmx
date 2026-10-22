@@ -162,9 +162,10 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-@pytest.mark.integration
+# Only the tests that use the ifpri_asti_sm cassette are integration-marked
+# (TEST-02); those that build their maps inline run in the unit lane.
 class TestApplyComponentMap:
-    """Tests for apply_component_map using the ifpri_asti_sm fixture."""
+    """Tests for apply_component_map."""
 
     @pytest.fixture
     def component_map(self, ifpri_asti_sm):
@@ -173,6 +174,7 @@ class TestApplyComponentMap:
 
         return cm
 
+    @pytest.mark.integration
     def test_successful_mapping(self, component_map):
         """Tests that mapping is applied correctly via the ComponentMap."""
         # Prepare DataFrame with source values
@@ -191,6 +193,7 @@ class TestApplyComponentMap:
         assert "SEX" in result.columns
         assert list(result["SEX"]) == ["F", "M", "_T", np.nan]
 
+    @pytest.mark.integration
     def test_original_dataframe_not_mutated(self, component_map):
         """Tests that the original DataFrame remains unchanged after mapping."""
         df = pd.DataFrame({"INDICATOR": ["RES_FEMALE_TOT_FTE"]})
@@ -199,6 +202,7 @@ class TestApplyComponentMap:
         _ = apply_component_map(df, component_map)
         pd.testing.assert_frame_equal(df, original_copy)
 
+    @pytest.mark.integration
     def test_verbose_output(self, component_map, caplog):
         """Tests that verbose=True logs mapping details."""
         df = pd.DataFrame({"INDICATOR": ["RES_FEMALE_TOT_FTE", "UNKNOWN"]})
@@ -208,6 +212,7 @@ class TestApplyComponentMap:
         assert "Mapped 'INDICATOR' → 'SEX'" in caplog.text
         assert "values could not be mapped" in caplog.text
 
+    @pytest.mark.integration
     def test_missing_source_column_raises_keyerror(self, component_map):
         """Tests that KeyError is raised when source column is missing."""
         df_missing = pd.DataFrame({"OTHER": ["RES_FEMALE_TOT_FTE"]})
@@ -215,6 +220,7 @@ class TestApplyComponentMap:
         with pytest.raises(KeyError, match="Source column 'INDICATOR' not found"):
             apply_component_map(df_missing, component_map)
 
+    @pytest.mark.integration
     def test_invalid_dataframe_type_raises_typeerror(self, component_map):
         """Tests that TypeError is raised when df is not a pandas DataFrame."""
         with pytest.raises(TypeCheckError):
@@ -227,6 +233,7 @@ class TestApplyComponentMap:
         with pytest.raises(TypeCheckError):
             apply_component_map(df, "not_a_component_map")
 
+    @pytest.mark.integration
     def test_unmapped_values_are_nan(self, component_map):
         """Tests that unmapped values in source column become NaN in target column."""
         df = pd.DataFrame({"INDICATOR": ["UNKNOWN"]})
@@ -291,7 +298,8 @@ class TestApplyComponentMap:
         assert result["REGION"].iloc[1:].isna().all()
 
 
-@pytest.mark.integration
+# Only the tests that use the ifpri_asti_sm cassette are integration-marked
+# (TEST-02); those that build their maps inline run in the unit lane.
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -302,6 +310,7 @@ class TestApplyMultiComponentMap:
         cm = maps[4]
         return cm
 
+    @pytest.mark.integration
     def test_basic_mapping(self, multi_component_map):
         """Tests that rows are correctly mapped based on exact matches."""
         df = pd.DataFrame(
@@ -312,6 +321,7 @@ class TestApplyMultiComponentMap:
         expected = ["RUR", "URB", "URB", "RUR"]
         assert list(result["URBANISATION"]) == expected
 
+    @pytest.mark.integration
     def test_regex_mapping(self, multi_component_map):
         """Tests that regex rules apply when no exact match exists."""
         df = pd.DataFrame(
@@ -322,6 +332,7 @@ class TestApplyMultiComponentMap:
         expected = ["_T", "_T", "_Z"]  # Matches regex rules
         assert list(result["URBANISATION"]) == expected
 
+    @pytest.mark.integration
     def test_missing_source_columns_raises(self, multi_component_map):
         """Tests that KeyError is raised when source columns are missing."""
         df = pd.DataFrame({"AREA": ["COL"], "OTHER": ["one"]})
@@ -329,6 +340,7 @@ class TestApplyMultiComponentMap:
             apply_multi_component_map(df, multi_component_map)
         assert "Missing source columns" in str(excinfo.value)
 
+    @pytest.mark.integration
     @pytest.mark.skip(
         reason="Unmapped values are assigned _Z in this multi-component-map fixture"
     )
@@ -339,6 +351,7 @@ class TestApplyMultiComponentMap:
         result = apply_multi_component_map(df, multi_component_map)
         assert result["URBANISATION"].isna().sum() == 2
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("verbose", [True, False])
     def test_verbose_flag(self, multi_component_map, caplog, verbose):
         """Tests that progress is logged at INFO only when verbose=True."""
