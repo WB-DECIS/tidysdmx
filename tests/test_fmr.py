@@ -1513,7 +1513,8 @@ class TestFmrClientPutStructuresLive:
     scope and an Azure sign-in, through a browser window when no other
     credential is available; skips without the variable. When the FMR app does
     not authorise the Azure CLI's client app (AADSTS650057), set
-    ``TIDYSDMX_FMR_CLIENT_ID`` and ``TIDYSDMX_FMR_TENANT_ID`` to one it does.
+    ``TIDYSDMX_FMR_CLIENT_ID`` and ``TIDYSDMX_FMR_TENANT_ID`` to one it does;
+    the sign-in then goes through the browser with that client app.
     ``scripts/diagnose_fmr_auth.py`` finds where a failing sign-in breaks. Run
     with ``-m integration``.
     """
@@ -1523,16 +1524,22 @@ class TestFmrClientPutStructuresLive:
         scope = os.environ.get("TIDYSDMX_FMR_SCOPE", "")
         if not scope:
             pytest.skip("set TIDYSDMX_FMR_SCOPE to the FMR app's scope to upload")
-        credential_kwargs: dict[str, Any] = {
-            "exclude_interactive_browser_credential": False
+        client = {
+            "client_id": os.environ.get("TIDYSDMX_FMR_CLIENT_ID"),
+            "tenant_id": os.environ.get("TIDYSDMX_FMR_TENANT_ID"),
         }
-        if client_id := os.environ.get("TIDYSDMX_FMR_CLIENT_ID"):
-            credential_kwargs["interactive_browser_client_id"] = client_id
-        if tenant_id := os.environ.get("TIDYSDMX_FMR_TENANT_ID"):
-            credential_kwargs["interactive_browser_tenant_id"] = tenant_id
-        provider = AzureTokenProvider.from_default_credential(
-            scope, **credential_kwargs
-        )
+        given = {key: value for key, value in client.items() if value}
+        if given:
+            # DefaultAzureCredential would let the Azure CLI, or any credential
+            # ahead of its browser fallback, sign in through its own client app.
+            identity = pytest.importorskip("azure.identity")
+            provider = AzureTokenProvider(
+                identity.InteractiveBrowserCredential(**given), scope
+            )
+        else:
+            provider = AzureTokenProvider.from_default_credential(
+                scope, exclude_interactive_browser_credential=False
+            )
         return FmrClient(
             LIVE_FMR_ROOT,
             token_provider=provider,
@@ -1550,11 +1557,14 @@ class TestFmrClientPutStructuresLive:
         added = Code(id=LIVE_TEST_CODE_ID, name="Added by the tidysdmx live test")
         updated = structs.replace(original, items=[*original.items, added])
 
-        client.put_structures([updated])
+        # The upload sits inside the try: it may take effect on the registry
+        # even when the request then fails. The restore sends back exactly
+        # what was fetched, the test code included if it was already there.
         try:
+            client.put_structures([updated])
             round_tripped = client.fetch_codelist(LIVE_TEST_CODELIST)
         finally:
-            client.put_structures([original])
+            client.put_structures([fetched])
 
         assert [code.id for code in round_tripped] == [
             *(code.id for code in original),
