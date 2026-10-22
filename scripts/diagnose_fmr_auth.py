@@ -45,6 +45,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from pysdmx.errors import PysdmxError
@@ -135,11 +136,15 @@ class Settings:
 
 @dataclass(frozen=True)
 class Probe:
-    """One read of the codelist, against one of the registry's APIs."""
+    """One read of the codelist, against one of the registry's APIs.
+
+    A probe that does not count is reported but never decides a verdict.
+    """
 
     name: str
     url: str
     accept: str
+    counts: bool = True
 
 
 def parse_args(argv: list[str] | None = None) -> Settings:
@@ -158,7 +163,10 @@ def parse_args(argv: list[str] | None = None) -> Settings:
     parser.add_argument(
         "--root",
         default=env("TIDYSDMX_FMR_ROOT", DEFAULT_ROOT),
-        help="registry root, the part before /sdmx/v2 (default: %(default)s)",
+        help=(
+            "registry root, the part before /sdmx/v2; https only, since a "
+            "bearer token is sent to it (default: %(default)s)"
+        ),
     )
     parser.add_argument(
         "--scope",
@@ -203,6 +211,11 @@ def parse_args(argv: list[str] | None = None) -> Settings:
         parser.error("pass --scope or set TIDYSDMX_FMR_SCOPE, e.g. <app-id>/.default")
     if not REFERENCE.match(args.codelist):
         parser.error(f"--codelist must be AGENCY:ID(VERSION), got {args.codelist!r}")
+    if urlsplit(args.root).scheme != "https":
+        parser.error(
+            "--root must be an https URL: the diagnostic sends a bearer token, "
+            f"got {args.root!r}"
+        )
     return Settings(
         root=args.root.rstrip("/"),
         scope=args.scope,
@@ -223,7 +236,9 @@ def codelist_probes(root: str, reference: str) -> list[Probe]:
 
     Returns:
         One probe per API: the public SDMX 3.0 one that reads use, and the
-        secure SDMX 2.1 one that uploads go to.
+        secure SDMX 2.1 one that uploads go to. The secure one is shown for
+        information only: uploads POST to its root, and FMR documents no GET
+        of a structure there, so its answer cannot decide a verdict.
 
     Raises:
         ValueError: If ``reference`` is not ``AGENCY:ID(VERSION)``.
@@ -239,9 +254,10 @@ def codelist_probes(root: str, reference: str) -> list[Probe]:
             "application/vnd.sdmx.structure+json;version=2.0.0",
         ),
         Probe(
-            "secure API, used by uploads",
+            "secure API, where uploads POST (a GET here is undocumented)",
             f"{root}/ws/secure/sdmxapi/rest/{path}",
             "application/vnd.sdmx.structure+xml;version=2.1",
+            counts=False,
         ),
     ]
 
@@ -417,22 +433,28 @@ def probe_with_token(step: int, title: str, probes: list[Probe], token: str) -> 
         token: The bearer token; it is never printed.
 
     Returns:
-        Whether every API answered 200.
+        Whether every probe that counts answered 200.
     """
     _heading(step, title)
     statuses: set[int] = set()
     for probe in probes:
         response = _get(probe, token=token)
+        status = 0 if response is None else response.status_code
+        if probe.counts:
+            statuses.add(status)
         if response is None:
-            statuses.add(0)
             continue
-        statuses.add(response.status_code)
-        _detail(f"{probe.name}: HTTP {response.status_code}")
-        if response.status_code != httpx.codes.OK:
+        _detail(f"{probe.name}: HTTP {status}")
+        if status != httpx.codes.OK:
             challenge = response.headers.get("WWW-Authenticate", "(none)")
             _detail(f"  WWW-Authenticate: {challenge}")
             body = " ".join(response.text.split())[:300]
             _detail(f"  body: {body or '(empty)'}")
+            if not probe.counts:
+                _detail(
+                    "  For information only: the registry need not serve a GET "
+                    "here, and this says nothing about whether uploads work."
+                )
     accepted = statuses == {httpx.codes.OK}
     for status in sorted(statuses - {httpx.codes.OK}):
         if status in STATUS_HINTS:

@@ -97,6 +97,11 @@ class TestCodelistProbes:
 
         assert [probe.url for probe in probes] == [PUBLIC_URL, SECURE_URL]
 
+    def test_codelist_probes_lets_only_the_public_api_decide(self):
+        probes = diagnose.codelist_probes(ROOT, CODELIST)
+
+        assert [probe.counts for probe in probes] == [True, False]
+
     def test_codelist_probes_rejects_a_malformed_reference(self):
         with pytest.raises(ValueError, match="not an AGENCY:ID"):
             diagnose.codelist_probes(ROOT, "CL_TEST")
@@ -125,6 +130,22 @@ class TestParseArgs:
             diagnose.parse_args(["--scope", "app-id/.default", "--codelist", "CL"])
         assert "--codelist must be AGENCY:ID(VERSION)" in capsys.readouterr().err
 
+    def test_parse_args_rejects_a_root_without_tls(self, capsys):
+        with pytest.raises(SystemExit, match=r"^2$"):
+            diagnose.parse_args(
+                ["--scope", "app-id/.default", "--root", "http://fmr.example.org"]
+            )
+        assert "--root must be an https URL" in capsys.readouterr().err
+
+    def test_parse_args_rejects_a_root_without_tls_from_the_environment(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setenv("TIDYSDMX_FMR_ROOT", "http://fmr.example.org")
+
+        with pytest.raises(SystemExit, match=r"^2$"):
+            diagnose.parse_args(["--scope", "app-id/.default"])
+        assert "--root must be an https URL" in capsys.readouterr().err
+
 
 class TestCheckAnonymousReads:
     @pytest.mark.parametrize("status", [200, 401, 403])
@@ -152,6 +173,24 @@ class TestCheckAnonymousReads:
 
         assert not diagnose.check_anonymous_reads(
             diagnose.codelist_probes(ROOT, CODELIST)
+        )
+
+
+class TestProbeWithToken:
+    def test_probe_with_token_ignores_the_secure_api_answer(self, respx_mock):
+        respx_mock.get(PUBLIC_URL).mock(return_value=httpx.Response(200))
+        respx_mock.get(SECURE_URL).mock(return_value=httpx.Response(405))
+
+        assert diagnose.probe_with_token(
+            5, "offer", diagnose.codelist_probes(ROOT, CODELIST), "token"
+        )
+
+    def test_probe_with_token_fails_when_the_public_api_refuses(self, respx_mock):
+        respx_mock.get(PUBLIC_URL).mock(return_value=httpx.Response(401))
+        respx_mock.get(SECURE_URL).mock(return_value=httpx.Response(200))
+
+        assert not diagnose.probe_with_token(
+            5, "offer", diagnose.codelist_probes(ROOT, CODELIST), "token"
         )
 
 
