@@ -18,6 +18,31 @@ from pysdmx.model.map import (
 )
 from typeguard import typechecked
 
+
+def _require_pandas_3(version: str) -> None:
+    """Refuse to run on a pandas older than 3.
+
+    The maps return shallow copies, which only pandas 3's Copy-on-Write keeps
+    isolated from their input: on pandas 2, editing a returned frame would
+    silently edit the caller's DataFrame. pip enforces ``pandas>=3``, but a
+    ``--no-deps`` install or a stale environment does not.
+
+    Args:
+        version: A pandas version string, such as ``pd.__version__``.
+
+    Raises:
+        ImportError: If ``version`` is older than 3.
+    """
+    major = version.partition(".")[0]
+    if major.isdigit() and int(major) < 3:
+        raise ImportError(
+            f"tidysdmx requires pandas>=3 (Copy-on-Write), but pandas {version} "
+            "is installed. Upgrade pandas, or run `uv sync` in a checkout."
+        )
+
+
+_require_pandas_3(pd.__version__)
+
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_MAP_TYPES: tuple[type, ...] = (

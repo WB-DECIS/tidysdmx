@@ -1353,3 +1353,22 @@ class TestDistinctRows:
         monkeypatch.setattr(mapping_module, "_PRINT_FORM_CHUNK_ROWS", 2)
         values = pd.Series([1, 1.0, True, 1.0, 1, True], dtype=object)
         assert self._first_rows([values]) == [0, 1, 2, 1, 0, 2]
+
+
+class TestRequirePandas3:
+    """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""
+
+    @pytest.mark.parametrize("version", ["2.3.3", "1.5.3"])
+    def test_require_pandas_3_rejects_older_pandas(self, version):
+        with pytest.raises(
+            ImportError, match=rf"pandas {re.escape(version)} is installed.*uv sync"
+        ):
+            mapping_module._require_pandas_3(version)
+
+    @pytest.mark.parametrize("version", ["3.0.6", "3.1.0.dev0+1.gabc", "10.0.0"])
+    def test_require_pandas_3_accepts_pandas_3_and_later(self, version):
+        mapping_module._require_pandas_3(version)
+
+    def test_require_pandas_3_accepts_an_unparsed_version(self):
+        """A source build without version metadata reports "0+unknown"."""
+        mapping_module._require_pandas_3("0+unknown")
