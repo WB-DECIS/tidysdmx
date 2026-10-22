@@ -814,3 +814,160 @@ class TestMapStructuresSourceIsolation:
         maps = [self._component_map("METRIC", "METRIC", METRIC_TO_METRIC)]
         map_structures(metric_df, self._structure_map(maps))
         pd.testing.assert_frame_equal(metric_df, original)
+
+
+class TestMappingOnDistinctValues:
+    """Maps resolve each distinct source value once, then broadcast to rows."""
+
+    @staticmethod
+    def _component_map(source, target, value_maps):
+        return ComponentMap(
+            source=source,
+            target=target,
+            values=RepresentationMap(
+                id="RM",
+                name="RM",
+                agency="WB",
+                source="urn:x",
+                target="urn:y",
+                maps=value_maps,
+            ),
+        )
+
+    @staticmethod
+    def _multi_map(value_maps):
+        return MultiComponentMap(
+            source=["AREA", "NOTE"],
+            target=["URBANISATION"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["urn:x", "urn:x2"],
+                target=["urn:y"],
+                maps=value_maps,
+            ),
+        )
+
+    @pytest.fixture
+    def area_map(self):
+        return self._component_map(
+            "AREA",
+            "REF_AREA",
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:B.*", target="B_"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ],
+        )
+
+    @pytest.fixture
+    def urbanisation_map(self):
+        return self._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["regex:B.*", "regex:.*"], target=["B_"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+            ]
+        )
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_component_map_repeated_values_across_dtypes(self, area_map, dtype):
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL"]}, dtype=dtype)
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].tolist() == ["CO", "B_", "CO", "_Z", "B_"]
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_component_map_missing_source_stays_unmapped(self, area_map, dtype):
+        df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype=dtype)
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].isna().tolist() == [False, True, False]
+
+    def test_apply_component_map_regex_result_keeps_object_dtype(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "KEN"]})
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].dtype == object
+
+    def test_apply_component_map_keeps_row_index(self, area_map):
+        df = pd.DataFrame({"AREA": ["BEL", "COL"]}, index=[10, 3])
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].to_dict() == {10: "B_", 3: "CO"}
+
+    def test_apply_component_map_empty_frame(self, area_map):
+        df = pd.DataFrame({"AREA": pd.Series([], dtype="str")})
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].tolist() == []
+
+    def test_apply_component_map_treats_equal_numbers_as_one_value(self):
+        """Distinct values are found by equality, so 1 and 1.0 are one value.
+
+        Known divergence from the row-wise implementation, where the regex
+        saw str(1) == "1" and str(1.0) == "1.0" separately.
+        """
+        cmap = self._component_map(
+            "CODE", "TARGET", [ValueMap(source="regex:1", target="ONE")]
+        )
+        df = pd.DataFrame({"CODE": pd.Series([1, 1.0], dtype=object)})
+        result = apply_component_map(df, cmap)
+        assert result["TARGET"].tolist() == ["ONE", "ONE"]
+
+    def test_apply_multi_component_map_interleaved_combinations(self, urbanisation_map):
+        df = pd.DataFrame(
+            {
+                "AREA": ["KEN", "COL", "BEL", "COL", "KEN", "BEL"],
+                "NOTE": ["two", "one", "two", "one", "two", "one"],
+            }
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == [
+            "_T",
+            "CO1",
+            "B_",
+            "CO1",
+            "_T",
+            "B_",
+        ]
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_multi_component_map_missing_value_stays_unmapped(
+        self, urbanisation_map, dtype
+    ):
+        df = pd.DataFrame(
+            {"AREA": ["COL", None, "BEL", "COL"], "NOTE": ["one", "one", None, "one"]},
+            dtype=dtype,
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].isna().tolist() == [False, True, True, False]
+
+    def test_apply_multi_component_map_keeps_row_index(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": ["BEL", "COL"], "NOTE": ["two", "one"]}, index=[10, 3]
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].to_dict() == {10: "B_", 3: "CO1"}
+
+    def test_apply_multi_component_map_empty_frame(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": pd.Series([], dtype="str"), "NOTE": pd.Series([], dtype="str")}
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == []
+
+    def test_map_structures_does_not_deep_copy_passthrough_columns(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "OBS_VALUE": [1.0, 2.0]})
+        sm = StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=[area_map]
+        )
+        result = map_structures(df, sm)
+        assert np.shares_memory(
+            result["OBS_VALUE"].to_numpy(), df["OBS_VALUE"].to_numpy()
+        )
+
+    def test_map_structures_result_edits_leave_input_untouched(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "OBS_VALUE": [1.0, 2.0]})
+        sm = StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=[area_map]
+        )
+        result = map_structures(df, sm)
+        result.loc[0, "OBS_VALUE"] = 99.0
+        assert df["OBS_VALUE"].tolist() == [1.0, 2.0]

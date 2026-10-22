@@ -3,6 +3,7 @@
 import logging
 import re
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,9 @@ from pysdmx.model.map import (
     FixedValueMap,
     ImplicitComponentMap,
     MultiComponentMap,
+    RepresentationMap,
     StructureMap,
+    ValueMap,
 )
 from typeguard import typechecked
 
@@ -79,7 +82,9 @@ def map_structures(
 
     Returns:
         A new DataFrame holding ``df``'s columns plus every target column,
-        added or overwritten.
+        added or overwritten. Passthrough columns are not copied up front:
+        pandas' Copy-on-Write copies one only if it is later modified, so
+        editing the result never changes ``df``.
 
     Raises:
         KeyError: If a ComponentMap or MultiComponentMap source column is not
@@ -94,8 +99,10 @@ def map_structures(
 
     # Maps read from ``df`` and write only their target into ``result_df``, so
     # no map sees another's output. Chaining them instead let METRIC → METRIC
-    # overwrite METRIC before METRIC → UNIT_MEASURE ran (issue #265).
-    result_df = df.copy()
+    # overwrite METRIC before METRIC → UNIT_MEASURE ran (issue #265). The copy
+    # is shallow: under pandas' Copy-on-Write, ``result_df`` is still isolated
+    # from ``df``, but its passthrough columns cost no memory until written to.
+    result_df = df.copy(deep=False)
 
     if fixed_value_maps:
         result_df = apply_fixed_value_maps(df, fixed_value_maps)
@@ -183,7 +190,7 @@ def apply_fixed_value_maps(
             "All elements in fixed_value_maps must be FixedValueMap instances."
         )
 
-    result_df = df.copy()
+    result_df = df.copy(deep=False)
 
     for fmap in fixed_value_maps:
         result_df[fmap.target] = fmap.value
@@ -217,7 +224,7 @@ def apply_implicit_component_maps(
             "All elements in implicit_maps must be ImplicitComponentMap instances."
         )
 
-    result_df = df.copy()
+    result_df = df.copy(deep=False)
 
     for imap in implicit_maps:
         source_col = imap.source
@@ -252,6 +259,10 @@ def apply_component_map(
     by regex value maps or the catch-all (``"regex:.*"``) and yield NaN in the
     target column.
 
+    Each distinct source value is matched once and the result broadcast to
+    every row, so the cost grows with the number of rows only through one
+    hashing pass; value-map matching grows with the number of distinct values.
+
     Args:
         df: Source data.
         component_map: ComponentMap with source, target, and values.
@@ -266,51 +277,33 @@ def apply_component_map(
         TypeError: If ``component_map.values`` is a URN string rather than an
             embedded RepresentationMap.
     """
-    result_df = df.copy()
-
     source_col = component_map.source
     target_col = component_map.target
     rep_map = component_map.values
     if isinstance(rep_map, str):
         raise _unresolved_values_error("ComponentMap", source_col, rep_map)
 
-    if source_col not in result_df.columns:
+    if source_col not in df.columns:
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
 
-    # Apply literal (exact) value maps first via a fast vectorised lookup;
-    # these always win. Source values left unmapped then fall through to the
-    # regex value maps, with any catch-all ("regex:.*") evaluated last.
-    literal_mapping = {
-        vm.source: vm.target
-        for vm in rep_map.maps
-        if not vm.source.startswith("regex:")
-    }
-    regex_maps = sorted(
-        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
-        key=lambda vm: _value_map_rank([vm.source]),
+    # Resolve each distinct source value once, then broadcast the result back
+    # to every row by its factorize code: matching then costs one hash pass
+    # over the rows plus work proportional to the number of distinct values,
+    # instead of a Python-level regex call per row. Missing values get code -1,
+    # which take() fills with NaN, so they stay unmapped.
+    codes, uniques = pd.factorize(df[source_col])
+    literal_mapping, regex_maps, resolved = _resolve_component_values(
+        pd.Series(uniques), rep_map
     )
 
-    mapped = result_df[source_col].map(literal_mapping)
-
-    if regex_maps:
-
-        def _regex_target(value: object) -> object:
-            for vm in regex_maps:
-                pattern = vm.source.removeprefix("regex:")
-                if re.fullmatch(pattern, str(value)):
-                    return vm.target
-            return None
-
-        # Missing source values stay unmapped: str(NaN) is "nan", which a
-        # regex (especially the catch-all "regex:.*") would otherwise match.
-        unmatched = mapped.isna() & result_df[source_col].notna()
-        if unmatched.any():
-            mapped = mapped.astype(object)
-            mapped.loc[unmatched] = result_df.loc[unmatched, source_col].map(
-                _regex_target
-            )
-
-    result_df[target_col] = mapped
+    # dtype= keeps the resolved dtype: an object result (the regex path) would
+    # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
+    result_df = df.copy(deep=False)
+    result_df[target_col] = pd.Series(
+        pd.api.extensions.take(resolved.array, codes, allow_fill=True),
+        index=df.index,
+        dtype=resolved.dtype,
+    )
 
     n_pairs = len(literal_mapping) + len(regex_maps)
     logger.log(
@@ -325,6 +318,56 @@ def apply_component_map(
         logger.warning("%d values could not be mapped (set to NaN).", unmapped)
 
     return result_df
+
+
+def _resolve_component_values(
+    values: pd.Series, rep_map: RepresentationMap
+) -> tuple[dict[str, str], list[ValueMap], pd.Series]:
+    """Map source values through a RepresentationMap's value maps.
+
+    Literal (exact) value maps are applied first via a vectorised lookup and
+    always win. Values left unmapped then fall through to the regex value maps,
+    with any catch-all (``"regex:.*"``) evaluated last. Missing values are never
+    matched by a regex.
+
+    Args:
+        values: The source values to map, typically the distinct values of a
+            source column.
+        rep_map: The RepresentationMap holding the value maps.
+
+    Returns:
+        The literal lookup, the rank-sorted regex value maps, and the mapped
+        values, aligned with ``values``.
+    """
+    literal_mapping = {
+        vm.source: vm.target
+        for vm in rep_map.maps
+        if not vm.source.startswith("regex:")
+    }
+    regex_maps = sorted(
+        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
+        key=lambda vm: _value_map_rank([vm.source]),
+    )
+
+    mapped = values.map(literal_mapping)
+
+    if regex_maps:
+
+        def _regex_target(value: object) -> object:
+            for vm in regex_maps:
+                pattern = vm.source.removeprefix("regex:")
+                if re.fullmatch(pattern, str(value)):
+                    return vm.target
+            return None
+
+        # Missing source values stay unmapped: str(NaN) is "nan", which a
+        # regex (especially the catch-all "regex:.*") would otherwise match.
+        unmatched = mapped.isna() & values.notna()
+        if unmatched.any():
+            mapped = mapped.astype(object)
+            mapped.loc[unmatched] = values.loc[unmatched].map(_regex_target)
+
+    return literal_mapping, regex_maps, mapped
 
 
 @typechecked
@@ -348,6 +391,10 @@ def apply_multi_component_map(
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
 
+    Each distinct combination of source values is matched once and the result
+    broadcast to every row, so rule matching grows with the number of
+    distinct combinations rather than the number of rows.
+
     Args:
         df: Source data.
         multi_component_map: MultiComponentMap with source columns, target
@@ -363,15 +410,13 @@ def apply_multi_component_map(
         TypeError: If ``multi_component_map.values`` is a URN string rather
             than an embedded MultiRepresentationMap.
     """
-    result_df = df.copy()
-
-    source_cols = multi_component_map.source
+    source_cols = list(multi_component_map.source)
     target_col = multi_component_map.target[0]
     rep_map = multi_component_map.values
     if isinstance(rep_map, str):
-        raise _unresolved_values_error("MultiComponentMap", list(source_cols), rep_map)
+        raise _unresolved_values_error("MultiComponentMap", source_cols, rep_map)
 
-    missing_cols = [col for col in source_cols if col not in result_df.columns]
+    missing_cols = [col for col in source_cols if col not in df.columns]
     if missing_cols:
         raise KeyError(f"Missing source columns: {missing_cols}")
 
@@ -384,6 +429,52 @@ def apply_multi_component_map(
     # round-trip).
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
+    # Resolve each distinct combination of source values once, then broadcast
+    # back to every row by its group code. Evaluating the rules over all rows
+    # instead held one row-length mask per rule, which ran out of memory on
+    # large frames. dropna=False keeps rows with a missing value in their own
+    # groups, which the rules then leave unmapped.
+    codes = df.groupby(source_cols, sort=False, dropna=False).ngroup().to_numpy()
+    first_rows = pd.Series(codes).drop_duplicates()
+    # Row i of ``combinations`` is the combination with group code i.
+    order = np.argsort(first_rows.to_numpy(), kind="stable")
+    combinations = df.iloc[first_rows.index.to_numpy()[order]][source_cols]
+    resolved = _resolve_multi_values(combinations, source_cols, rules)
+
+    result_df = df.copy(deep=False)
+    result_df[target_col] = pd.Series(resolved[codes], index=df.index)
+
+    logger.log(
+        _progress_level(verbose),
+        "Mapped %s → '%s' using %d ordered rules.",
+        source_cols,
+        target_col,
+        len(rules),
+    )
+    unmapped = result_df[target_col].isna().sum()
+    if unmapped > 0:
+        logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
+
+    return result_df
+
+
+def _resolve_multi_values(
+    combinations: pd.DataFrame,
+    source_cols: list[str],
+    rules: list[dict[str, Any]],
+) -> np.ndarray:
+    """Return the first matching rule's target for each row of ``combinations``.
+
+    Args:
+        combinations: The source values to match, one row per combination.
+        source_cols: The source columns, in the order of each rule's patterns.
+        rules: Rank-sorted rules, each with ``"patterns"`` (one per source
+            column) and ``"target"``.
+
+    Returns:
+        An object array aligned with ``combinations``'s rows, holding the
+        matched target, or None where no rule matches.
+    """
     str_cols: dict[str, pd.Series] = {}
 
     def _stringified(col: str) -> pd.Series:
@@ -395,15 +486,14 @@ def apply_multi_component_map(
         # na_action="ignore" keeps missing values missing so that na=False
         # below treats them as non-matches and they stay unmapped.
         if col not in str_cols:
-            str_cols[col] = result_df[col].map(str, na_action="ignore")
+            str_cols[col] = combinations[col].map(str, na_action="ignore")
         return str_cols[col]
 
     # Build one boolean mask per rule, vectorised across the source columns,
     # then resolve them with np.select: rules are already rank-sorted, and
     # np.select picks the first true condition per row, so the first matching
-    # rule wins. This replaces a row-wise .apply(axis=1) so matching cost
-    # scales with the number of rules/columns instead of the number of rows.
-    n_rows = len(result_df)
+    # rule wins.
+    n_rows = len(combinations)
     conditions = []
     choices = []
     for rule in rules:
@@ -411,7 +501,7 @@ def apply_multi_component_map(
         # strict=True preserves the contract that each rule must supply one
         # pattern per source column.
         for col, pattern in zip(source_cols, rule["patterns"], strict=True):
-            col_series = result_df[col]
+            col_series = combinations[col]
             if pattern.startswith("regex:"):
                 regex = pattern.removeprefix("regex:")
                 col_mask = (
@@ -428,22 +518,6 @@ def apply_multi_component_map(
         conditions.append(mask)
         choices.append(rule["target"])
 
-    if conditions:
-        result_df[target_col] = pd.Series(
-            np.select(conditions, choices, default=None), index=result_df.index
-        )
-    else:
-        result_df[target_col] = None
-
-    logger.log(
-        _progress_level(verbose),
-        "Mapped %s → '%s' using %d ordered rules.",
-        source_cols,
-        target_col,
-        len(rules),
-    )
-    unmapped = result_df[target_col].isna().sum()
-    if unmapped > 0:
-        logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
-
-    return result_df
+    if not conditions:
+        return np.full(n_rows, None, dtype=object)
+    return np.select(conditions, choices, default=None)
