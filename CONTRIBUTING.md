@@ -70,6 +70,14 @@ uv run python -m pytest -k test_validate_dataset_local -v
 
 Tests marked `integration` need an FMR and are excluded from the default lane;
 run them with `uv run python -m pytest -m integration` when you have access.
+The live upload test in `tests/test_fmr.py` also needs `TIDYSDMX_FMR_SCOPE` set
+to the FMR app's scope (`<fmr-app-id>/.default`) and an Azure sign-in, and skips
+without the variable. Set `TIDYSDMX_FMR_CLIENT_ID` and `TIDYSDMX_FMR_TENANT_ID`
+as well when the FMR app does not authorise the Azure CLI's client app. The test
+adds a code to `WB.TEST:CL_TEST(1.0)` on the QA registry and restores the
+codelist afterwards. When the sign-in or the registry refuses you,
+`uv run python scripts/diagnose_fmr_auth.py` walks through each step of the
+authentication, read-only, and reports where it breaks.
 
 ## Adding a dependency
 
