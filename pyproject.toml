@@ -242,6 +242,9 @@ max-complexity = 10
 # blocks; their print() calls are progress output for a human running them, not
 # stray debugging left in library code.
 "tests/fixtures/fxtr_*.py" = ["T20"]
+# The scripts/ tools are run by a human at a terminal, and print() is how they
+# report; they are not part of the package.
+"scripts/*.py" = ["T20"]
 # The FMR client tests pass dummy bearer strings ("t1", "azure-access-token")
 # around; bandit's hardcoded-password heuristics match any name containing
 # "token". Nothing here is a credential.

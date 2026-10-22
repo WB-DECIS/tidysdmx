@@ -117,6 +117,8 @@ index.qmd                   — docs landing page
 user_guide/*.qmd            — narrative documentation
 SKILL.md                    — API summary published for AI agents consuming this package
 notebooks/                  — exploratory notebooks (outputs stripped by the nbstripout hook)
+scripts/                    — developer tools run from the repo root, not shipped;
+                              diagnose_fmr_auth.py finds where an FMR sign-in breaks
 
 .github/workflows/          — ci, release, docs, security, pr-review
 ```
