@@ -23,7 +23,8 @@ only the claims that describe its shape. Run it from the repository root::
     uv run python scripts/diagnose_fmr_auth.py --scope "<app-id>/.default"
 
 and add ``--client-id`` and ``--tenant-id`` when the registry's app does not
-authorise the Azure CLI's client. Every option falls back to an environment
+authorise the Azure CLI's client; the sign-in then goes through the browser
+with that client app. Every option falls back to an environment
 variable: ``TIDYSDMX_FMR_ROOT``, ``TIDYSDMX_FMR_SCOPE``,
 ``TIDYSDMX_FMR_CLIENT_ID`` and ``TIDYSDMX_FMR_TENANT_ID``, the last three being
 the ones the live upload test in ``tests/test_fmr.py`` reads. A browser window
@@ -57,6 +58,7 @@ REFERENCE = re.compile(
     r"^(?P<agency>[\w.@$-]+):(?P<id>[\w@$-]+)\((?P<version>[\w.+~-]+)\)$"
 )
 CLAIMS_SHOWN = ("aud", "iss", "ver", "scp", "roles", "appid", "azp", "tid")
+NEEDS_TOKEN = frozenset({httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN})
 
 # The Entra ID errors met while signing in to a registry, and what each means
 # for this setup. Any other code is looked up by URL.
@@ -185,7 +187,10 @@ def parse_args(argv: list[str] | None = None) -> Settings:
         help=(
             "azure-identity credential: DefaultAzureCredential with its browser "
             "fallback, as AzureTokenProvider.from_default_credential builds it, "
-            "or a browser or device-code sign-in alone (default: %(default)s)"
+            "or a browser or device-code sign-in alone. With --client-id or "
+            "--tenant-id, default signs in through the browser, the only "
+            "credential in DefaultAzureCredential's chain that would honour them "
+            "(default: %(default)s)"
         ),
     )
     parser.add_argument(
@@ -270,7 +275,8 @@ def check_anonymous_reads(probes: list[Probe]) -> bool:
         probes: The reads to try, without a token.
 
     Returns:
-        Whether the public API answered 200.
+        Whether the public API answered at all: 200, or 401 or 403 from a
+        registry whose reads need a token, which the next steps then test.
     """
     _heading(1, "Read the codelist without a token")
     answers = {probe.name: _get(probe, token=None) for probe in probes}
@@ -278,9 +284,13 @@ def check_anonymous_reads(probes: list[Probe]) -> bool:
         if response is not None:
             _detail(f"{name}: HTTP {response.status_code}")
     _detail(
-        "Only the public API must answer 200 here; the secure one may want a token."
+        "The public API answers 200 when reads are public, or 401 or 403 when "
+        "they need a token; the secure one may want a token either way."
     )
     public = answers[probes[0].name]
+    if public is not None and public.status_code in NEEDS_TOKEN:
+        _verdict(True, "the registry answers, and its reads need a token")
+        return True
     if public is None or public.status_code != httpx.codes.OK:
         _verdict(False, "the registry or the codelist is unreachable; check --root")
         return False
@@ -305,7 +315,14 @@ def build_credential(settings: Settings) -> Any | None:
         return None
     client = {"client_id": settings.client_id, "tenant_id": settings.tenant_id}
     given = {key: value for key, value in client.items() if value}
-    if settings.credential == "browser":
+    client_app = settings.client_id or "azure-identity's default"
+    if settings.credential == "default" and given:
+        # DefaultAzureCredential hands a client app only to its browser
+        # fallback; the Azure CLI or any other credential earlier in its chain
+        # would sign in through its own client and ignore the one asked for.
+        _detail("--client-id or --tenant-id given: signing in through the browser")
+        credential = identity.InteractiveBrowserCredential(**given)
+    elif settings.credential == "browser":
         credential = identity.InteractiveBrowserCredential(**given)
     elif settings.credential == "device-code":
         credential = identity.DeviceCodeCredential(**given)
@@ -318,11 +335,10 @@ def build_credential(settings: Settings) -> Any | None:
             logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         credential = identity.DefaultAzureCredential(
-            exclude_interactive_browser_credential=False,
-            **{f"interactive_browser_{key}": value for key, value in given.items()},
+            exclude_interactive_browser_credential=False
         )
-    client_id = settings.client_id or "the Azure CLI's"
-    _verdict(True, f"{type(credential).__name__}, client app {client_id}")
+        client_app = "that of the credential the chain picks (see its log)"
+    _verdict(True, f"{type(credential).__name__}, client app {client_app}")
     return credential
 
 
