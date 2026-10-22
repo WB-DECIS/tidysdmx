@@ -18,6 +18,7 @@ from pysdmx.model import (
 from typeguard import TypeCheckError
 
 # Load tidysdmx functions
+from tidysdmx import mapping as mapping_module
 from tidysdmx.mapping import (
     apply_component_map,
     apply_fixed_value_maps,
@@ -971,3 +972,92 @@ class TestMappingOnDistinctValues:
         result = map_structures(df, sm)
         result.loc[0, "OBS_VALUE"] = 99.0
         assert df["OBS_VALUE"].tolist() == [1.0, 2.0]
+
+    def test_apply_multi_component_map_index_named_like_source(self, urbanisation_map):
+        """An index level named like a source column does not confuse grouping."""
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]}).set_index(
+            "AREA", drop=False
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_"]
+
+    def test_map_structures_index_named_like_source(self, urbanisation_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]}).set_index(
+            "AREA", drop=False
+        )
+        sm = StructureMap(
+            id="SM",
+            name="SM",
+            agency="WB",
+            source="",
+            target="",
+            maps=[urbanisation_map],
+        )
+        result = map_structures(df, sm)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_"]
+
+    def test_apply_multi_component_map_repeated_source_column(self):
+        """A source listed twice is matched once per pattern position."""
+        mcm = MultiComponentMap(
+            source=["AREA", "AREA"],
+            target=["URBANISATION"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["urn:x", "urn:x2"],
+                target=["urn:y"],
+                maps=[
+                    MultiValueMap(source=["COL", "regex:C.*"], target=["C1"]),
+                    MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+                ],
+            ),
+        )
+        df = pd.DataFrame({"AREA": ["COL", "BEL"]})
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].tolist() == ["C1", "_T"]
+
+    def test_apply_multi_component_map_duplicate_index_labels(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": ["COL", "BEL", "COL"], "NOTE": ["one", "two", "one"]},
+            index=[0, 0, 1],
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_", "CO1"]
+
+    def test_apply_multi_component_map_resolves_only_distinct_source_combinations(
+        self, urbanisation_map, monkeypatch
+    ):
+        """Only the source columns of each distinct combination are matched."""
+        resolve = mapping_module._resolve_multi_values
+        seen = []
+
+        def spy(combinations, rules):
+            seen.append([len(column) for column in combinations])
+            return resolve(combinations, rules)
+
+        monkeypatch.setattr(mapping_module, "_resolve_multi_values", spy)
+        df = pd.DataFrame(
+            {
+                "AREA": ["COL", "BEL", "COL", "KEN", "BEL", "KEN"],
+                "NOTE": ["one", "two", "one", "two", "two", "two"],
+                "OBS_VALUE": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            }
+        )
+        apply_multi_component_map(df, urbanisation_map)
+        assert seen == [[3, 3]]
+
+    def test_apply_component_map_resolves_only_distinct_values(
+        self, area_map, monkeypatch
+    ):
+        resolve = mapping_module._resolve_component_values
+        seen = []
+
+        def spy(values, rep_map):
+            seen.append(len(values))
+            return resolve(values, rep_map)
+
+        monkeypatch.setattr(mapping_module, "_resolve_component_values", spy)
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL", "KEN"]})
+        apply_component_map(df, area_map)
+        assert seen == [3]

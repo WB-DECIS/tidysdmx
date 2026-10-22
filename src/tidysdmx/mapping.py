@@ -434,12 +434,19 @@ def apply_multi_component_map(
     # instead held one row-length mask per rule, which ran out of memory on
     # large frames. dropna=False keeps rows with a missing value in their own
     # groups, which the rules then leave unmapped.
-    codes = df.groupby(source_cols, sort=False, dropna=False).ngroup().to_numpy()
+    # Group by the source Series themselves, not by label: a label can also
+    # name an index level (ambiguous to groupby) or appear twice in
+    # source_cols.
+    sources = [df[col] for col in source_cols]
+    codes = sources[0].groupby(sources, sort=False, dropna=False).ngroup().to_numpy()
     first_rows = pd.Series(codes).drop_duplicates()
-    # Row i of ``combinations`` is the combination with group code i.
-    order = np.argsort(first_rows.to_numpy(), kind="stable")
-    combinations = df.iloc[first_rows.index.to_numpy()[order]][source_cols]
-    resolved = _resolve_multi_values(combinations, source_cols, rules)
+    positions = first_rows.index.to_numpy()[
+        np.argsort(first_rows.to_numpy(), kind="stable")
+    ]
+    # Gather only the source columns, one row per combination: element i of
+    # each Series belongs to the combination with group code i.
+    combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]
+    resolved = _resolve_multi_values(combinations, rules)
 
     result_df = df.copy(deep=False)
     result_df[target_col] = pd.Series(resolved[codes], index=df.index)
@@ -459,25 +466,24 @@ def apply_multi_component_map(
 
 
 def _resolve_multi_values(
-    combinations: pd.DataFrame,
-    source_cols: list[str],
+    combinations: list[pd.Series],
     rules: list[dict[str, Any]],
 ) -> np.ndarray:
-    """Return the first matching rule's target for each row of ``combinations``.
+    """Return the first matching rule's target for each source combination.
 
     Args:
-        combinations: The source values to match, one row per combination.
-        source_cols: The source columns, in the order of each rule's patterns.
+        combinations: One Series per source column, in the order of each
+            rule's patterns; element i of every Series forms combination i.
         rules: Rank-sorted rules, each with ``"patterns"`` (one per source
             column) and ``"target"``.
 
     Returns:
-        An object array aligned with ``combinations``'s rows, holding the
-        matched target, or None where no rule matches.
+        An object array with one entry per combination, holding the matched
+        target, or None where no rule matches.
     """
-    str_cols: dict[str, pd.Series] = {}
+    str_cols: dict[int, pd.Series] = {}
 
-    def _stringified(col: str) -> pd.Series:
+    def _stringified(position: int) -> pd.Series:
         # Per-cell str() (not .astype("string")) keeps the exact regex
         # semantics of the previous row-wise implementation and of
         # apply_component_map: .astype("string") formats some dtypes
@@ -485,27 +491,28 @@ def _resolve_multi_values(
         # from datetime columns, but only when every value is midnight).
         # na_action="ignore" keeps missing values missing so that na=False
         # below treats them as non-matches and they stay unmapped.
-        if col not in str_cols:
-            str_cols[col] = combinations[col].map(str, na_action="ignore")
-        return str_cols[col]
+        if position not in str_cols:
+            str_cols[position] = combinations[position].map(str, na_action="ignore")
+        return str_cols[position]
 
     # Build one boolean mask per rule, vectorised across the source columns,
     # then resolve them with np.select: rules are already rank-sorted, and
     # np.select picks the first true condition per row, so the first matching
     # rule wins.
-    n_rows = len(combinations)
+    n_rows = len(combinations[0])
     conditions = []
     choices = []
     for rule in rules:
         mask = np.ones(n_rows, dtype=bool)
         # strict=True preserves the contract that each rule must supply one
         # pattern per source column.
-        for col, pattern in zip(source_cols, rule["patterns"], strict=True):
-            col_series = combinations[col]
+        for position, (col_series, pattern) in enumerate(
+            zip(combinations, rule["patterns"], strict=True)
+        ):
             if pattern.startswith("regex:"):
                 regex = pattern.removeprefix("regex:")
                 col_mask = (
-                    _stringified(col)
+                    _stringified(position)
                     .str.fullmatch(regex, na=False)
                     .to_numpy(dtype=bool)
                 )
