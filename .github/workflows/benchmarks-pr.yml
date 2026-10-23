@@ -26,9 +26,15 @@ jobs:
   decide:
     name: Decide whether to benchmark
     # Same trust model as pr-review.yml: fork PRs and drafts are skipped.
+    # Dependabot-triggered runs are skipped too: they get a read-only token, so
+    # the comment could not be posted, and its lockfile bumps rarely touch
+    # runtime code. To measure one, a maintainer adds the `benchmark` label;
+    # that `labeled` event's actor is the maintainer, so it runs with the
+    # normal token.
     if: >-
       github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
