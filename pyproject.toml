@@ -266,7 +266,7 @@ max-complexity = 10
 # ----------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.11"
-files = ["src", "tests"]
+files = ["src", "tests", "benchmarks"]
 warn_unreachable = true
 warn_redundant_casts = true
 warn_unused_ignores = true
