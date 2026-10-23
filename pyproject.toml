@@ -75,7 +75,9 @@ build-backend = "flit_core.buildapi"
 # flit ships src/tidysdmx, pyproject.toml, README.md and LICENSE by itself; this
 # adds what the sdist carried before the backend switch.
 include = ["tests/", "CHANGELOG.md"]
-exclude = ["tests/**/__pycache__", "tests/**/*.pyc"]
+# tests/test_benchmarks.py tests the top-level benchmarks/ package, which the
+# sdist does not carry, so pytest would fail to collect it from an unpacked sdist.
+exclude = ["tests/**/__pycache__", "tests/**/*.pyc", "tests/test_benchmarks.py"]
 
 # ----------------------------------------------------------------------
 # Dependency groups (PEP 735). `uv sync` installs `dev` by default;
