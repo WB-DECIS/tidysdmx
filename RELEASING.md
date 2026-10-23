@@ -19,7 +19,10 @@ and published to [PyPI](https://pypi.org/project/tidysdmx/) via GitHub Actions
    - inserts a generated section into `CHANGELOG.md` under the `<!-- version list -->` marker;
    - commits (`chore(release): X.Y.Z [skip ci]`), tags `vX.Y.Z`, and creates a GitHub Release;
    - hands off to a separate `build` job that runs `uv build` against the new tag;
-   - publishes to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC — no token).
+   - publishes to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC — no token);
+   - benchmarks `map_structures` against the previous three releases and attaches
+     `benchmarks-vX.Y.Z.json` to the GitHub Release (non-blocking);
+   - redeploys the docs, whose Performance page renders those results.
 4. After the release, **back-merge `main` into `dev` immediately, before merging
    any new work into `dev`**, so the release commit (version bump + changelog) reaches
    `dev`. Skipping it reintroduces version drift; delaying it can cause commits merged
@@ -92,7 +95,10 @@ you also remove `allow_zero_version`) becomes 1.0.0.
 4. Watch *Actions → Release*. Verify afterwards:
    - PyPI shows the new version (with project links and classifiers);
    - `pip install tidysdmx==<version>` works;
-   - the `vX.Y.Z` tag, GitHub Release (with dists attached), and CHANGELOG entry exist.
+   - the `vX.Y.Z` tag, GitHub Release (with dists attached), and CHANGELOG entry exist;
+   - `benchmarks-vX.Y.Z.json` is attached and the Performance page shows the new
+     version. If the *Benchmark the release* job failed, re-run it from the Actions
+     page; re-running also re-runs the attach and docs jobs after it.
 5. Back-merge `main` → `dev`.
 
 ## Dry runs

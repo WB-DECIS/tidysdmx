@@ -53,6 +53,7 @@ Run `make help` for the full list. The ones you will use:
 | `make cov` | unit tests with coverage, enforcing the gate |
 | `make build` | build the sdist and wheel, check their metadata, import the wheel |
 | `make docs` / `make docs-preview` | build / live-preview the documentation site |
+| `make bench` | benchmark `map_structures`: the working tree vs the last 3 releases |
 | `make audit` | check locked dependencies for known vulnerabilities |
 | `make release-dry` | show the version the next release would produce |
 | `make check` | lint + typecheck + cov — CI runs these plus `make build` |
@@ -235,6 +236,19 @@ longer version.
 Every PR runs lint, typing, tests on every supported Python version, a
 packaging check, a dependency audit and a workflow security lint. A green board
 is the bar for merging.
+
+### Benchmarks on pull requests
+
+A PR that touches `src/tidysdmx/mapping.py`, `benchmarks/` or `uv.lock` gets a
+benchmark comment comparing its head with the base branch and the latest
+release on the same runner. Each push updates it. To benchmark a PR outside
+those paths, add the `benchmark` label. The full grid takes a while, and the
+check is not required for merging. Dependabot's pull requests are not
+benchmarked automatically; add the `benchmark` label to measure one.
+
+To measure locally, `make bench` compares your working tree with the last
+three releases and `make docs-preview` shows the result on the Performance
+page. Laptop numbers describe the laptop; compare them only with each other.
 
 ## Code of Conduct
 
