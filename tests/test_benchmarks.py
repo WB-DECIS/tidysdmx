@@ -1,9 +1,15 @@
 """Tests for the benchmarks/ harness (not part of the tidysdmx package)."""
 
+import json
+import platform
+import sys
+
 import pandas as pd
 import pytest
 from pysdmx.model.map import ComponentMap, FixedValueMap, MultiComponentMap
 
+from benchmarks import case, probe
+from benchmarks.case import repeats_for, run_case
 from benchmarks.records import SCENARIOS, empty_record, release_key
 from benchmarks.scenarios import build
 from tidysdmx import map_structures
@@ -107,3 +113,75 @@ class TestBuild:
     def test_build_rejects_rows_below_one(self):
         with pytest.raises(ValueError, match="rows must be at least 1, got 0"):
             build("typical", 0)
+
+
+class TestRepeatsFor:
+    @pytest.mark.parametrize(
+        ("rows", "expected"),
+        [(1_000, 7), (10_000, 7), (100_000, 5), (1_000_000, 3)],
+    )
+    def test_repeats_for_shrinks_with_size(self, rows, expected):
+        assert repeats_for(rows) == expected
+
+
+class TestRunCase:
+    def test_run_case_reports_ok(self):
+        assert run_case("typical", 1_000)["status"] == "ok"
+
+    def test_run_case_records_every_sample(self):
+        assert len(run_case("wide", 1_000)["samples_s"]) == 7
+
+    def test_run_case_measures_peak_allocation(self):
+        assert run_case("typical", 1_000)["peak_alloc_bytes"] > 0
+
+    def test_run_case_records_output_rows(self):
+        assert run_case("high_cardinality", 1_000)["output_shape"][0] == 1_000
+
+    def test_run_case_records_input_size(self):
+        assert run_case("regex_heavy", 1_000)["input_bytes"] > 0
+
+    def test_run_case_stops_after_a_slow_call(self, monkeypatch):
+        monkeypatch.setattr(case, "SLOW_CALL_S", 0.0)
+        assert len(run_case("typical", 1_000)["samples_s"]) == 1
+
+    def test_run_case_skips_memory_when_too_slow(self, monkeypatch):
+        monkeypatch.setattr(case, "MEMORY_SKIP_S", 0.0)
+        assert run_case("typical", 1_000)["peak_alloc_bytes"] is None
+
+
+class TestCaseMain:
+    def _main(self, tmp_path):
+        result = tmp_path / "case.json"
+        code = case.main(
+            ["--scenario", "typical", "--rows", "100", "--result", str(result)]
+        )
+        return code, json.loads(result.read_text(encoding="utf-8"))
+
+    def test_main_refuses_tidysdmx_from_outside_the_environment(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "elsewhere"))
+        _, record = self._main(tmp_path)
+        assert record["reason"].startswith("ImportError: tidysdmx was imported from")
+
+    def test_main_returns_one_on_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "elsewhere"))
+        code, _ = self._main(tmp_path)
+        assert code == 1
+
+    def test_main_writes_an_ok_record(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(case, "_assert_installed", lambda: None)
+        _, record = self._main(tmp_path)
+        assert record["status"] == "ok"
+
+
+class TestInstalled:
+    def test_installed_reports_python(self):
+        assert probe.installed()["python"] == platform.python_version()
+
+    def test_installed_reports_pandas(self):
+        assert probe.installed()["pandas"] == pd.__version__
+
+    def test_installed_reports_missing_package_as_none(self, monkeypatch):
+        monkeypatch.setattr(probe, "PACKAGES", ("no-such-package-xyz",))
+        assert probe.installed()["no-such-package-xyz"] is None
