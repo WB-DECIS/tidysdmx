@@ -33,8 +33,9 @@ comparison is like for like.
   - *regex heavy*: two columns where half the values miss the literal lookup and
     fall through to twenty regular expressions and a catch-all;
   - *wide*: twenty mapped columns.
-- **Time** is the median of 3 to 7 calls, measured with `time.perf_counter`
-  after a warm-up call.
+- **Time** is the median of up to 7 calls (3 at 1,000,000 rows, and just one
+  when a call takes over 30 seconds), measured with `time.perf_counter` after a
+  warm-up call.
 - **Peak extra memory** is the most memory one call allocated beyond its
   inputs, output included, measured with `tracemalloc` in a separate call.
   - It counts NumPy buffers, pandas hash tables and Python objects.
