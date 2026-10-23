@@ -98,6 +98,9 @@ dev = [
     # httpx mocking for the FMR client tests: pysdmx builds an httpx.Client
     # inside every request, so only a transport-level mock can see the wire.
     "respx>=0.23",
+    # Draws the Performance page's charts (benchmarks/report.py). In `dev`, not
+    # `docs`, so CI's test job renders them too; docs builds sync `dev` anyway.
+    "matplotlib>=3.9",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool

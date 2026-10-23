@@ -1,19 +1,26 @@
 """Render benchmark results as Markdown: ``python -m benchmarks.report``.
 
-One results file (``benchmarks.records.Results``) feeds two text formats:
+One results file (``benchmarks.records.Results``) feeds three formats:
 
+- ``page``: the docs site's Performance page, with charts;
 - ``summary``: a GitHub Actions job summary;
 - ``pr-comment``: the sticky pull-request comment, ``summary`` behind a marker.
 
-Standard library only, so it runs under ``uv run --no-project``.
+The text formats use the standard library only, so they run under
+``uv run --no-project``. The charts need matplotlib, which is imported only when
+one is drawn.
 """
 
 import argparse
+import io
 import json
+import math
+import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from benchmarks.records import (
     SCHEMA_VERSION,
@@ -21,8 +28,13 @@ from benchmarks.records import (
     Record,
     Results,
     VersionInfo,
+    release_key,
 )
 
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
+TEMPLATE: Path = Path(__file__).with_name("page.qmd")
 COMMENT_MARKER: str = "<!-- tidysdmx-benchmark -->"
 RESULTS_MARKER: str = "<!-- RESULTS -->"
 HEADLINE_SCENARIO: str = "typical"
@@ -282,6 +294,302 @@ def render_pr_comment(results: Results, run_url: str | None = None) -> str:
     return f"{COMMENT_MARKER}\n{render_comparison(results, run_url)}"
 
 
+_PLACEHOLDER: str = (
+    "::: {.callout-note}\n"
+    "No performance profile has been published yet. The first one arrives with\n"
+    "the next release; `make bench` produces one locally.\n"
+    ":::"
+)
+
+
+def sizing_table(results: Results, metric: Metric) -> str:
+    """Show the target's time or memory for every scenario and size.
+
+    Memory cells add the peak's multiple of the input size, which is what
+    sizing a job needs: its memory is roughly the input plus the peak.
+    """
+    index = index_records(results)
+    target = results["versions"][0]["label"]
+    header = [_METRIC_TITLES[metric], *(f"{rows:,} rows" for rows in results["sizes"])]
+    body = []
+    for scenario in results["scenarios"]:
+        cells = [scenario]
+        for rows in results["sizes"]:
+            record = index.get((target, scenario, rows))
+            value = metric_value(record, metric)
+            input_bytes = record["input_bytes"] if record is not None else None
+            cell = format_metric(value, metric)
+            if metric == "memory" and value is not None and input_bytes:
+                cell += f" ({value / input_bytes:.1f}{TIMES} input)"
+            cells.append(cell)
+        body.append(cells)
+    return markdown_table(header, body)
+
+
+def headline(results: Results) -> str:
+    """Return the opening line: the target on the headline scenario, largest size."""
+    target = results["versions"][0]
+    rows = max(results["sizes"])
+    record = index_records(results).get((target["label"], HEADLINE_SCENARIO, rows))
+    measured = (
+        f"Measured {results['generated_at'][:10]} on {machine_description(results)}."
+    )
+    seconds = metric_value(record, "time")
+    peak = metric_value(record, "memory")
+    input_bytes = record["input_bytes"] if record is not None else None
+    if seconds is None or peak is None or not input_bytes:
+        return f"**{display_label(target)}**. {measured}"
+    return (
+        f"**{display_label(target)}** maps the {HEADLINE_SCENARIO} indicator table "
+        f"of {rows:,} rows in **{format_seconds(seconds)}**, allocating "
+        f"**{format_bytes(peak)}** beyond its input "
+        f"({peak / input_bytes:.1f}{TIMES} the input's size). {measured}"
+    )
+
+
+def raw_data_link(results: Results, repo_url: str = REPO_URL) -> str | None:
+    """Link the results file attached to the target's Release, if it is a release."""
+    tag = results["versions"][0]["label"]
+    if release_key(tag) is None:
+        return None
+    url = f"{repo_url}/releases/download/{tag}/benchmarks-{tag}.json"
+    return (
+        "The raw measurements are attached to the release: "
+        f"[benchmarks-{tag}.json]({url})."
+    )
+
+
+def render_page(
+    results: Results | None,
+    template: str,
+    charts: Callable[[Results], str] | None = None,
+) -> str:
+    """Return the Performance page: ``template`` with its results marker filled in.
+
+    Args:
+        results: The results to show, or ``None`` for the placeholder.
+        template: The page template's text; must contain ``RESULTS_MARKER``.
+        charts: Draws the charts; ``render_charts`` by default.
+
+    Returns:
+        The page as Quarto Markdown.
+
+    Raises:
+        ValueError: If ``template`` has no ``RESULTS_MARKER``.
+    """
+    if RESULTS_MARKER not in template:
+        raise ValueError(f"The page template has no {RESULTS_MARKER} marker")
+    if results is None:
+        return template.replace(RESULTS_MARKER, _PLACEHOLDER)
+    draw = render_charts if charts is None else charts
+    largest = max(results["sizes"])
+    sections = [
+        headline(results),
+        "## Sizing",
+        "Median time per call, by dataset shape and size:",
+        sizing_table(results, "time"),
+        "Peak memory allocated per call beyond the input, and its multiple of the "
+        "input's size:",
+        sizing_table(results, "memory"),
+        "## Scaling",
+        draw(results),
+    ]
+    if reference_versions(results):
+        sections += [
+            "## Compared with earlier versions",
+            f"At {largest:,} rows. {DELTA} columns give the change from the named "
+            f"version: negative is faster or smaller, and changes within "
+            f'{PLUS_MINUS}10% read "{SAME}".',
+            comparison_table(results, largest, "time"),
+            comparison_table(results, largest, "memory"),
+        ]
+    sections += [
+        "## Environment",
+        f"Measured on {machine_description(results)}.",
+        environment_table(results),
+    ]
+    link = raw_data_link(results)
+    if link is not None:
+        sections.append(link)
+    return template.replace(RESULTS_MARKER, "\n\n".join(sections))
+
+
+@dataclass(frozen=True)
+class _Theme:
+    surface: str
+    text: str
+    muted: str
+    grid: str
+    accent: str
+    context: tuple[str, ...]
+
+
+# Surfaces, text and the accent come from the dataviz reference palette. Older
+# versions are neutral context lines, darker for newer releases. Identity never
+# rests on colour alone: every line also has its own marker and dash style, and
+# the tables beside the charts carry the exact values.
+_THEMES: dict[str, _Theme] = {
+    "light": _Theme(
+        surface="#fcfcfb",
+        text="#0b0b0b",
+        muted="#52514e",
+        grid="#e4e3df",
+        accent="#2a78d6",
+        context=("#52514e", "#8a8984", "#b5b4ae"),
+    ),
+    "dark": _Theme(
+        surface="#1a1a19",
+        text="#f0efec",
+        muted="#c3c2b7",
+        grid="#3a3936",
+        accent="#3987e5",
+        context=("#c3c2b7", "#8f8e87", "#64635e"),
+    ),
+}
+_MARKERS: tuple[str, ...] = ("o", "s", "^", "D", "v", "P")
+_DASHES: tuple[str, ...] = ("-", "--", ":", "-.")
+_METRICS: tuple[Metric, ...] = ("time", "memory")
+# What fits in one legend row of the 8-inch figure, in characters of label text,
+# and what a legend handle and its gap add to each label.
+_LEGEND_ROW_CHARS: int = 85
+_LEGEND_HANDLE_CHARS: int = 6
+_SVG_DEFAULT_STYLE: re.Pattern[str] = re.compile(
+    r'<style type="text/css">\*\{[^}]*\}</style>\s*'
+)
+
+
+def render_charts(results: Results) -> str:
+    """Return the scaling charts, time then memory, each in a light and a dark variant.
+
+    Each variant sits in a ``perf-chart-light`` or ``perf-chart-dark`` div; the
+    page template's style block shows the one matching the site's theme.
+    """
+    blocks = []
+    for metric in _METRICS:
+        blocks.append(f"**{_METRIC_TITLES[metric]} per call**, against rows:")
+        for mode, theme in _THEMES.items():
+            svg = _chart_svg(results, metric, theme)
+            blocks.append(f"::: {{.perf-chart-{mode}}}\n```{{=html}}\n{svg}\n```\n:::")
+    return "\n\n".join(blocks)
+
+
+@dataclass(frozen=True)
+class _Style:
+    color: str
+    linewidth: float
+    marker: str
+    linestyle: str
+    zorder: int
+
+
+def _series_style(theme: _Theme, position: int) -> _Style:
+    """Return the target's accent style for position 0, a context style after it."""
+    if position == 0:
+        return _Style(theme.accent, 2.5, "o", "-", 3)
+    return _Style(
+        theme.context[min(position, len(theme.context)) - 1],
+        1.5,
+        _MARKERS[position % len(_MARKERS)],
+        _DASHES[position % len(_DASHES)],
+        2,
+    )
+
+
+def _plot_panel(
+    ax: "Axes", results: Results, scenario: str, metric: Metric, theme: _Theme
+) -> None:
+    """Draw one scenario's panel: one line per version, log-log."""
+    index = index_records(results)
+    sizes = sorted(results["sizes"])
+    scale = 1.0 if metric == "time" else 1 / 2**20
+    for position, info in enumerate(results["versions"]):
+        values = [
+            metric_value(index.get((info["label"], scenario, rows)), metric)
+            for rows in sizes
+        ]
+        style = _series_style(theme, position)
+        ax.plot(
+            sizes,
+            [math.nan if v is None else v * scale for v in values],
+            label=display_label(info),
+            color=style.color,
+            linewidth=style.linewidth,
+            marker=style.marker,
+            markersize=6,
+            linestyle=style.linestyle,
+            zorder=style.zorder,
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_facecolor(theme.surface)
+    ax.set_title(scenario.replace("_", " "), loc="left", color=theme.text, fontsize=11)
+    ax.grid(visible=True, which="major", color=theme.grid, linewidth=0.8)
+    ax.tick_params(colors=theme.muted, labelsize=9)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(theme.grid)
+
+
+def _legend_columns(labels: Sequence[str]) -> int:
+    """Return the legend's column count: as many as fit in the figure's width.
+
+    One row of long labels (versions with several aliases) would run off the
+    figure's edges, so the legend wraps to the rows it needs.
+    """
+    characters = sum(len(label) + _LEGEND_HANDLE_CHARS for label in labels)
+    rows = max(1, math.ceil(characters / _LEGEND_ROW_CHARS))
+    return max(1, math.ceil(len(labels) / rows))
+
+
+def _chart_svg(results: Results, metric: Metric, theme: _Theme) -> str:
+    """Draw one metric as small multiples, one panel per scenario, as inline SVG."""
+    from matplotlib import rc_context
+    from matplotlib.figure import Figure
+
+    scenarios = results["scenarios"]
+    nrows = math.ceil(len(scenarios) / 2)
+    figure = Figure(
+        figsize=(8, 3.2 * nrows + 0.6), layout="constrained", facecolor=theme.surface
+    )
+    axes = figure.subplots(nrows, 2, sharex=True, sharey=True, squeeze=False)
+    for ax, scenario in zip(axes.flat, scenarios, strict=False):
+        _plot_panel(ax, results, scenario, metric, theme)
+    for ax in axes.flat[len(scenarios) :]:
+        ax.set_visible(False)
+    for ax in axes[-1]:
+        ax.set_xlabel("Rows", color=theme.muted)
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Seconds" if metric == "time" else "MiB", color=theme.muted)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        loc="outside upper center",
+        ncols=_legend_columns(labels),
+        frameon=False,
+        labelcolor=theme.text,
+    )
+    buffer = io.StringIO()
+    # Text as text, not glyph paths: smaller, selectable, and in the page's font.
+    with rc_context({"svg.fonttype": "none", "font.family": "sans-serif"}):
+        figure.savefig(
+            buffer, format="svg", facecolor=theme.surface, metadata={"Date": None}
+        )
+    svg = buffer.getvalue()
+    # Drop the XML declaration and DOCTYPE, which are invalid inside HTML, and
+    # let the viewBox scale the chart to the column instead of a fixed pt size.
+    svg = svg[svg.index("<svg") :]
+    svg = re.sub(r'width="[\d.]+pt" height="[\d.]+pt"', 'width="100%"', svg, count=1)
+    # matplotlib's default stylesheet is `*{...}`, and a <style> element inline in
+    # a page is global to it: left in, it would restyle every SVG on the site.
+    # The same two defaults, set on the root, apply to this chart alone.
+    svg = _SVG_DEFAULT_STYLE.sub("", svg)
+    return svg.replace(
+        "<svg ", '<svg stroke-linejoin="round" stroke-linecap="butt" ', 1
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Render a results file in the requested format.
 
@@ -289,21 +597,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Command-line arguments; ``sys.argv[1:]`` when ``None``.
 
     Returns:
-        0 on success. A missing results file ends the program through
-        ``argparse`` with status 2 instead.
+        0. A missing results file is fine for ``page`` (it renders the
+        placeholder) and ends the program through ``argparse`` otherwise.
     """
     parser = argparse.ArgumentParser(
         prog="python -m benchmarks.report", description="Render benchmark results."
     )
-    parser.add_argument("--format", required=True, choices=("summary", "pr-comment"))
+    parser.add_argument(
+        "--format", required=True, choices=("page", "summary", "pr-comment")
+    )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", type=Path, help="file to write (default: stdout)")
+    parser.add_argument("--template", type=Path, default=TEMPLATE)
     parser.add_argument("--run-url", help="the workflow run to link")
     args = parser.parse_args(argv)
     results = load_results(args.input)
-    if results is None:
+    if args.format == "page":
+        text = render_page(results, args.template.read_text(encoding="utf-8"))
+    elif results is None:
         parser.error(f"no results at {args.input}")
-    if args.format == "summary":
+    elif args.format == "summary":
         text = render_comparison(results, args.run_url)
     else:
         text = render_pr_comment(results, args.run_url)

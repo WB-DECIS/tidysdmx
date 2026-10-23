@@ -17,12 +17,15 @@ from benchmarks.records import SCENARIOS, empty_record, release_key
 from benchmarks.report import (
     COMMENT_MARKER,
     MISSING,
+    RESULTS_MARKER,
     SAME,
     format_bytes,
     format_change,
     format_seconds,
     load_results,
+    render_charts,
     render_comparison,
+    render_page,
     render_pr_comment,
 )
 from benchmarks.run import (
@@ -39,9 +42,11 @@ from benchmarks.run import (
     target_measured,
 )
 from benchmarks.scenarios import build
+from tests.fixtures.fxtr_benchmarks import make_results
 from tidysdmx import map_structures
 
 ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = "---\ntitle: Performance\n---\n\n<!-- RESULTS -->\n\n## How it is measured\n"
 TAGS = ["v0.8.0", "v0.10.0", "v0.9.0", "v0.7.5", "not-a-release", "v1.0.0-rc.1"]
 
 
@@ -719,3 +724,106 @@ class TestReportMain:
                 ["--format", "summary", "--input", str(tmp_path / "absent.json")]
             )
         assert "no results at" in capsys.readouterr().err
+
+
+class TestRenderPage:
+    def _page(self, results):
+        return render_page(results, TEMPLATE, charts=lambda _: "CHARTS")
+
+    def test_render_page_shows_placeholder_without_results(self):
+        assert "No performance profile has been published yet" in render_page(
+            None, TEMPLATE
+        )
+
+    def test_render_page_replaces_the_marker(self, benchmark_results):
+        assert RESULTS_MARKER not in self._page(benchmark_results)
+
+    def test_render_page_rejects_template_without_marker(self, benchmark_results):
+        with pytest.raises(ValueError, match="has no <!-- RESULTS --> marker"):
+            render_page(benchmark_results, "# Performance\n")
+
+    def test_render_page_headline_gives_time_and_memory(self, benchmark_results):
+        assert "in **1 s**, allocating **300 MiB**" in self._page(benchmark_results)
+
+    def test_render_page_sizing_relates_memory_to_input(self, benchmark_results):
+        assert "300 MiB (3.1\u00d7 input)" in self._page(benchmark_results)
+
+    def test_render_page_includes_charts(self, benchmark_results):
+        assert "CHARTS" in self._page(benchmark_results)
+
+    def test_render_page_links_raw_data_for_a_release(self, benchmark_results):
+        benchmark_results["versions"][0]["label"] = "v0.11.0"
+        assert "releases/download/v0.11.0/benchmarks-v0.11.0.json" in self._page(
+            benchmark_results
+        )
+
+    def test_render_page_omits_raw_data_link_otherwise(self, benchmark_results):
+        assert "releases/download" not in self._page(benchmark_results)
+
+    def test_render_page_skips_comparison_for_a_single_version(self, benchmark_results):
+        benchmark_results["versions"] = benchmark_results["versions"][:1]
+        assert "## Compared with earlier versions" not in self._page(benchmark_results)
+
+
+@pytest.fixture(scope="module")
+def rendered_charts():
+    # Module-scoped: drawing eight SVGs takes seconds, and the string is immutable.
+    return render_charts(make_results())
+
+
+class TestRenderCharts:
+    def test_render_charts_draws_two_metrics_in_two_themes(self, rendered_charts):
+        assert rendered_charts.count("<svg") == 4
+
+    def test_render_charts_wraps_dark_variants(self, rendered_charts):
+        assert rendered_charts.count("{.perf-chart-dark}") == 2
+
+    def test_render_charts_scales_to_the_page_width(self, rendered_charts):
+        assert rendered_charts.count('width="100%"') == 4
+
+    def test_render_charts_drops_xml_prolog(self, rendered_charts):
+        assert "<?xml" not in rendered_charts
+
+    def test_render_charts_leaves_no_page_wide_stylesheet(self, rendered_charts):
+        # An inline <style> is global to the page, so a `*{...}` rule would
+        # restyle every other SVG on the site.
+        assert "<style" not in rendered_charts
+
+    def test_render_charts_keeps_round_joins_on_each_chart(self, rendered_charts):
+        assert rendered_charts.count('<svg stroke-linejoin="round"') == 4
+
+
+class TestLegendColumns:
+    def test_legend_columns_keeps_short_labels_in_one_row(self):
+        assert report._legend_columns(["head", "base", "v0.10.0", "v0.9.0"]) == 4
+
+    def test_legend_columns_wraps_long_labels(self):
+        labels = [
+            "head",
+            "base (= v0.11.0, v0.11.0-rc.2)",
+            "v0.10.0",
+            "v0.9.0 (= v0.9.1, v0.9.2)",
+            "v0.8.0",
+        ]
+        assert report._legend_columns(labels) == 3
+
+    def test_legend_columns_handles_a_single_label(self):
+        assert report._legend_columns(["head"]) == 1
+
+
+class TestReportMainPage:
+    def test_main_writes_placeholder_page_without_results(self, tmp_path):
+        output = tmp_path / "index.qmd"
+        report.main(
+            [
+                "--format",
+                "page",
+                "--input",
+                str(tmp_path / "absent.json"),
+                "--output",
+                str(output),
+            ]
+        )
+        assert "No performance profile has been published yet" in output.read_text(
+            encoding="utf-8"
+        )

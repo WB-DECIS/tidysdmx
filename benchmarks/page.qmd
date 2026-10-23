@@ -1,0 +1,54 @@
+---
+title: "Performance"
+description: "How long map_structures() takes and how much memory it needs, by dataset shape and size, compared with earlier releases."
+---
+
+```{=html}
+<style>
+/* One chart variant per theme. great-docs' toggle sets data-bs-theme on <html>;
+   it does not use Quarto's .light-content / .dark-content classes. */
+.perf-chart-dark { display: none; }
+html[data-bs-theme="dark"] .perf-chart-light { display: none; }
+html[data-bs-theme="dark"] .perf-chart-dark { display: block; }
+</style>
+```
+
+How long does `map_structures()` take, and how much memory does it need, for a
+dataset of a given shape and size? This page answers that for the latest
+release. The benchmark ran on a GitHub-hosted runner when the release was cut,
+and re-measured earlier releases in the same run on the same machine, so the
+comparison is like for like.
+
+<!-- RESULTS -->
+
+## How it is measured
+
+- **Four dataset shapes**, each generated with a fixed seed at 1,000 to
+  1,000,000 rows (`benchmarks/scenarios.py` in the repository):
+  - *typical*: an indicator table with six low-cardinality dimensions, mapped by
+    three value maps, two implicit maps, two fixed values and one two-to-one
+    multi-component map;
+  - *high cardinality*: one column whose distinct values number a tenth of the
+    rows, mapped through a 10,000-entry value map with a catch-all;
+  - *regex heavy*: two columns where half the values miss the literal lookup and
+    fall through to twenty regular expressions and a catch-all;
+  - *wide*: twenty mapped columns.
+- **Time** is the median of 3 to 7 calls, measured with `time.perf_counter`
+  after a warm-up call.
+- **Peak extra memory** is the most memory one call allocated beyond its
+  inputs, output included, measured with `tracemalloc` in a separate call.
+  - It counts NumPy buffers, pandas hash tables and Python objects.
+  - It misses memory allocated outside Python's allocator hooks.
+  - A job's peak is roughly the input plus this figure.
+- **Each version is installed as users install it**, with the dependencies it
+  declares, resolved when the benchmark ran.
+  - Versions that require different pandas releases are measured with different
+    pandas releases, so part of a difference between them can come from pandas.
+  - The Environment table lists what each version ran with.
+- **Noise.** Runs on shared hardware vary by a few percent, so changes within
+  ±10% read "≈ same". Versions whose mapping code is unchanged differ by noise
+  alone.
+- **Cells marked "—" were not measured**, for one of three reasons:
+  - a smaller size of the same shape took over a minute;
+  - the call failed;
+  - the call was too slow to trace its memory.
