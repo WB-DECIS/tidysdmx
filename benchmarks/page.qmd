@@ -45,6 +45,10 @@ comparison is like for like.
   - Versions that require different pandas releases are measured with different
     pandas releases, so part of a difference between them can come from pandas.
   - The Environment table lists what each version ran with.
+- **Like for like.** Every case records a fingerprint of the mapped output. A
+  version whose output differs from the profiled version's, for example because
+  an older release lacks a feature the case uses, is marked "≠ output" and left
+  out of the comparison, because its time would say nothing about speed.
 - **Noise.** Runs on shared hardware vary by a few percent, so changes within
   ±10% read "≈ same". Versions whose mapping code is unchanged differ by noise
   alone.

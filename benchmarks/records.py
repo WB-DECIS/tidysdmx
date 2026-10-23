@@ -30,6 +30,9 @@ class Record(TypedDict):
     min_s: float | None
     peak_alloc_bytes: int | None
     output_shape: list[int] | None
+    # Absent from records of cases that measured nothing, and from files written
+    # before it was added; the report treats a missing fingerprint as comparable.
+    output_fingerprint: NotRequired[str]
     version: NotRequired[str]
 
 

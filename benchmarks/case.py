@@ -8,11 +8,13 @@ never to stdout, because tidysdmx 0.8.0 reports progress with ``print()``.
 
 import argparse
 import gc
+import hashlib
 import json
 import statistics
 import sys
 import time
 import tracemalloc
+from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -20,7 +22,7 @@ import pandas as pd
 from pysdmx.model.map import StructureMap
 
 from benchmarks.records import SCENARIOS, Record, empty_record
-from benchmarks.scenarios import build
+from benchmarks.scenarios import build, targets
 
 WARMUP_ROWS: int = 1_000
 SLOW_CALL_S: float = 30.0
@@ -45,13 +47,47 @@ def repeats_for(rows: int) -> int:
     return 3
 
 
+def output_fingerprint(df: pd.DataFrame, columns: Sequence[str]) -> str:
+    """Return a short hash of the values that ``columns`` of a mapped output hold.
+
+    Versions that map a case the same way get the same fingerprint, and one
+    that leaves values unmapped, or maps them differently, gets another. It
+    hashes each column's name, its null count and how many times each distinct
+    non-null value occurs, as ``str``. So it ignores row order, the column's
+    dtype (``object``, ``string`` or ``str``, which differ between pandas 2 and
+    3) and how a null is spelled (``None``, ``NaN`` or ``pd.NA``).
+
+    Args:
+        df: The output of ``map_structures``.
+        columns: The columns to hash, such as ``benchmarks.scenarios.targets``.
+            One that ``df`` lacks changes the fingerprint instead of failing,
+            so a version that drops a column is flagged, not lost.
+
+    Returns:
+        The first 16 hex digits of a SHA-256 digest.
+    """
+    digest = hashlib.sha256()
+    for name in columns:
+        if name not in df.columns:
+            entry: list[object] = [name, None]
+        else:
+            column = df[name]
+            counts: Counter[str] = Counter()
+            for value, count in column.value_counts(dropna=True).items():
+                counts[str(value)] += int(count)
+            entry = [name, int(column.isna().sum()), sorted(counts.items())]
+        digest.update(json.dumps(entry).encode("ascii"))
+    return digest.hexdigest()[:16]
+
+
 def run_case(scenario: str, rows: int, seed: int = 0) -> Record:
     """Time ``map_structures`` on one scenario and measure its peak allocation.
 
     A warm-up call on the first ``WARMUP_ROWS`` rows absorbs typeguard's
     instrumentation, imports and regex compilation. Timing stops early after a
     call slower than ``SLOW_CALL_S``. Memory is not traced when the median
-    exceeds ``MEMORY_SKIP_S``, because tracemalloc slows Python-level code.
+    exceeds ``MEMORY_SKIP_S``, because tracemalloc slows Python-level code. The
+    first call's output is fingerprinted once the clock has stopped.
 
     Args:
         scenario: One of ``benchmarks.records.SCENARIOS``.
@@ -70,11 +106,14 @@ def run_case(scenario: str, rows: int, seed: int = 0) -> Record:
 
     samples: list[float] = []
     output_shape: list[int] = []
-    for _ in range(repeats_for(rows)):
+    fingerprint = ""
+    for attempt in range(repeats_for(rows)):
         start = time.perf_counter()
         result = map_structures(df, structure_map)
         samples.append(time.perf_counter() - start)
         output_shape = [int(n) for n in result.shape]
+        if attempt == 0:
+            fingerprint = output_fingerprint(result, targets(structure_map))
         # Free this output before the next call, so calls don't overlap in memory.
         del result
         if samples[-1] > SLOW_CALL_S:
@@ -97,6 +136,7 @@ def run_case(scenario: str, rows: int, seed: int = 0) -> Record:
         "min_s": min(samples),
         "peak_alloc_bytes": peak,
         "output_shape": output_shape,
+        "output_fingerprint": fingerprint,
     }
 
 

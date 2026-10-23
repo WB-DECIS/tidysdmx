@@ -60,6 +60,26 @@ def build(scenario: str, rows: int, seed: int = 0) -> Inputs:
     return builder(rows, np.random.default_rng(seed))
 
 
+def targets(structure_map: StructureMap) -> list[str]:
+    """Return the target columns a structure map writes.
+
+    ``benchmarks.case`` fingerprints these columns of the mapped output.
+
+    Args:
+        structure_map: A map from ``build``, or any made of the same map types.
+
+    Returns:
+        The distinct target column names, sorted.
+    """
+    names: set[str] = set()
+    for component in structure_map.maps:
+        if isinstance(component, MultiComponentMap):
+            names.update(component.target)
+        else:
+            names.add(component.target)
+    return sorted(names)
+
+
 def _codes(prefix: str, count: int) -> list[str]:
     return [f"{prefix}{i:06d}" for i in range(count)]
 

@@ -2,10 +2,13 @@
 
 import pytest
 
+# Every version maps the fixture's cases to the same output, until a test says not.
+FINGERPRINTS = {"typical": "0123456789abcdef", "wide": "fedcba9876543210"}
+
 
 def _record(version, scenario, rows, median, peak, status="ok", reason=None):
     measured = status == "ok"
-    return {
+    record = {
         "version": version,
         "scenario": scenario,
         "rows": rows,
@@ -18,6 +21,9 @@ def _record(version, scenario, rows, median, peak, status="ok", reason=None):
         "peak_alloc_bytes": peak,
         "output_shape": [rows, 9] if measured else None,
     }
+    if measured:
+        record["output_fingerprint"] = FINGERPRINTS[scenario]
+    return record
 
 
 def _deps(pandas):

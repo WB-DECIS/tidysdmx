@@ -2,26 +2,37 @@
 
 import json
 import logging
+import math
 import platform
+import re
 import sys
 import tarfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
-from pysdmx.model.map import ComponentMap, FixedValueMap, MultiComponentMap
+from matplotlib.figure import Figure
+from pysdmx.model.map import (
+    ComponentMap,
+    FixedValueMap,
+    MultiComponentMap,
+    StructureMap,
+)
 
 from benchmarks import case, probe, report, run
-from benchmarks.case import repeats_for, run_case
+from benchmarks.case import output_fingerprint, repeats_for, run_case
 from benchmarks.records import SCENARIOS, empty_record, release_key
 from benchmarks.report import (
     COMMENT_MARKER,
     MISSING,
+    NOT_COMPARABLE,
     RESULTS_MARKER,
     SAME,
     format_bytes,
     format_change,
     format_seconds,
+    is_comparable,
     load_results,
     render_charts,
     render_comparison,
@@ -41,7 +52,7 @@ from benchmarks.run import (
     select_baselines,
     target_measured,
 )
-from benchmarks.scenarios import build
+from benchmarks.scenarios import build, targets
 from tests.fixtures.fxtr_benchmarks import make_results
 from tidysdmx import map_structures
 
@@ -85,6 +96,9 @@ class TestEmptyRecord:
     def test_empty_record_has_no_measurements(self):
         record = empty_record("typical", 10, "error", "boom")
         assert (record["median_s"], record["samples_s"]) == (None, [])
+
+    def test_empty_record_has_no_output_fingerprint(self):
+        assert "output_fingerprint" not in empty_record("typical", 10, "error", "boom")
 
 
 class TestBuild:
@@ -150,6 +164,38 @@ class TestBuild:
             build("typical", 0)
 
 
+class TestTargets:
+    def test_targets_lists_every_typical_target(self):
+        _, structure_map = build("typical", 100)
+        assert targets(structure_map) == [
+            "FREQ",
+            "INDICATOR",
+            "OBS_VALUE",
+            "REF_AREA",
+            "SEX",
+            "TIME_PERIOD",
+            "UNIT_MEASURE",
+            "UNIT_MULT",
+        ]
+
+    def test_targets_lists_each_target_once_in_order(self):
+        structure_map = StructureMap(
+            id="SM",
+            agency="BENCH",
+            maps=[
+                FixedValueMap(target="B", value="1"),
+                FixedValueMap(target="A", value="1"),
+                FixedValueMap(target="B", value="2"),
+            ],
+        )
+        assert targets(structure_map) == ["A", "B"]
+
+    @pytest.mark.parametrize("scenario", SCENARIOS)
+    def test_targets_are_columns_of_the_mapped_output(self, scenario):
+        df, structure_map = build(scenario, 100)
+        assert set(targets(structure_map)) <= set(map_structures(df, structure_map))
+
+
 class TestRepeatsFor:
     @pytest.mark.parametrize(
         ("rows", "expected"),
@@ -159,9 +205,112 @@ class TestRepeatsFor:
         assert repeats_for(rows) == expected
 
 
+def _frame(**columns):
+    return pd.DataFrame(columns)
+
+
+class TestOutputFingerprint:
+    def test_output_fingerprint_is_sixteen_hex_digits(self):
+        fingerprint = output_fingerprint(_frame(A=["x", "y"]), ["A"])
+        assert re.fullmatch(r"[0-9a-f]{16}", fingerprint)
+
+    def test_output_fingerprint_is_the_same_for_equal_frames(self):
+        assert output_fingerprint(_frame(A=["x", "y"]), ["A"]) == output_fingerprint(
+            _frame(A=["x", "y"]), ["A"]
+        )
+
+    def test_output_fingerprint_ignores_the_dtype(self):
+        as_object = _frame(A=pd.Series(["x", "y", "x"], dtype=object))
+        as_string = _frame(A=pd.Series(["x", "y", "x"], dtype="string"))
+        assert output_fingerprint(as_object, ["A"]) == output_fingerprint(
+            as_string, ["A"]
+        )
+
+    def test_output_fingerprint_ignores_how_a_null_is_spelled(self):
+        spellings = [None, np.nan, pd.NA]
+        fingerprints = {
+            output_fingerprint(_frame(A=pd.Series(["x", null], dtype=object)), ["A"])
+            for null in spellings
+        }
+        assert len(fingerprints) == 1
+
+    def test_output_fingerprint_ignores_null_in_a_string_dtype(self):
+        as_object = _frame(A=pd.Series(["x", None], dtype=object))
+        as_string = _frame(A=pd.Series(["x", pd.NA], dtype="string"))
+        assert output_fingerprint(as_object, ["A"]) == output_fingerprint(
+            as_string, ["A"]
+        )
+
+    def test_output_fingerprint_ignores_row_order(self):
+        assert output_fingerprint(_frame(A=["x", "y"]), ["A"]) == output_fingerprint(
+            _frame(A=["y", "x"]), ["A"]
+        )
+
+    def test_output_fingerprint_ignores_columns_it_is_not_asked_for(self):
+        assert output_fingerprint(
+            _frame(A=["x"], B=["1"]), ["A"]
+        ) == output_fingerprint(_frame(A=["x"], B=["2"]), ["A"])
+
+    def test_output_fingerprint_differs_when_a_value_differs(self):
+        assert output_fingerprint(_frame(A=["x", "y"]), ["A"]) != output_fingerprint(
+            _frame(A=["x", "z"]), ["A"]
+        )
+
+    def test_output_fingerprint_differs_when_a_count_differs(self):
+        assert output_fingerprint(_frame(A=["x", "y"]), ["A"]) != output_fingerprint(
+            _frame(A=["x", "x"]), ["A"]
+        )
+
+    def test_output_fingerprint_differs_when_the_null_count_differs(self):
+        # The same non-null values on both sides: only the nulls differ.
+        assert output_fingerprint(
+            _frame(A=["x", "y", None]), ["A"]
+        ) != output_fingerprint(_frame(A=["x", "y"]), ["A"])
+
+    def test_output_fingerprint_differs_when_a_value_moves_between_columns(self):
+        assert output_fingerprint(
+            _frame(A=["x"], B=["y"]), ["A", "B"]
+        ) != output_fingerprint(_frame(A=["y"], B=["x"]), ["A", "B"])
+
+    def test_output_fingerprint_flags_a_missing_column_instead_of_failing(self):
+        complete = _frame(A=["x"], B=["y"])
+        assert output_fingerprint(complete, ["A", "B"]) != output_fingerprint(
+            complete[["A"]], ["A", "B"]
+        )
+
+    def test_output_fingerprint_tells_a_mapped_column_from_an_unmapped_one(self):
+        df, structure_map = build("regex_heavy", 1_000)
+        mapped = map_structures(df, structure_map)
+        unmapped = mapped.assign(CODE_A=np.nan)
+        columns = targets(structure_map)
+        assert output_fingerprint(mapped, columns) != output_fingerprint(
+            unmapped, columns
+        )
+
+
 class TestRunCase:
     def test_run_case_reports_ok(self):
         assert run_case("typical", 1_000)["status"] == "ok"
+
+    def test_run_case_records_an_output_fingerprint(self):
+        fingerprint = run_case("wide", 1_000)["output_fingerprint"]
+        assert re.fullmatch(r"[0-9a-f]{16}", fingerprint)
+
+    def test_run_case_fingerprints_the_same_output_every_time(self):
+        first = run_case("typical", 1_000)["output_fingerprint"]
+        assert run_case("typical", 1_000)["output_fingerprint"] == first
+
+    def test_run_case_fingerprints_only_the_first_call(self, monkeypatch):
+        calls = []
+        real = case.output_fingerprint
+
+        def counting(df, columns):
+            calls.append(len(df))
+            return real(df, columns)
+
+        monkeypatch.setattr(case, "output_fingerprint", counting)
+        run_case("typical", 1_000)
+        assert calls == [1_000]
 
     def test_run_case_records_every_sample(self):
         assert len(run_case("wide", 1_000)["samples_s"]) == 7
@@ -703,6 +852,112 @@ class TestRenderComparison:
         )
 
 
+def _record_of(results, version, scenario, rows):
+    return next(
+        r
+        for r in results["results"]
+        if (r["version"], r["scenario"], r["rows"]) == (version, scenario, rows)
+    )
+
+
+class TestIsComparable:
+    def test_is_comparable_accepts_equal_fingerprints(self):
+        assert is_comparable(
+            {"output_fingerprint": "aaaa"}, {"output_fingerprint": "aaaa"}
+        )
+
+    def test_is_comparable_rejects_different_fingerprints(self):
+        assert not is_comparable(
+            {"output_fingerprint": "aaaa"}, {"output_fingerprint": "bbbb"}
+        )
+
+    def test_is_comparable_accepts_a_record_without_a_fingerprint(self):
+        assert is_comparable({}, {"output_fingerprint": "aaaa"})
+
+    def test_is_comparable_accepts_a_target_without_a_fingerprint(self):
+        assert is_comparable({"output_fingerprint": "aaaa"}, {})
+
+    @pytest.mark.parametrize(
+        ("record", "target"),
+        [
+            (None, {"output_fingerprint": "aaaa"}),
+            ({"output_fingerprint": "aaaa"}, None),
+        ],
+    )
+    def test_is_comparable_accepts_a_missing_record(self, record, target):
+        assert is_comparable(record, target)
+
+
+class TestRenderComparisonFingerprints:
+    @pytest.fixture
+    def differing_baseline(self, benchmark_results):
+        """v0.10.0 mapped the typical table at 1M rows differently from head."""
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        return benchmark_results
+
+    def test_render_comparison_marks_a_version_with_different_output(
+        self, differing_baseline
+    ):
+        row = f"| typical | 1 s | 2 s | {NOT_COMPARABLE} | -50% | {MISSING} |"
+        assert row in render_comparison(differing_baseline)
+
+    def test_render_comparison_marks_different_output_in_the_memory_table(
+        self, differing_baseline
+    ):
+        row = f"| typical | 300 MiB | 600 MiB | {NOT_COMPARABLE} | -50% | {MISSING} |"
+        assert row in render_comparison(differing_baseline)
+
+    def test_render_comparison_explains_the_mark_in_a_footnote(
+        self, differing_baseline
+    ):
+        note = (
+            f"{NOT_COMPARABLE}: that version produced different results from head "
+            "on this case"
+        )
+        assert note in render_comparison(differing_baseline)
+
+    def test_render_comparison_footnotes_each_size_with_a_mark(
+        self, differing_baseline
+    ):
+        # The 1M-row tables appear twice (up front and under All sizes); the
+        # 1k-row tables match, so they get no note.
+        text = render_comparison(differing_baseline)
+        assert text.count("that version produced different results") == 2
+
+    def test_render_comparison_keeps_the_targets_own_cells(self, benchmark_results):
+        _record_of(benchmark_results, "head", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        row = f"| typical | 1 s | {NOT_COMPARABLE} | {NOT_COMPARABLE} | {MISSING} | "
+        assert row in render_comparison(benchmark_results)
+
+    def test_render_comparison_has_no_footnote_when_outputs_match(
+        self, benchmark_results
+    ):
+        assert NOT_COMPARABLE not in render_comparison(benchmark_results)
+
+    def test_render_comparison_compares_a_version_without_a_fingerprint(
+        self, benchmark_results
+    ):
+        del _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ]
+        assert NOT_COMPARABLE not in render_comparison(benchmark_results)
+
+    def test_render_comparison_ignores_fingerprints_of_unmeasured_cases(
+        self, benchmark_results
+    ):
+        # The wide table's base errored, so it has no fingerprint to disagree with.
+        assert f"| wide | 4 s | {MISSING} |" in render_comparison(benchmark_results)
+
+    def test_render_pr_comment_carries_the_footnote(self, differing_baseline):
+        assert "that version produced different results" in render_pr_comment(
+            differing_baseline
+        )
+
+
 class TestRenderPrComment:
     def test_render_pr_comment_starts_with_marker(self, benchmark_results):
         assert render_pr_comment(benchmark_results).startswith(COMMENT_MARKER + "\n")
@@ -764,6 +1019,32 @@ class TestRenderPage:
         benchmark_results["versions"] = benchmark_results["versions"][:1]
         assert "## Compared with earlier versions" not in self._page(benchmark_results)
 
+    def test_render_page_marks_a_version_with_different_output(self, benchmark_results):
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        page = self._page(benchmark_results)
+        assert f"| typical | 1 s | 2 s | {NOT_COMPARABLE} |" in page
+
+    def test_render_page_footnotes_the_comparison_tables(self, benchmark_results):
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        assert "that version produced different results" in self._page(
+            benchmark_results
+        )
+
+    def test_render_page_explains_a_gap_in_the_charts(self, benchmark_results):
+        # Different output at 1k rows only: no table cell shows it, but the lines do.
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        assert "A line leaves out a point" in self._page(benchmark_results)
+
+    def test_render_page_has_no_notes_when_outputs_match(self, benchmark_results):
+        page = self._page(benchmark_results)
+        assert NOT_COMPARABLE not in page
+
 
 @pytest.fixture(scope="module")
 def rendered_charts():
@@ -791,6 +1072,32 @@ class TestRenderCharts:
 
     def test_render_charts_keeps_round_joins_on_each_chart(self, rendered_charts):
         assert rendered_charts.count('<svg stroke-linejoin="round"') == 4
+
+
+class TestPlotPanel:
+    @staticmethod
+    def _time_lines(results):
+        axes = Figure().subplots()
+        report._plot_panel(axes, results, "typical", "time", report._THEMES["light"])
+        return {line.get_label(): list(line.get_ydata()) for line in axes.lines}
+
+    def test_plot_panel_draws_every_comparable_point(self, benchmark_results):
+        assert self._time_lines(benchmark_results)["v0.10.0"] == [0.020, 1.05]
+
+    def test_plot_panel_leaves_out_a_point_with_different_output(
+        self, benchmark_results
+    ):
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        line = self._time_lines(benchmark_results)["v0.10.0"]
+        assert (line[0], math.isnan(line[1])) == (0.020, True)
+
+    def test_plot_panel_keeps_the_targets_points(self, benchmark_results):
+        _record_of(benchmark_results, "v0.10.0", "typical", 1_000_000)[
+            "output_fingerprint"
+        ] = "ffffffffffffffff"
+        assert self._time_lines(benchmark_results)["head"] == [0.010, 1.0]
 
 
 class TestLegendColumns:

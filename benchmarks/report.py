@@ -46,6 +46,7 @@ SAME: str = "\u2248 same"  # approximately equal to
 TIMES: str = "\u00d7"  # multiplication sign
 DELTA: str = "\u0394"  # Greek capital delta
 PLUS_MINUS: str = "\u00b1"  # plus-minus sign
+NOT_COMPARABLE: str = "\u2260 output"  # not-equal sign
 
 Metric = Literal["time", "memory"]
 Key = tuple[str, str, int]
@@ -122,6 +123,29 @@ def metric_value(record: Record | None, metric: Metric) -> float | None:
     return None if value is None else float(value)
 
 
+def is_comparable(record: Record | None, target: Record | None) -> bool:
+    """Return whether a version's result on a case can be set against the target's.
+
+    Two results are comparable unless both carry an output fingerprint and the
+    fingerprints differ: then the versions mapped the case differently (an old
+    release may lack a feature the case uses), so a difference in time says
+    nothing about speed. A missing record, or one without a fingerprint, is
+    comparable, so older results files and unmeasured cases keep reading as
+    before.
+
+    Args:
+        record: The version's record on the case.
+        target: The target's record on the same case.
+
+    Returns:
+        ``False`` only for two fingerprints that differ.
+    """
+    if record is None or target is None:
+        return True
+    theirs, ours = record.get("output_fingerprint"), target.get("output_fingerprint")
+    return theirs is None or ours is None or theirs == ours
+
+
 def format_metric(value: float | None, metric: Metric) -> str:
     """Format a time or memory value, or ``MISSING``."""
     if value is None:
@@ -177,6 +201,8 @@ def comparison_table(results: Results, rows: int, metric: Metric) -> str:
     Returns:
         A table with one column per version, then one change column per
         reference version (see ``reference_versions``), taken from the target.
+        A version whose output differs from the target's on a case reads
+        ``NOT_COMPARABLE`` there, and no change is computed from it.
     """
     index = index_records(results)
     versions = results["versions"]
@@ -189,14 +215,21 @@ def comparison_table(results: Results, rows: int, metric: Metric) -> str:
     ]
     body = []
     for scenario in results["scenarios"]:
-        values = {
-            v["label"]: metric_value(index.get((v["label"], scenario, rows)), metric)
-            for v in versions
-        }
+        target_record = index.get((target, scenario, rows))
+        values: dict[str, float | None] = {}
+        cells: dict[str, str] = {}
+        for v in versions:
+            record = index.get((v["label"], scenario, rows))
+            if is_comparable(record, target_record):
+                values[v["label"]] = metric_value(record, metric)
+                cells[v["label"]] = format_metric(values[v["label"]], metric)
+            else:
+                values[v["label"]] = None
+                cells[v["label"]] = NOT_COMPARABLE
         body.append(
             [
                 scenario,
-                *(format_metric(values[v["label"]], metric) for v in versions),
+                *(cells[v["label"]] for v in versions),
                 *(
                     format_change(relative_change(values[target], values[r["label"]]))
                     for r in references
@@ -204,6 +237,40 @@ def comparison_table(results: Results, rows: int, metric: Metric) -> str:
             ]
         )
     return markdown_table(header, body)
+
+
+def has_different_output(results: Results, sizes: Sequence[int]) -> bool:
+    """Return whether any version's output differs from the target's at ``sizes``."""
+    index = index_records(results)
+    target = results["versions"][0]["label"]
+    return any(
+        not is_comparable(
+            index.get((v["label"], scenario, rows)), index.get((target, scenario, rows))
+        )
+        for v in results["versions"]
+        for scenario in results["scenarios"]
+        for rows in sizes
+    )
+
+
+def comparison_block(results: Results, rows: int) -> str:
+    """Return the time and memory comparison tables at one size.
+
+    The tables are followed by a footnote explaining ``NOT_COMPARABLE``, if
+    either of them contains it.
+    """
+    parts = [
+        comparison_table(results, rows, "time"),
+        comparison_table(results, rows, "memory"),
+    ]
+    if has_different_output(results, [rows]):
+        target = results["versions"][0]["label"]
+        parts.append(
+            f"{NOT_COMPARABLE}: that version produced different results from "
+            f"{target} on this case (for example a feature it lacks), so its "
+            "measurements are not comparable."
+        )
+    return "\n\n".join(parts)
 
 
 def machine_description(results: Results) -> str:
@@ -262,8 +329,7 @@ def render_comparison(results: Results, run_url: str | None = None) -> str:
     largest = max(results["sizes"])
     source = f" in [this run]({run_url})" if run_url else ""
     by_size = [
-        f"**{rows:,} rows**\n\n{comparison_table(results, rows, 'time')}"
-        f"\n\n{comparison_table(results, rows, 'memory')}"
+        f"**{rows:,} rows**\n\n{comparison_block(results, rows)}"
         for rows in results["sizes"]
     ]
     return "\n\n".join(
@@ -276,8 +342,7 @@ def render_comparison(results: Results, run_url: str | None = None) -> str:
             f'"{SAME}". {MISSING} marks a case that was not measured; the '
             "run's JSON says why.",
             f"**{largest:,} rows**",
-            comparison_table(results, largest, "time"),
-            comparison_table(results, largest, "memory"),
+            comparison_block(results, largest),
             "<details><summary>All sizes</summary>",
             *by_size,
             "</details>",
@@ -394,14 +459,19 @@ def render_page(
         "## Scaling",
         draw(results),
     ]
+    if has_different_output(results, results["sizes"]):
+        sections.append(
+            "A line leaves out a point where that version's output differed from "
+            f"{results['versions'][0]['label']}'s on the case ({NOT_COMPARABLE}), "
+            "for example because it lacks a feature the case uses."
+        )
     if reference_versions(results):
         sections += [
             "## Compared with earlier versions",
             f"At {largest:,} rows. {DELTA} columns give the change from the named "
             f"version: negative is faster or smaller, and changes within "
             f'{PLUS_MINUS}10% read "{SAME}".',
-            comparison_table(results, largest, "time"),
-            comparison_table(results, largest, "memory"),
+            comparison_block(results, largest),
         ]
     sections += [
         "## Environment",
@@ -500,13 +570,15 @@ def _plot_panel(
 ) -> None:
     """Draw one scenario's panel: one line per version, log-log."""
     index = index_records(results)
+    target = results["versions"][0]["label"]
     sizes = sorted(results["sizes"])
     scale = 1.0 if metric == "time" else 1 / 2**20
     for position, info in enumerate(results["versions"]):
-        values = [
-            metric_value(index.get((info["label"], scenario, rows)), metric)
-            for rows in sizes
-        ]
+        values: list[float | None] = []
+        for rows in sizes:
+            record = index.get((info["label"], scenario, rows))
+            comparable = is_comparable(record, index.get((target, scenario, rows)))
+            values.append(metric_value(record, metric) if comparable else None)
         style = _series_style(theme, position)
         ax.plot(
             sizes,
