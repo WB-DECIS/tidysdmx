@@ -81,6 +81,7 @@ nav_icons:
   navbar:
     User Guide: book-open
     Reference: code
+    Performance: gauge
     Changelog: clock
 
 # ----------------------------------------------------------------------
@@ -105,6 +106,14 @@ markdown_pages: true
 
 changelog:
   enabled: true
+
+# Performance profile. performance/index.qmd is generated (and gitignored):
+# `make docs` renders it from benchmarks/page.qmd and the newest benchmark
+# results — see benchmarks/report.py and docs.yml's fetch step.
+sections:
+  - title: Performance
+    dir: performance
+    navbar_after: Reference
 
 # ----------------------------------------------------------------------
 # Site-wide settings
