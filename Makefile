@@ -99,9 +99,10 @@ release-dry: ## Show the version the next release would produce, changing nothin
 BENCH_ARGS ?=
 
 # --no-project: the orchestrator is standard library only, and each version
-# under test gets a venv of its own under .bench/.
+# under test gets a venv of its own under .bench/. --python 3.11 because it
+# needs datetime.UTC, so a machine whose default Python is older fails clearly.
 bench: ## Benchmark map_structures: the working tree against the last 3 releases
-	uv run --no-project python -m benchmarks.run --target WORKTREE --baselines 3 \
+	uv run --no-project --python 3.11 python -m benchmarks.run --target WORKTREE --baselines 3 \
 		--out $(PERF_RESULTS) $(BENCH_ARGS)
 
 check: lint typecheck cov ## Lint, typecheck and gated tests — CI runs these plus `build`
