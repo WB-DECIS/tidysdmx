@@ -294,8 +294,9 @@ applicable hunk is in.
   read-only, and stores the results as an artifact. Called by `release.yml` and
   `benchmarks-pr.yml`, or run by hand (`workflow_dispatch`).
 - **`benchmarks-pr.yml`** — on PRs touching `src/tidysdmx/mapping.py`, `benchmarks/` or
-  `uv.lock` (or labelled `benchmark`; Dependabot PRs only when labelled), benchmarks
-  head vs base vs the latest release and keeps one PR comment up to date.
+  `pyproject.toml` (or labelled `benchmark`), benchmarks head vs base vs the latest
+  release and keeps one PR comment up to date. Drafts and fork PRs are skipped, and so
+  are Dependabot's: a lock-only bump cannot change what the benchmark installs.
 
 Actions are pinned to full commit SHAs. If you add a workflow step, pin it the
 same way and add the `# vX.Y.Z` comment.
