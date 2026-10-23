@@ -1073,6 +1073,13 @@ class TestRenderCharts:
     def test_render_charts_keeps_round_joins_on_each_chart(self, rendered_charts):
         assert rendered_charts.count('<svg stroke-linejoin="round"') == 4
 
+    def test_render_charts_gives_every_font_a_generic_fallback(self, rendered_charts):
+        # Without one, a machine lacking DejaVu Sans falls back to a serif.
+        assert not re.search(r"font-family: 'DejaVu Sans'(?!,)", rendered_charts)
+
+    def test_render_charts_still_names_dejavu_sans_first(self, rendered_charts):
+        assert "font-family: 'DejaVu Sans', sans-serif" in rendered_charts
+
 
 class TestPlotPanel:
     @staticmethod

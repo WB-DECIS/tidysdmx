@@ -526,6 +526,8 @@ _LEGEND_HANDLE_CHARS: int = 6
 _SVG_DEFAULT_STYLE: re.Pattern[str] = re.compile(
     r'<style type="text/css">\*\{[^}]*\}</style>\s*'
 )
+# A font-family that names DejaVu Sans and nothing after it.
+_SVG_BARE_FONT: re.Pattern[str] = re.compile(r"font-family: 'DejaVu Sans'(?=[;\"])")
 
 
 def render_charts(results: Results) -> str:
@@ -643,7 +645,8 @@ def _chart_svg(results: Results, metric: Metric, theme: _Theme) -> str:
         labelcolor=theme.text,
     )
     buffer = io.StringIO()
-    # Text as text, not glyph paths: smaller, selectable, and in the page's font.
+    # Text as text, not glyph paths: smaller and selectable. matplotlib names the
+    # font it drew with, DejaVu Sans, which a reader's machine may lack.
     with rc_context({"svg.fonttype": "none", "font.family": "sans-serif"}):
         figure.savefig(
             buffer, format="svg", facecolor=theme.surface, metadata={"Date": None}
@@ -657,6 +660,9 @@ def _chart_svg(results: Results, metric: Metric, theme: _Theme) -> str:
     # a page is global to it: left in, it would restyle every SVG on the site.
     # The same two defaults, set on the root, apply to this chart alone.
     svg = _SVG_DEFAULT_STYLE.sub("", svg)
+    # Most text declares DejaVu Sans alone, so a machine without it would fall
+    # back to the browser's default font, often a serif. Add a generic fallback.
+    svg = _SVG_BARE_FONT.sub("font-family: 'DejaVu Sans', sans-serif", svg)
     return svg.replace(
         "<svg ", '<svg stroke-linejoin="round" stroke-linecap="butt" ', 1
     )
