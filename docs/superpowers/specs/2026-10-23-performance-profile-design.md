@@ -77,10 +77,12 @@ is excluded from the sdist.
 
 | File | Responsibility | Runs in |
 |---|---|---|
+| `benchmarks/records.py` | The results schema (`Record`, `VersionInfo`, `Results` TypedDicts), `SCENARIOS`, `release_key()` and `empty_record()`. Stdlib only, so every other module can share it. | everywhere |
 | `benchmarks/scenarios.py` | `build(scenario, rows, seed) -> (DataFrame, StructureMap)`. Builds deterministic synthetic inputs with pysdmx constructors only, never tidysdmx builders (`build_multi_component_map` does not exist at v0.8.0). Works under pandas 2 and 3. | each version's venv, and the dev env for tests |
 | `benchmarks/case.py` | `python -m benchmarks.case`: measures one (scenario, rows) case and writes one JSON record to `--result`. Checks that `tidysdmx` was imported from site-packages, not a source tree. | each version's venv |
+| `benchmarks/probe.py` | `python -m benchmarks.probe`: prints the Python and dependency versions installed in an env as JSON. | each version's venv |
 | `benchmarks/run.py` | Orchestrator, stdlib only. Selects versions, builds the environments, runs the grid and writes the results JSON. | any Python with `git` and `uv` on PATH |
-| `benchmarks/report.py` | Renders a results JSON as `page` (the docs page, or a placeholder when there are no results), `summary` (the job summary) or `pr-comment`. Imports matplotlib only to draw the page's charts. | the docs env |
+| `benchmarks/report.py` | Renders a results JSON as `page` (the docs page, or a placeholder when there are no results), `summary` (the job summary) or `pr-comment`. Imports matplotlib only to draw the page's charts. matplotlib is in the `dev` group: CI's test job renders the charts, and docs builds sync `dev` by default. | the dev env, or `--no-project` for the text formats |
 | `benchmarks/page.qmd` | Page template: methodology and how to read the page, around a `<!-- RESULTS -->` marker. | n/a |
 
 ### Scenarios
@@ -183,7 +185,16 @@ five parts:
    - Two figures, time and memory. Each is a 2×2 small multiple (one panel per
      scenario), log-log against rows, with one line per version.
    - The figures are drawn with matplotlib and inlined as SVG in a `{=html}` raw
-     block.
+     block, once for light mode and once for dark.
+   - great-docs switches themes with its own toggle, which sets
+     `html[data-bs-theme="dark"]`. It does not use Quarto's
+     `.light-content`/`.dark-content` classes. The template therefore carries a
+     small style block keyed on that attribute, which shows one variant at a
+     time.
+   - The target version is drawn as an accent-coloured, heavier line. Older
+     versions are grey context lines, darker for newer releases, with distinct
+     markers and dash styles. Every line is in the legend, and the tables carry
+     the exact values.
    - A table at 1M rows gives the % change against the previous release; changes
      within ±10% read "≈ same".
 4. **Method and caveats.**
@@ -212,57 +223,71 @@ The comment is found and edited in place by the hidden marker
 
 ## CI
 
-### `.github/workflows/benchmarks.yml` (new)
+The benchmark is split across three workflow files.
 
-**Triggers:**
+**Why three files.** A called workflow's jobs cannot request more permissions
+than the caller grants, even jobs that end up skipped. If one file held both the
+release upload (`contents: write`) and the PR comment (`pull-requests: write`),
+both callers would have to grant both. Each write therefore lives in its own
+caller, next to the event that needs it, and the shared measuring step only ever
+reads.
 
-- `workflow_call`, with inputs `ref`, `baselines` (3), `sizes` (the full grid)
-  and `release-tag` (`""`).
-- `workflow_dispatch`, with inputs `ref`, `baselines` and `sizes`.
-- `pull_request` to `dev` or `main`, on `opened`, `synchronize`, `reopened` and
-  `labeled`.
-
-**Jobs.** PR code never runs while a write token is present.
-
-1. **`decide`** (PR only, `contents: read`). It follows `pr-review.yml`:
-   - Fork PRs and drafts are skipped.
-   - A run starts if `git diff "origin/$BASE_REF...HEAD"` touches
-     `src/tidysdmx/mapping.py`, `benchmarks/` or `uv.lock`, or if the PR carries
-     the `benchmark` label.
-   - The check lives in a job because an `on.pull_request.paths` filter would
-     also drop the `labeled` event.
-2. **`run`** (`contents: read`, ubuntu-latest, 75-minute timeout,
-   `fetch-depth: 0`):
-   - Runs `uv run --no-project python -m benchmarks.run ...`.
-   - Writes `report.py --format summary` to `$GITHUB_STEP_SUMMARY`.
-   - Uploads the JSON, and `pr-comment.md` on PRs, as an artifact.
-   - On a PR: `--target <head sha> --compare origin/<base> --baselines 1`.
-3. **`comment`** (PR only, `pull-requests: write`, no checkout). Downloads
-   `pr-comment.md`, then creates or edits the sticky comment with `gh api`.
-4. **`upload`** (`contents: write`, only when `release-tag` is set). Runs
-   `gh release upload "$TAG" <json> --clobber`.
-
-**Concurrency** is one group per PR number with `cancel-in-progress`, and one
-group per ref otherwise.
-
-**Supply-chain rules:**
+**Supply-chain rules** apply to all three files:
 
 - Actions are pinned to full SHAs with `# vX.Y.Z` comments.
 - Untrusted values reach scripts through `env:`, never by `${{ }}` interpolation
   inside `run:`.
 
+### `.github/workflows/benchmarks.yml` (new, measure only)
+
+- **Triggers:** `workflow_call` and `workflow_dispatch`, both with inputs `ref`,
+  `target-label`, `compare`, `baselines` (3) and `sizes` (the full grid).
+- **One job, `run`:**
+  - Runs with `contents: read` on ubuntu-latest, with a 75-minute timeout. The
+    checkout uses `fetch-depth: 0` so tags and branches are present.
+  - Runs `uv run --no-project python -m benchmarks.run ...`.
+  - Writes `report.py --format summary` to `$GITHUB_STEP_SUMMARY`, and renders
+    `pr-comment.md`.
+  - Uploads both, with the JSON, as the `benchmark-results` artifact.
+
+### `.github/workflows/benchmarks-pr.yml` (new, PR view)
+
+- **Trigger:** `pull_request` to `dev` or `main`, on `opened`, `synchronize`,
+  `reopened`, `ready_for_review` and `labeled`.
+- **Concurrency:** one group per PR number with `cancel-in-progress`. A
+  `labeled` event for any other label gets a group of its own, so it cannot
+  cancel a benchmark in flight.
+- **Jobs.** PR code never runs while a write token is present:
+  1. **`decide`** (`contents: read`). It follows `pr-review.yml`:
+     - Fork PRs and drafts are skipped.
+     - A run starts if `git diff "origin/$BASE_REF...HEAD"` touches
+       `src/tidysdmx/mapping.py`, `benchmarks/` or `uv.lock`, or if the PR
+       carries the `benchmark` label.
+     - A `labeled` event runs only when the label is `benchmark`.
+     - The check lives in a job because an `on.pull_request.paths` filter would
+       also drop the `labeled` event.
+  2. **`benchmark`** calls `benchmarks.yml` with:
+     - `ref` set to the head SHA, `target-label: head`;
+     - `compare: base=origin/<base>`;
+     - `baselines: 1`.
+  3. **`comment`** (`pull-requests: write`, no checkout). Downloads the
+     artifact, then creates or edits the sticky comment with `gh api`.
+
 ### `release.yml`
 
 - **New `benchmark` job.**
   - It `needs: [release, build]` and carries the same `released`/`noop` guard.
-  - It calls `benchmarks.yml` with `ref` and `release-tag` set to the tag, and
+  - It calls `benchmarks.yml` with `ref` set to the tag and `baselines: 3`, and
     runs in parallel with `publish-pypi`.
+- **New `attach-benchmark` job** (`contents: write`).
+  - It downloads the artifact and runs
+    `gh release upload "$TAG" "benchmarks-$TAG.json" --clobber`.
 - **`deploy-docs` changes.**
-  - It also `needs: benchmark`.
+  - It also `needs: attach-benchmark`.
   - Its condition becomes
     `!cancelled() && needs.publish-pypi.result == 'success' && released && !noop`,
     so a failed benchmark never blocks the docs redeploy.
-- **Cancellation window.** The benchmark job is outside the docs concurrency
+- **Cancellation window.** The benchmark jobs are outside the docs concurrency
   group, so the window described in the `deploy-docs` comment does not widen.
 
 ### `docs.yml`
@@ -302,7 +327,7 @@ in `tests/fixtures/fxtr_benchmarks.py` and is imported by `conftest.py`.
 | `TestRenderPrComment` | The marker, head-vs-base change, `<details>`, collapsed duplicate refs. |
 
 The environment and subprocess plumbing is checked end to end by the
-`benchmarks.yml` PR run on the PR that adds it.
+`benchmarks-pr.yml` run on the PR that adds it.
 
 ## Rollout
 
