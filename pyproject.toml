@@ -209,6 +209,11 @@ ignore = [
     "ANN401", # allow explicit Any where it is genuinely the right type
 ]
 
+[tool.ruff.lint.isort]
+# benchmarks/ is this repository's own code, outside src/, so import sorting
+# must treat it as first-party rather than third-party.
+known-first-party = ["benchmarks"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -332,6 +337,9 @@ disable_error_code = ["arg-type", "call-arg", "var-annotated"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Puts the repository root on sys.path, so tests can import the top-level
+# `benchmarks/` harness under any runner, not only `python -m pytest`.
+pythonpath = ["."]
 # --cov is deliberately NOT here: it would make `pytest -k one_test` trip the
 # coverage gate, which trains people to bypass the gate. Use `make cov` (or CI)
 # for a gated, measured run.

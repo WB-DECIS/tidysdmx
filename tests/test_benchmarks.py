@@ -2,10 +2,10 @@
 
 import pandas as pd
 import pytest
-from benchmarks.records import SCENARIOS, empty_record, release_key
-from benchmarks.scenarios import build
 from pysdmx.model.map import ComponentMap, FixedValueMap, MultiComponentMap
 
+from benchmarks.records import SCENARIOS, empty_record, release_key
+from benchmarks.scenarios import build
 from tidysdmx import map_structures
 
 
