@@ -75,7 +75,9 @@ build-backend = "flit_core.buildapi"
 # flit ships src/tidysdmx, pyproject.toml, README.md and LICENSE by itself; this
 # adds what the sdist carried before the backend switch.
 include = ["tests/", "CHANGELOG.md"]
-exclude = ["tests/**/__pycache__", "tests/**/*.pyc"]
+# tests/test_benchmarks.py tests the top-level benchmarks/ package, which the
+# sdist does not carry, so pytest would fail to collect it from an unpacked sdist.
+exclude = ["tests/**/__pycache__", "tests/**/*.pyc", "tests/test_benchmarks.py"]
 
 # ----------------------------------------------------------------------
 # Dependency groups (PEP 735). `uv sync` installs `dev` by default;
@@ -98,6 +100,9 @@ dev = [
     # httpx mocking for the FMR client tests: pysdmx builds an httpx.Client
     # inside every request, so only a transport-level mock can see the wire.
     "respx>=0.23",
+    # Draws the Performance page's charts (benchmarks/report.py). In `dev`, not
+    # `docs`, so CI's test job renders them too; docs builds sync `dev` anyway.
+    "matplotlib>=3.9",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool
@@ -209,6 +214,11 @@ ignore = [
     "ANN401", # allow explicit Any where it is genuinely the right type
 ]
 
+[tool.ruff.lint.isort]
+# benchmarks/ is this repository's own code, outside src/, so import sorting
+# must treat it as first-party rather than third-party.
+known-first-party = ["benchmarks"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -247,6 +257,11 @@ max-complexity = 10
 # "token". Nothing here is a credential.
 "tests/test_fmr.py" = ["S105", "S106", "S107"]
 "tests/fixtures/fxtr_fmr.py" = ["S105", "S106", "S107"]
+# The orchestrator's job is to run git, uv and each benchmark environment's
+# interpreter. Every call passes an argv list (never a shell string) built from
+# refs and paths the caller chose; "git"/"uv" are resolved from PATH on purpose,
+# as everywhere else in this repository's tooling.
+"benchmarks/run.py" = ["S603", "S607"]
 
 # ----------------------------------------------------------------------
 # Static typing
@@ -266,7 +281,7 @@ max-complexity = 10
 # ----------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.11"
-files = ["src", "tests"]
+files = ["src", "tests", "benchmarks"]
 warn_unreachable = true
 warn_redundant_casts = true
 warn_unused_ignores = true
@@ -332,6 +347,9 @@ disable_error_code = ["arg-type", "call-arg", "var-annotated"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Puts the repository root on sys.path, so tests can import the top-level
+# `benchmarks/` harness under any runner, not only `python -m pytest`.
+pythonpath = ["."]
 # --cov is deliberately NOT here: it would make `pytest -k one_test` trip the
 # coverage gate, which trains people to bypass the gate. Use `make cov` (or CI)
 # for a gated, measured run.
