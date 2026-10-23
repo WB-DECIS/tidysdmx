@@ -11,9 +11,20 @@ import pandas as pd
 import pytest
 from pysdmx.model.map import ComponentMap, FixedValueMap, MultiComponentMap
 
-from benchmarks import case, probe, run
+from benchmarks import case, probe, report, run
 from benchmarks.case import repeats_for, run_case
 from benchmarks.records import SCENARIOS, empty_record, release_key
+from benchmarks.report import (
+    COMMENT_MARKER,
+    MISSING,
+    SAME,
+    format_bytes,
+    format_change,
+    format_seconds,
+    load_results,
+    render_comparison,
+    render_pr_comment,
+)
 from benchmarks.run import (
     Version,
     exceeds_budget,
@@ -588,3 +599,123 @@ class TestMain:
         monkeypatch.setattr(run, "create_env", create_env_fails)
         with pytest.raises(RuntimeError, match="target would not build"):
             run.main(argv)
+
+
+class TestFormatSeconds:
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [
+            (0.000412, "0.412 ms"),
+            (0.35, "350 ms"),
+            (0.9996, "1 s"),
+            (2.314, "2.31 s"),
+            (123.4, "123 s"),
+        ],
+    )
+    def test_format_seconds_keeps_three_figures(self, seconds, expected):
+        assert format_seconds(seconds) == expected
+
+
+class TestFormatBytes:
+    @pytest.mark.parametrize(
+        ("count", "expected"),
+        [
+            (512, "512 B"),
+            (1_000, "0.977 KiB"),
+            (2 * 2**20, "2 MiB"),
+            (300 * 2**20, "300 MiB"),
+            (1.5 * 2**30, "1.5 GiB"),
+        ],
+    )
+    def test_format_bytes_picks_the_unit(self, count, expected):
+        assert format_bytes(count) == expected
+
+
+class TestFormatChange:
+    @pytest.mark.parametrize(
+        ("change", "expected"),
+        [
+            (None, MISSING),
+            (0.05, SAME),
+            (-0.0999, SAME),
+            (-0.5, "-50%"),
+            (0.25, "+25%"),
+        ],
+    )
+    def test_format_change_folds_small_changes(self, change, expected):
+        assert format_change(change) == expected
+
+
+class TestLoadResults:
+    def test_load_results_returns_none_for_missing_file(self, tmp_path):
+        assert load_results(tmp_path / "absent.json") is None
+
+    def test_load_results_rejects_other_schemas(self, tmp_path):
+        path = tmp_path / "old.json"
+        path.write_text('{"schema_version": 0}', encoding="utf-8")
+        with pytest.raises(
+            ValueError, match="is not a schema 1 benchmark results file"
+        ):
+            load_results(path)
+
+
+class TestRenderComparison:
+    def test_render_comparison_compares_head_with_base(self, benchmark_results):
+        assert "| typical | 1 s | 2 s | 1.05 s | -50% | " in render_comparison(
+            benchmark_results
+        )
+
+    def test_render_comparison_folds_small_change_from_release(self, benchmark_results):
+        assert f"| -50% | {SAME} |" in render_comparison(benchmark_results)
+
+    def test_render_comparison_marks_unmeasured_cells(self, benchmark_results):
+        row = f"| wide | 4 s | {MISSING} | {MISSING} | {MISSING} | {MISSING} |"
+        assert row in render_comparison(benchmark_results)
+
+    def test_render_comparison_folds_all_sizes_away(self, benchmark_results):
+        text = render_comparison(benchmark_results)
+        assert text.index("<details>") < text.index("**1,000 rows**")
+
+    def test_render_comparison_links_the_run(self, benchmark_results):
+        text = render_comparison(benchmark_results, "https://example.test/run/1")
+        assert "[this run](https://example.test/run/1)" in text
+
+    def test_render_comparison_shows_aliases(self, benchmark_results):
+        benchmark_results["versions"].pop()
+        benchmark_results["versions"][1]["aliases"] = ["v0.10.0"]
+        assert "base (= v0.10.0)" in render_comparison(benchmark_results)
+
+    def test_render_comparison_drops_change_from_a_merged_release(
+        self, benchmark_results
+    ):
+        benchmark_results["versions"].pop()
+        benchmark_results["versions"][1]["aliases"] = ["v0.10.0"]
+        assert "vs v0.10.0" not in render_comparison(benchmark_results)
+
+    def test_render_comparison_lists_dependency_versions(self, benchmark_results):
+        assert "| head | target | `abc1234` | 3.11.14 | 3.0.6 |" in render_comparison(
+            benchmark_results
+        )
+
+
+class TestRenderPrComment:
+    def test_render_pr_comment_starts_with_marker(self, benchmark_results):
+        assert render_pr_comment(benchmark_results).startswith(COMMENT_MARKER + "\n")
+
+
+class TestReportMain:
+    def test_main_writes_pr_comment(self, tmp_path, benchmark_results):
+        source = tmp_path / "results.json"
+        source.write_text(json.dumps(benchmark_results), encoding="utf-8")
+        output = tmp_path / "comment.md"
+        report.main(
+            ["--format", "pr-comment", "--input", str(source), "--output", str(output)]
+        )
+        assert output.read_text(encoding="utf-8").startswith(COMMENT_MARKER)
+
+    def test_main_rejects_summary_without_results(self, tmp_path, capsys):
+        with pytest.raises(SystemExit, match=r"^2$"):
+            report.main(
+                ["--format", "summary", "--input", str(tmp_path / "absent.json")]
+            )
+        assert "no results at" in capsys.readouterr().err
