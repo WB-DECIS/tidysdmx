@@ -124,7 +124,7 @@ user_guide/*.qmd            — narrative documentation
 SKILL.md                    — API summary published for AI agents consuming this package
 notebooks/                  — exploratory notebooks (outputs stripped by the nbstripout hook)
 
-.github/workflows/          — ci, release, docs, security, pr-review
+.github/workflows/          — ci, release, docs, security, pr-review, benchmarks, benchmarks-pr
 ```
 
 ## Key pysdmx Classes Used
