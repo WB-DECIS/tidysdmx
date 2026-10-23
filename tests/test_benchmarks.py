@@ -3,16 +3,31 @@
 import json
 import platform
 import sys
+from pathlib import Path
 
 import pandas as pd
 import pytest
 from pysdmx.model.map import ComponentMap, FixedValueMap, MultiComponentMap
 
-from benchmarks import case, probe
+from benchmarks import case, probe, run
 from benchmarks.case import repeats_for, run_case
 from benchmarks.records import SCENARIOS, empty_record, release_key
+from benchmarks.run import (
+    Version,
+    exceeds_budget,
+    measure,
+    merge_same_commit,
+    parse_named_ref,
+    plan_versions,
+    rotated,
+    run_grid,
+    select_baselines,
+)
 from benchmarks.scenarios import build
 from tidysdmx import map_structures
+
+ROOT = Path(__file__).resolve().parents[1]
+TAGS = ["v0.8.0", "v0.10.0", "v0.9.0", "v0.7.5", "not-a-release", "v1.0.0-rc.1"]
 
 
 def _sources_and_targets(structure_map):
@@ -185,3 +200,154 @@ class TestInstalled:
     def test_installed_reports_missing_package_as_none(self, monkeypatch):
         monkeypatch.setattr(probe, "PACKAGES", ("no-such-package-xyz",))
         assert probe.installed()["no-such-package-xyz"] is None
+
+
+def _version(label, commit=None, role="baseline"):
+    return Version(label=label, ref=label, role=role, commit=commit or f"sha-{label}")
+
+
+def _ok(median, scenario="typical", rows=1):
+    record = empty_record(scenario, rows, "error", "")
+    record.update(status="ok", reason=None, median_s=median, samples_s=[median])
+    return record
+
+
+class TestSelectBaselines:
+    def test_select_baselines_takes_releases_below_a_tag(self):
+        assert select_baselines(TAGS, "v0.10.0", 2) == ["v0.9.0", "v0.8.0"]
+
+    def test_select_baselines_takes_newest_releases_for_a_branch(self):
+        assert select_baselines(TAGS, "origin/dev", 3) == [
+            "v0.10.0",
+            "v0.9.0",
+            "v0.8.0",
+        ]
+
+    def test_select_baselines_returns_nothing_for_zero(self):
+        assert select_baselines(TAGS, "origin/dev", 0) == []
+
+
+class TestParseNamedRef:
+    def test_parse_named_ref_splits_label(self):
+        assert parse_named_ref("base=origin/dev") == ("base", "origin/dev")
+
+    def test_parse_named_ref_uses_bare_ref_as_label(self):
+        assert parse_named_ref("origin/dev") == ("origin/dev", "origin/dev")
+
+    @pytest.mark.parametrize("text", ["=origin/dev", "base="])
+    def test_parse_named_ref_rejects_empty_side(self, text):
+        with pytest.raises(ValueError, match="Expected LABEL=REF or REF"):
+            parse_named_ref(text)
+
+
+class TestMergeSameCommit:
+    def test_merge_same_commit_keeps_the_first_label(self):
+        merged = merge_same_commit(
+            [_version("base", "abc"), _version("v0.10.0", "abc")]
+        )
+        assert [v.label for v in merged] == ["base"]
+
+    def test_merge_same_commit_records_aliases(self):
+        merged = merge_same_commit(
+            [_version("base", "abc"), _version("v0.10.0", "abc")]
+        )
+        assert merged[0].aliases == ("v0.10.0",)
+
+    def test_merge_same_commit_keeps_distinct_commits(self):
+        merged = merge_same_commit([_version("a", "1"), _version("b", "2")])
+        assert len(merged) == 2
+
+
+class TestPlanVersions:
+    def _plan(self, target, compare=(), baselines=2, label=None):
+        commits = {"origin/dev": "sha-dev", "WORKTREE": "WORKTREE"}
+        return plan_versions(
+            target,
+            label,
+            list(compare),
+            baselines,
+            TAGS,
+            lambda ref: commits.get(ref, f"sha-{ref}"),
+        )
+
+    def test_plan_versions_labels_worktree(self):
+        assert self._plan("WORKTREE")[0].label == "worktree"
+
+    def test_plan_versions_orders_target_compare_baselines(self):
+        planned = self._plan("head", compare=["base=origin/dev"], baselines=1)
+        assert [(v.label, v.role) for v in planned] == [
+            ("head", "target"),
+            ("base", "compare"),
+            ("v0.10.0", "baseline"),
+        ]
+
+    def test_plan_versions_uses_given_target_label(self):
+        assert self._plan("abc123", label="head")[0].label == "head"
+
+
+class TestRotated:
+    def test_rotated_shifts_left(self):
+        assert rotated(["a", "b", "c"], 1) == ["b", "c", "a"]
+
+    def test_rotated_wraps_around(self):
+        assert rotated(["a", "b", "c"], 4) == ["b", "c", "a"]
+
+    def test_rotated_handles_empty(self):
+        assert rotated([], 3) == []
+
+
+class TestExceedsBudget:
+    def test_exceeds_budget_flags_slow_case(self):
+        assert exceeds_budget(_ok(run.BUDGET_S + 1))
+
+    def test_exceeds_budget_ignores_errors(self):
+        assert not exceeds_budget(empty_record("typical", 1, "error", "boom"))
+
+
+class TestRunGrid:
+    def test_run_grid_rotates_version_order_per_case(self):
+        calls = []
+
+        def fake(version, scenario, rows):
+            calls.append(version.label)
+            return _ok(0.1)
+
+        run_grid([_version("a"), _version("b")], ["typical"], [1, 2], fake)
+        assert calls == ["a", "b", "b", "a"]
+
+    def test_run_grid_skips_larger_sizes_after_budget(self):
+        def fake(version, scenario, rows):
+            return _ok(run.BUDGET_S + 1 if version.label == "slow" else 0.1)
+
+        records = run_grid(
+            [_version("slow"), _version("fast")], ["typical"], [1, 2], fake
+        )
+        statuses = {(r["version"], r["rows"]): r["status"] for r in records}
+        assert statuses[("slow", 2)] == "skipped"
+
+    def test_run_grid_keeps_measuring_other_scenarios(self):
+        def fake(version, scenario, rows):
+            return _ok(run.BUDGET_S + 1 if scenario == "typical" else 0.1, scenario)
+
+        records = run_grid([_version("a")], ["typical", "wide"], [1, 2], fake)
+        assert [r["status"] for r in records if r["scenario"] == "wide"] == ["ok", "ok"]
+
+    def test_run_grid_labels_every_record(self):
+        records = run_grid([_version("a")], ["typical"], [1], lambda *_: _ok(0.1))
+        assert records[0]["version"] == "a"
+
+
+class TestMeasure:
+    def test_measure_returns_the_record_the_case_wrote(self, tmp_path):
+        record = measure(Path(sys.executable), ROOT, tmp_path, "typical", 100)
+        assert (record["scenario"], record["rows"]) == ("typical", 100)
+
+    def test_measure_reports_a_case_that_wrote_nothing(self, tmp_path):
+        # From tmp_path, `python -m benchmarks.case` cannot even be imported.
+        record = measure(Path(sys.executable), tmp_path, tmp_path, "typical", 100)
+        assert record["reason"].startswith("exited 1 without a result")
+
+    def test_measure_reports_a_timeout(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(run, "CASE_TIMEOUT_S", 0.001)
+        record = measure(Path(sys.executable), ROOT, tmp_path, "typical", 100)
+        assert record["reason"].startswith("timed out")

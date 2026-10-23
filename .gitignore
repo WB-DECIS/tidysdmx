@@ -74,6 +74,9 @@ Thumbs.db
 *.secret
 
 # tidysdmx-specific
+# Benchmark environments and results (`make bench`, benchmarks/run.py)
+.bench/
+benchmarks/results/
 notebooks/TMP/
 TMP/
 notebooks/tidysdmx/config.json

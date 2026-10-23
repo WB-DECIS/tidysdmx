@@ -252,6 +252,11 @@ max-complexity = 10
 # "token". Nothing here is a credential.
 "tests/test_fmr.py" = ["S105", "S106", "S107"]
 "tests/fixtures/fxtr_fmr.py" = ["S105", "S106", "S107"]
+# The orchestrator's job is to run git, uv and each benchmark environment's
+# interpreter. Every call passes an argv list (never a shell string) built from
+# refs and paths the caller chose; "git"/"uv" are resolved from PATH on purpose,
+# as everywhere else in this repository's tooling.
+"benchmarks/run.py" = ["S603", "S607"]
 
 # ----------------------------------------------------------------------
 # Static typing
