@@ -1,8 +1,10 @@
 """Tests for the benchmarks/ harness (not part of the tidysdmx package)."""
 
 import json
+import logging
 import platform
 import sys
+import tarfile
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +17,7 @@ from benchmarks.records import SCENARIOS, empty_record, release_key
 from benchmarks.run import (
     Version,
     exceeds_budget,
+    install_versions,
     measure,
     merge_same_commit,
     parse_named_ref,
@@ -22,6 +25,7 @@ from benchmarks.run import (
     rotated,
     run_grid,
     select_baselines,
+    target_measured,
 )
 from benchmarks.scenarios import build
 from tidysdmx import map_structures
@@ -337,10 +341,55 @@ class TestRunGrid:
         assert records[0]["version"] == "a"
 
 
+STUB_CASE = """\
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--scenario", required=True)
+parser.add_argument("--rows", type=int, required=True)
+parser.add_argument("--result", type=Path, required=True)
+args = parser.parse_args()
+record = {
+    "scenario": args.scenario,
+    "rows": args.rows,
+    "status": "ok",
+    "reason": None,
+    "median_s": 0.5,
+    "samples_s": [0.5],
+}
+args.result.write_text(json.dumps(record), encoding="utf-8")
+"""
+
+
+@pytest.fixture
+def stub_harness(tmp_path):
+    """A directory whose `benchmarks.case` writes a known record, stdlib only."""
+    root = tmp_path / "stub"
+    package = root / "benchmarks"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "case.py").write_text(STUB_CASE, encoding="utf-8")
+    return root
+
+
 class TestMeasure:
-    def test_measure_returns_the_record_the_case_wrote(self, tmp_path):
-        record = measure(Path(sys.executable), ROOT, tmp_path, "typical", 100)
-        assert (record["scenario"], record["rows"]) == ("typical", 100)
+    def test_measure_returns_the_record_the_case_wrote(self, stub_harness, tmp_path):
+        record = measure(Path(sys.executable), stub_harness, tmp_path, "typical", 100)
+        assert record["median_s"] == 0.5
+
+    def test_measure_passes_the_scenario_and_rows_to_the_case(
+        self, stub_harness, tmp_path
+    ):
+        record = measure(Path(sys.executable), stub_harness, tmp_path, "wide", 7)
+        assert (record["scenario"], record["rows"]) == ("wide", 7)
+
+    def test_measure_ignores_a_result_left_by_an_earlier_case(self, tmp_path):
+        (tmp_path / "case.json").write_text('{"median_s": 9.9}', encoding="utf-8")
+        # tmp_path has no benchmarks package, so this case writes nothing.
+        record = measure(Path(sys.executable), tmp_path, tmp_path, "typical", 100)
+        assert record["median_s"] is None
 
     def test_measure_reports_a_case_that_wrote_nothing(self, tmp_path):
         # From tmp_path, `python -m benchmarks.case` cannot even be imported.
@@ -351,3 +400,191 @@ class TestMeasure:
         monkeypatch.setattr(run, "CASE_TIMEOUT_S", 0.001)
         record = measure(Path(sys.executable), ROOT, tmp_path, "typical", 100)
         assert record["reason"].startswith("timed out")
+
+
+def _installer(failing=None):
+    """Return an install function that fails for the labels in ``failing``."""
+    failing = failing or {}
+
+    def install(version):
+        if version.label in failing:
+            raise failing[version.label]
+        return Path("py") / version.label, {"pandas": "2.3.3"}
+
+    return install
+
+
+class TestInstallVersions:
+    def test_install_versions_maps_each_label_to_its_python(self):
+        pythons, _ = install_versions(
+            [_version("head", role="target"), _version("v0.9.0")], _installer()
+        )
+        assert pythons == {"head": Path("py/head"), "v0.9.0": Path("py/v0.9.0")}
+
+    def test_install_versions_describes_each_version(self):
+        version = Version("head", "origin/dev", "target", "abc123", aliases=("tip",))
+        _, infos = install_versions([version], _installer())
+        assert infos == [
+            {
+                "label": "head",
+                "ref": "origin/dev",
+                "commit": "abc123",
+                "role": "target",
+                "aliases": ["tip"],
+                "deps": {"pandas": "2.3.3"},
+            }
+        ]
+
+    def test_install_versions_raises_when_the_target_fails(self):
+        versions = [_version("head", role="target"), _version("v0.9.0")]
+        failing = {"head": RuntimeError("uv exploded")}
+        with pytest.raises(RuntimeError, match="uv exploded"):
+            install_versions(versions, _installer(failing))
+
+    def test_install_versions_raises_when_the_target_tool_is_missing(self):
+        failing = {"head": FileNotFoundError("uv")}
+        with pytest.raises(FileNotFoundError, match="uv"):
+            install_versions([_version("head", role="target")], _installer(failing))
+
+    @pytest.mark.parametrize(
+        "error",
+        [RuntimeError("boom"), OSError("boom"), tarfile.TarError("boom")],
+        ids=["RuntimeError", "OSError", "TarError"],
+    )
+    def test_install_versions_skips_a_baseline_that_fails(self, error):
+        versions = [
+            _version("head", role="target"),
+            _version("v0.10.0"),
+            _version("v0.9.0"),
+        ]
+        pythons, _ = install_versions(versions, _installer({"v0.10.0": error}))
+        assert list(pythons) == ["head", "v0.9.0"]
+
+    def test_install_versions_leaves_a_failed_baseline_out_of_the_infos(self):
+        versions = [_version("head", role="target"), _version("v0.9.0")]
+        failing = {"v0.9.0": RuntimeError("no wheel")}
+        _, infos = install_versions(versions, _installer(failing))
+        assert [info["label"] for info in infos] == ["head"]
+
+    def test_install_versions_logs_the_baseline_it_skips(self, caplog):
+        versions = [_version("head", role="target"), _version("v0.9.0")]
+        failing = {"v0.9.0": RuntimeError("no wheel")}
+        with caplog.at_level(logging.ERROR, logger="benchmarks.run"):
+            install_versions(versions, _installer(failing))
+        assert "Skipping v0.9.0" in caplog.text
+
+    def test_install_versions_lets_a_programming_error_through(self):
+        versions = [_version("head", role="target"), _version("v0.9.0")]
+        with pytest.raises(KeyError, match="oops"):
+            install_versions(versions, _installer({"v0.9.0": KeyError("oops")}))
+
+
+class TestTargetMeasured:
+    @staticmethod
+    def _record(version, status):
+        record = empty_record("typical", 1, status, "")
+        record["version"] = version
+        return record
+
+    def test_target_measured_is_true_with_an_ok_record(self):
+        records = [self._record("head", "error"), self._record("head", "ok")]
+        assert target_measured(records, "head")
+
+    def test_target_measured_is_false_when_only_another_version_is_ok(self):
+        assert not target_measured([self._record("v0.9.0", "ok")], "head")
+
+    @pytest.mark.parametrize("status", ["error", "skipped"])
+    def test_target_measured_is_false_without_an_ok_record(self, status):
+        assert not target_measured([self._record("head", status)], "head")
+
+    def test_target_measured_is_false_for_no_records(self):
+        assert not target_measured([], "head")
+
+
+class TestMain:
+    """`main` with git, uv and the cases replaced: only the wiring is real."""
+
+    @pytest.fixture
+    def wired(self, tmp_path, monkeypatch):
+        versions = [
+            _version("head", role="target"),
+            _version("v0.10.0"),
+            _version("v0.9.0"),
+        ]
+        monkeypatch.setattr(run, "_run", lambda command, cwd=None: str(tmp_path))
+        monkeypatch.setattr(run, "plan_versions", lambda *args: versions)
+        monkeypatch.setattr(run, "export_source", lambda root, v, work: tmp_path)
+        monkeypatch.setattr(run, "create_env", lambda v, source, work: Path(v.label))
+        monkeypatch.setattr(run, "installed_versions", lambda python, harness: {})
+        monkeypatch.setattr(run, "measure", self._measure_ok)
+        out = tmp_path / "out" / "results.json"
+        argv = [
+            "--target",
+            "head",
+            "--sizes",
+            "10",
+            "--scenarios",
+            "typical",
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--out",
+            str(out),
+        ]
+        return argv, out
+
+    @staticmethod
+    def _measure_ok(python, harness, work, scenario, rows):
+        return _ok(0.1, scenario, rows)
+
+    def test_main_returns_zero_when_the_target_is_measured(self, wired):
+        argv, _ = wired
+        assert run.main(argv) == 0
+
+    def test_main_skips_a_baseline_whose_probe_fails(self, wired, monkeypatch):
+        argv, out = wired
+
+        def probe_fails_for_v0_9_0(python, harness):
+            if python.name == "v0.9.0":
+                raise RuntimeError("probe failed")
+            return {}
+
+        monkeypatch.setattr(run, "installed_versions", probe_fails_for_v0_9_0)
+        run.main(argv)
+        written = json.loads(out.read_text(encoding="utf-8"))
+        assert [v["label"] for v in written["versions"]] == ["head", "v0.10.0"]
+
+    def test_main_measures_only_the_versions_that_installed(self, wired, monkeypatch):
+        argv, out = wired
+
+        def create_env_fails_for_v0_10_0(version, source, work):
+            if version.label == "v0.10.0":
+                raise RuntimeError("no wheel")
+            return Path(version.label)
+
+        monkeypatch.setattr(run, "create_env", create_env_fails_for_v0_10_0)
+        run.main(argv)
+        written = json.loads(out.read_text(encoding="utf-8"))
+        assert {r["version"] for r in written["results"]} == {"head", "v0.9.0"}
+
+    def test_main_returns_one_when_the_target_has_no_measurement(
+        self, wired, monkeypatch
+    ):
+        argv, _ = wired
+
+        def measure_fails_for_head(python, harness, work, scenario, rows):
+            if python.name == "head":
+                return empty_record(scenario, rows, "error", "boom")
+            return _ok(0.1, scenario, rows)
+
+        monkeypatch.setattr(run, "measure", measure_fails_for_head)
+        assert run.main(argv) == 1
+
+    def test_main_raises_when_the_target_cannot_be_installed(self, wired, monkeypatch):
+        argv, _ = wired
+
+        def create_env_fails(version, source, work):
+            raise RuntimeError("target would not build")
+
+        monkeypatch.setattr(run, "create_env", create_env_fails)
+        with pytest.raises(RuntimeError, match="target would not build"):
+            run.main(argv)

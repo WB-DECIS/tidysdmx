@@ -70,6 +70,7 @@ class Version:
 
 
 CaseRunner = Callable[[Version, str, int], Record]
+Installer = Callable[[Version], tuple[Path, dict[str, str | None]]]
 
 
 def select_baselines(tags: Iterable[str], target: str, count: int) -> list[str]:
@@ -364,6 +365,59 @@ def measure(
     )
 
 
+def install_versions(
+    versions: Sequence[Version], install: Installer
+) -> tuple[dict[str, Path], list[VersionInfo]]:
+    """Install every version, skipping baselines and compares that fail.
+
+    Args:
+        versions: The versions to install; the target is the one whose
+            ``role`` is ``"target"``.
+        install: Installs one version and returns its interpreter and the
+            dependency versions installed with it.
+
+    Returns:
+        The interpreter by label, and the description of each version that
+        installed, in the order given.
+
+    Raises:
+        RuntimeError: If installing the target fails with it.
+        OSError: If installing the target fails with it.
+        tarfile.TarError: If installing the target fails with it.
+    """
+    pythons: dict[str, Path] = {}
+    infos: list[VersionInfo] = []
+    for version in versions:
+        logger.info("Installing %s (%s)", version.label, version.ref)
+        try:
+            python, deps = install(version)
+        except (RuntimeError, OSError, tarfile.TarError):
+            if version.role == "target":
+                raise
+            logger.exception("Skipping %s: it could not be installed", version.label)
+            continue
+        pythons[version.label] = python
+        infos.append(
+            {
+                "label": version.label,
+                "ref": version.ref,
+                "commit": version.commit,
+                "role": version.role,
+                "aliases": list(version.aliases),
+                "deps": deps,
+            }
+        )
+    return pythons, infos
+
+
+def target_measured(records: Sequence[Record], target: str) -> bool:
+    """Return whether the version labelled ``target`` has an ``ok`` record."""
+    return any(
+        record["status"] == "ok" and record.get("version") == target
+        for record in records
+    )
+
+
 def machine_info() -> Machine:
     """Describe the machine this runs on."""
     return {
@@ -446,6 +500,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Raises:
         RuntimeError: If the target version cannot be installed.
+        OSError: If a tool the target's install needs cannot be run.
+        tarfile.TarError: If the target's source archive cannot be extracted.
     """
     args = _parser().parse_args(argv)
     logging.basicConfig(
@@ -463,28 +519,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         lambda ref: resolve_commit(harness, ref),
     )
 
-    pythons: dict[str, Path] = {}
-    infos: list[VersionInfo] = []
-    for version in versions:
-        logger.info("Installing %s (%s)", version.label, version.ref)
-        try:
-            python = create_env(version, export_source(harness, version, work), work)
-        except RuntimeError:
-            if version.role == "target":
-                raise
-            logger.exception("Skipping %s: it could not be installed", version.label)
-            continue
-        pythons[version.label] = python
-        infos.append(
-            {
-                "label": version.label,
-                "ref": version.ref,
-                "commit": version.commit,
-                "role": version.role,
-                "aliases": list(version.aliases),
-                "deps": installed_versions(python, harness),
-            }
-        )
+    def _install(version: Version) -> tuple[Path, dict[str, str | None]]:
+        python = create_env(version, export_source(harness, version, work), work)
+        return python, installed_versions(python, harness)
+
+    pythons, infos = install_versions(versions, _install)
 
     def _run_case(version: Version, scenario: str, rows: int) -> Record:
         record = measure(pythons[version.label], harness, work, scenario, rows)
@@ -507,12 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     logger.info("Wrote %s", args.out)
-    target = versions[0].label
-    measured_target = any(
-        record["status"] == "ok" and record.get("version") == target
-        for record in records
-    )
-    return 0 if measured_target else 1
+    return 0 if target_measured(records, versions[0].label) else 1
 
 
 if __name__ == "__main__":
