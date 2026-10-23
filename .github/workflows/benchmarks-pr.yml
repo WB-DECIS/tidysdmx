@@ -104,7 +104,8 @@ jobs:
         run: |
           marker='<!-- tidysdmx-benchmark -->'
           id=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
-            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" \
+            | head -n 1)
           if [ -n "$id" ]; then
             gh api --method PATCH "repos/$GH_REPO/issues/comments/$id" \
               -F body=@results/pr-comment.md > /dev/null
