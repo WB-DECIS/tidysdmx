@@ -64,6 +64,24 @@ jobs:
       - run: uv sync --locked --group docs
       - name: Show Quarto version
         run: uv run quarto --version
+      # The Performance page renders from the newest release that carries
+      # benchmark results (release.yml attaches them). For a release redeploy
+      # that is the new release, unless its benchmark failed; without any, the
+      # page shows a placeholder and the build goes on.
+      - name: Fetch the latest performance profile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p benchmarks/results
+          for tag in $(gh release list --limit 20 --json tagName --jq '.[].tagName'); do
+            if gh release download "$tag" --pattern 'benchmarks-*.json' \
+                --output benchmarks/results/latest.json --clobber 2>/dev/null; then
+              echo "Performance profile: $tag"
+              exit 0
+            fi
+          done
+          echo "::notice::No release carries benchmark results yet; the Performance page shows a placeholder."
       - name: Build docs
         run: make docs
       - name: Upload docs artifact

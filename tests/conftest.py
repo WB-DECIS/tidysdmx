@@ -16,6 +16,7 @@ The re-exports below are deliberate: ruff would otherwise flag them as unused,
 hence ``__all__``.
 """
 
+from tests.fixtures.fxtr_benchmarks import benchmark_results
 from tests.fixtures.fxtr_dummy_data import ifpri_asti_df, sample_df, sdmx_df
 from tests.fixtures.fxtr_fmr import (
     agency,
@@ -58,6 +59,7 @@ __all__ = [
     "agency",
     "api_params_schema",
     "api_params_sm",
+    "benchmark_results",
     "categorisation",
     "category_scheme",
     "codelist",
