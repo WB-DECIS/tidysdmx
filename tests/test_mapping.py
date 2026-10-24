@@ -125,15 +125,13 @@ class TestApplyImplicitComponentMaps:
         expected = pd.DataFrame({"OBS_VALUE": ["M", "Q"], "FREQ": [100, 200]})
         pd.testing.assert_frame_equal(result[["OBS_VALUE", "FREQ"]], expected)
 
-    @pytest.mark.skip(
-        reason="REVIEW FUNCTION LOGIC: Should at least trigger a warning. But "
-        "probably needs to fails entirely with helpful message."
-    )
-    def test_skip_missing_source_column(self, sample_df):
-        """Test that missing source columns are skipped without error."""
-        maps = [ImplicitComponentMap("MISSING", "NEW_COL")]  # 'MISSING' does not exist
-        with pytest.raises(TypeError):
-            apply_implicit_component_maps(sample_df, maps)
+    def test_missing_source_column_is_skipped_with_a_warning(self, sample_df, caplog):
+        """A map whose source is absent adds nothing and warns, verbose or not."""
+        maps = [ImplicitComponentMap("MISSING", "NEW_COL")]
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            result = apply_implicit_component_maps(sample_df, maps)
+        assert "NEW_COL" not in result.columns
+        assert "Source column 'MISSING' not found. Skipping." in caplog.text
 
     def test_verbose_output(self, caplog, sample_df):
         """Test verbose logging for added and skipped columns."""
@@ -342,17 +340,6 @@ class TestApplyMultiComponentMap:
         with pytest.raises(KeyError) as excinfo:
             apply_multi_component_map(df, multi_component_map)
         assert "Missing source columns" in str(excinfo.value)
-
-    @pytest.mark.integration
-    @pytest.mark.skip(
-        reason="Unmapped values are assigned _Z in this multi-component-map fixture"
-    )
-    def test_unmapped_values_are_none(self, multi_component_map):
-        """Tests that unmapped rows result in None values."""
-        df = pd.DataFrame({"AREA": ["AAA", "BBB"], "NOTE": ["ccc", "ddd"]})
-
-        result = apply_multi_component_map(df, multi_component_map)
-        assert result["URBANISATION"].isna().sum() == 2
 
     @pytest.mark.integration
     @pytest.mark.parametrize("verbose", [True, False])
