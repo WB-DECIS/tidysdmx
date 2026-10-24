@@ -46,6 +46,11 @@ comparison is like for like.
   - Versions that require different pandas releases are measured with different
     pandas releases, so part of a difference between them can come from pandas.
   - The Environment table lists what each version ran with.
+- **Strings are Python-backed.** pyarrow is not installed in the benchmark
+  environments, so pandas 3 backs the generated `str` columns with Python
+  objects, as it does wherever pyarrow is absent. With pyarrow installed,
+  pandas backs them with Arrow and `map_structures` factorizes such columns
+  instead of looking their rows up; that path is not measured here.
 - **Like for like.** Every case records a fingerprint of the mapped output. A
   version whose output differs from the profiled version's, for example because
   an older release lacks a feature the case uses, is marked "≠ output" and left
