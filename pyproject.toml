@@ -36,7 +36,10 @@ dependencies = [
     # pysdmx's own HTTP layer, imported directly by tidysdmx.fmr for the
     # httpx.Auth hook that rotates bearer tokens on uploads.
     "httpx>=0.27",
-    "pandas>=2.2.3,<3",
+    # pandas 3 makes Copy-on-Write the only mode, which tidysdmx.mapping relies
+    # on to return frames that share no writable memory with their input
+    # without deep-copying it.
+    "pandas>=3,<4",
     "numpy>=1.26",
     "openpyxl>=3.1.5,<4",
     # typeguard is scheduled for removal once mypy reaches strict — see

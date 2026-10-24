@@ -1,4 +1,7 @@
+import datetime
 import logging
+import re
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -18,6 +21,7 @@ from pysdmx.model import (
 from typeguard import TypeCheckError
 
 # Load tidysdmx functions
+from tidysdmx import mapping as mapping_module
 from tidysdmx.mapping import (
     apply_component_map,
     apply_fixed_value_maps,
@@ -161,9 +165,10 @@ class TestApplyImplicitComponentMaps:
             apply_implicit_component_maps(sample_df, invalid_maps)
 
 
-@pytest.mark.integration
+# Only the tests that use the ifpri_asti_sm cassette are integration-marked
+# (TEST-02); those that build their maps inline run in the unit lane.
 class TestApplyComponentMap:
-    """Tests for apply_component_map using the ifpri_asti_sm fixture."""
+    """Tests for apply_component_map."""
 
     @pytest.fixture
     def component_map(self, ifpri_asti_sm):
@@ -172,6 +177,7 @@ class TestApplyComponentMap:
 
         return cm
 
+    @pytest.mark.integration
     def test_successful_mapping(self, component_map):
         """Tests that mapping is applied correctly via the ComponentMap."""
         # Prepare DataFrame with source values
@@ -190,6 +196,7 @@ class TestApplyComponentMap:
         assert "SEX" in result.columns
         assert list(result["SEX"]) == ["F", "M", "_T", np.nan]
 
+    @pytest.mark.integration
     def test_original_dataframe_not_mutated(self, component_map):
         """Tests that the original DataFrame remains unchanged after mapping."""
         df = pd.DataFrame({"INDICATOR": ["RES_FEMALE_TOT_FTE"]})
@@ -198,6 +205,7 @@ class TestApplyComponentMap:
         _ = apply_component_map(df, component_map)
         pd.testing.assert_frame_equal(df, original_copy)
 
+    @pytest.mark.integration
     def test_verbose_output(self, component_map, caplog):
         """Tests that verbose=True logs mapping details."""
         df = pd.DataFrame({"INDICATOR": ["RES_FEMALE_TOT_FTE", "UNKNOWN"]})
@@ -207,6 +215,7 @@ class TestApplyComponentMap:
         assert "Mapped 'INDICATOR' → 'SEX'" in caplog.text
         assert "values could not be mapped" in caplog.text
 
+    @pytest.mark.integration
     def test_missing_source_column_raises_keyerror(self, component_map):
         """Tests that KeyError is raised when source column is missing."""
         df_missing = pd.DataFrame({"OTHER": ["RES_FEMALE_TOT_FTE"]})
@@ -214,6 +223,7 @@ class TestApplyComponentMap:
         with pytest.raises(KeyError, match="Source column 'INDICATOR' not found"):
             apply_component_map(df_missing, component_map)
 
+    @pytest.mark.integration
     def test_invalid_dataframe_type_raises_typeerror(self, component_map):
         """Tests that TypeError is raised when df is not a pandas DataFrame."""
         with pytest.raises(TypeCheckError):
@@ -226,6 +236,7 @@ class TestApplyComponentMap:
         with pytest.raises(TypeCheckError):
             apply_component_map(df, "not_a_component_map")
 
+    @pytest.mark.integration
     def test_unmapped_values_are_nan(self, component_map):
         """Tests that unmapped values in source column become NaN in target column."""
         df = pd.DataFrame({"INDICATOR": ["UNKNOWN"]})
@@ -290,7 +301,8 @@ class TestApplyComponentMap:
         assert result["REGION"].iloc[1:].isna().all()
 
 
-@pytest.mark.integration
+# Only the tests that use the ifpri_asti_sm cassette are integration-marked
+# (TEST-02); those that build their maps inline run in the unit lane.
 class TestApplyMultiComponentMap:
     """Tests for apply_multi_component_map function."""
 
@@ -301,6 +313,7 @@ class TestApplyMultiComponentMap:
         cm = maps[4]
         return cm
 
+    @pytest.mark.integration
     def test_basic_mapping(self, multi_component_map):
         """Tests that rows are correctly mapped based on exact matches."""
         df = pd.DataFrame(
@@ -311,6 +324,7 @@ class TestApplyMultiComponentMap:
         expected = ["RUR", "URB", "URB", "RUR"]
         assert list(result["URBANISATION"]) == expected
 
+    @pytest.mark.integration
     def test_regex_mapping(self, multi_component_map):
         """Tests that regex rules apply when no exact match exists."""
         df = pd.DataFrame(
@@ -321,6 +335,7 @@ class TestApplyMultiComponentMap:
         expected = ["_T", "_T", "_Z"]  # Matches regex rules
         assert list(result["URBANISATION"]) == expected
 
+    @pytest.mark.integration
     def test_missing_source_columns_raises(self, multi_component_map):
         """Tests that KeyError is raised when source columns are missing."""
         df = pd.DataFrame({"AREA": ["COL"], "OTHER": ["one"]})
@@ -328,6 +343,7 @@ class TestApplyMultiComponentMap:
             apply_multi_component_map(df, multi_component_map)
         assert "Missing source columns" in str(excinfo.value)
 
+    @pytest.mark.integration
     @pytest.mark.skip(
         reason="Unmapped values are assigned _Z in this multi-component-map fixture"
     )
@@ -338,6 +354,7 @@ class TestApplyMultiComponentMap:
         result = apply_multi_component_map(df, multi_component_map)
         assert result["URBANISATION"].isna().sum() == 2
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("verbose", [True, False])
     def test_verbose_flag(self, multi_component_map, caplog, verbose):
         """Tests that progress is logged at INFO only when verbose=True."""
@@ -489,7 +506,9 @@ class TestApplyMultiComponentMap:
 
         result = apply_multi_component_map(df, mcm)
         # "COL"/"one" matches both rules; the first stored rule wins.
-        assert list(result["URBANISATION"]) == ["C_", "_L", None]
+        # "COL"/"three" matches neither and stays unmapped.
+        assert result["URBANISATION"].iloc[:2].tolist() == ["C_", "_L"]
+        assert pd.isna(result["URBANISATION"].iloc[2])
 
 
 @pytest.mark.integration
@@ -814,3 +833,621 @@ class TestMapStructuresSourceIsolation:
         maps = [self._component_map("METRIC", "METRIC", METRIC_TO_METRIC)]
         map_structures(metric_df, self._structure_map(maps))
         pd.testing.assert_frame_equal(metric_df, original)
+
+
+# region row-wise oracle
+# The pre-branch implementations matched every row on its own. These helpers
+# restate their rules row by row, with no grouping at all, so the
+# distinct-value implementation can be checked against them on inputs where
+# grouping is subtle: values that compare equal but print differently.
+
+
+def _as_list(series):
+    """Return the series' values, with every missing value as None."""
+    return [None if pd.isna(v) else v for v in series.tolist()]
+
+
+def _rank(patterns):
+    """Literal patterns first, then regexes, then the pure catch-all."""
+    if all(p == "regex:.*" for p in patterns):
+        return 2
+    if any(p.startswith("regex:") for p in patterns):
+        return 1
+    return 0
+
+
+def _row_wise_matches(column, pattern):
+    """Match each value of ``column`` against one pattern on its own."""
+    if pattern.startswith("regex:"):
+        regex = pattern.removeprefix("regex:")
+        # Series.map(str), as the row-wise implementation stringified: on a
+        # nullable integer column holding NA, pandas passes 1 to str() as 1.0.
+        return [
+            not pd.isna(s) and re.fullmatch(regex, s) is not None
+            for s in column.map(str, na_action="ignore").tolist()
+        ]
+    return (column == pattern).fillna(False).tolist()
+
+
+def _row_wise_component(column, value_maps):
+    """Apply apply_component_map's rules to each value of ``column`` alone."""
+    literals = {
+        vm.source: vm.target for vm in value_maps if not vm.source.startswith("regex:")
+    }
+    regexes = sorted(
+        (vm for vm in value_maps if vm.source.startswith("regex:")),
+        key=lambda vm: _rank([vm.source]),
+    )
+    result = []
+    for value, literal in zip(
+        column.tolist(), _as_list(column.map(literals)), strict=True
+    ):
+        if literal is not None or pd.isna(value):
+            result.append(literal)
+            continue
+        result.append(
+            next(
+                (
+                    vm.target
+                    for vm in regexes
+                    if re.fullmatch(vm.source.removeprefix("regex:"), str(value))
+                ),
+                None,
+            )
+        )
+    return result
+
+
+def _row_wise_multi(columns, value_maps):
+    """Apply apply_multi_component_map's rules to each row of ``columns`` alone."""
+    rules = sorted(value_maps, key=lambda mv: _rank(mv.source))
+    hits = [
+        [_row_wise_matches(c, p) for c, p in zip(columns, mv.source, strict=True)]
+        for mv in rules
+    ]
+    return [
+        next(
+            (
+                mv.target[0]
+                for mv, rule_hits in zip(rules, hits, strict=True)
+                if all(column_hits[row] for column_hits in rule_hits)
+            ),
+            None,
+        )
+        for row in range(len(columns[0]))
+    ]
+
+
+# Built fresh per test: Series are mutable.
+_TRICKY_COLUMNS = {
+    "object-numbers": lambda: pd.Series(
+        [1, 1.0, True, "1", 2, "COL", None], dtype=object
+    ),
+    "object-decimals": lambda: pd.Series(
+        [Decimal("1"), Decimal("1.0"), 1, None], dtype=object
+    ),
+    "object-zeros": lambda: pd.Series([0.0, -0.0, 0, False, np.nan], dtype=object),
+    "object-dates": lambda: pd.Series(
+        [
+            pd.Timestamp("2020-01-01"),
+            np.datetime64("2020-01-01"),
+            datetime.date(2020, 1, 1),
+            None,
+        ],
+        dtype=object,
+    ),
+    "float64-zeros": lambda: pd.Series([0.0, -0.0, 1.0, np.nan, -0.0]),
+    "Float64-zeros": lambda: pd.Series([0.0, -0.0, 1.0, None, -0.0], dtype="Float64"),
+    "float32-zeros": lambda: pd.Series([0.0, -0.0, 0.1, np.nan], dtype="float32"),
+    "str": lambda: pd.Series(["COL", "BEL", None, "COL", "1"], dtype="str"),
+    "category": lambda: pd.Series(
+        pd.Categorical(["COL", "BEL", None, "COL"], categories=["BEL", "COL", "ZZZ"])
+    ),
+    "Int64": lambda: pd.Series([1, None, 1, 2], dtype="Int64"),
+    "datetime": lambda: pd.Series(pd.to_datetime(["2020-01-01", None, "2020-01-01"])),
+}
+
+
+def _tricky_column(name, order):
+    """Build a tricky column in forward or reversed order, or duplicate its index."""
+    column = _TRICKY_COLUMNS[name]()
+    if order == "reversed":
+        return column.iloc[::-1].reset_index(drop=True)
+    if order == "duplicated-index":
+        return column.set_axis([i // 2 for i in range(len(column))])
+    return column
+
+
+_TRICKY_VALUE_MAPS = [
+    ValueMap(source="COL", target="CO"),
+    ValueMap(source="1", target="LIT1"),
+    ValueMap(source="regex:-.*", target="NEG"),
+    ValueMap(source="regex:1", target="ONE"),
+    ValueMap(source="regex:2020-01-01.*", target="DATE"),
+]
+_CATCH_ALL = ValueMap(source="regex:.*", target="_Z")
+
+# The tricky column comes first; "x" matches the constant second column.
+_TRICKY_MULTI_VALUE_MAPS = [
+    MultiValueMap(source=["COL", "x"], target=["CO"]),
+    MultiValueMap(source=["1", "x"], target=["LIT1"]),
+    MultiValueMap(source=["regex:-.*", "x"], target=["NEG"]),
+    MultiValueMap(source=["regex:1", "regex:.*"], target=["ONE"]),
+    MultiValueMap(source=["regex:2020-01-01.*", "x"], target=["DATE"]),
+    MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+]
+
+# endregion
+
+
+class TestMappingOnDistinctValues:
+    """Maps resolve each distinct source value once, then broadcast to rows."""
+
+    @staticmethod
+    def _component_map(source, target, value_maps):
+        return ComponentMap(
+            source=source,
+            target=target,
+            values=RepresentationMap(
+                id="RM",
+                name="RM",
+                agency="WB",
+                source="urn:x",
+                target="urn:y",
+                maps=value_maps,
+            ),
+        )
+
+    @staticmethod
+    def _multi_map(value_maps):
+        return MultiComponentMap(
+            source=["AREA", "NOTE"],
+            target=["URBANISATION"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["urn:x", "urn:x2"],
+                target=["urn:y"],
+                maps=value_maps,
+            ),
+        )
+
+    @pytest.fixture
+    def area_map(self):
+        return self._component_map(
+            "AREA",
+            "REF_AREA",
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:B.*", target="B_"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ],
+        )
+
+    @pytest.fixture
+    def urbanisation_map(self):
+        return self._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["regex:B.*", "regex:.*"], target=["B_"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+            ]
+        )
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_component_map_repeated_values_across_dtypes(self, area_map, dtype):
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL"]}, dtype=dtype)
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].tolist() == ["CO", "B_", "CO", "_Z", "B_"]
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_component_map_missing_source_stays_unmapped(self, area_map, dtype):
+        df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype=dtype)
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].isna().tolist() == [False, True, False]
+
+    def test_apply_component_map_regex_result_keeps_object_dtype(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "KEN"]})
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].dtype == object
+
+    def test_apply_component_map_keeps_row_index(self, area_map):
+        df = pd.DataFrame({"AREA": ["BEL", "COL"]}, index=[10, 3])
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].to_dict() == {10: "B_", 3: "CO"}
+
+    def test_apply_component_map_empty_frame(self, area_map):
+        df = pd.DataFrame({"AREA": pd.Series([], dtype="str")})
+        result = apply_component_map(df, area_map)
+        assert result["REF_AREA"].tolist() == []
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [([1, 1.0], ["ONE", None]), ([1.0, 1], [None, "ONE"])],
+        ids=["int-first", "float-first"],
+    )
+    def test_apply_component_map_regex_sees_each_printed_form(self, values, expected):
+        """1 and 1.0 compare equal, but a regex sees "1" and "1.0", in any order."""
+        cmap = self._component_map(
+            "CODE", "TARGET", [ValueMap(source="regex:1", target="ONE")]
+        )
+        df = pd.DataFrame({"CODE": pd.Series(values, dtype=object)})
+        result = apply_component_map(df, cmap)
+        assert _as_list(result["TARGET"]) == expected
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [([0.0, -0.0], ["ZERO", "NEG"]), ([-0.0, 0.0], ["NEG", "ZERO"])],
+        ids=["positive-first", "negative-first"],
+    )
+    def test_apply_component_map_regex_tells_signed_zeros_apart(self, values, expected):
+        """0.0 and -0.0 compare equal, but a regex sees "0.0" and "-0.0"."""
+        cmap = self._component_map(
+            "CODE",
+            "TARGET",
+            [
+                ValueMap(source="regex:-.*", target="NEG"),
+                ValueMap(source="regex:.*", target="ZERO"),
+            ],
+        )
+        df = pd.DataFrame({"CODE": pd.Series(values, dtype="float64")})
+        result = apply_component_map(df, cmap)
+        assert _as_list(result["TARGET"]) == expected
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [([1, 1.0], ["ONE", None]), ([1.0, 1], [None, "ONE"])],
+        ids=["int-first", "float-first"],
+    )
+    def test_apply_multi_component_map_regex_sees_each_printed_form(
+        self, values, expected
+    ):
+        mcm = self._multi_map([MultiValueMap(source=["regex:1", "x"], target=["ONE"])])
+        df = pd.DataFrame({"AREA": pd.Series(values, dtype=object), "NOTE": "x"})
+        result = apply_multi_component_map(df, mcm)
+        assert _as_list(result["URBANISATION"]) == expected
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [([0.0, -0.0], ["ZERO", "NEG"]), ([-0.0, 0.0], ["NEG", "ZERO"])],
+        ids=["positive-first", "negative-first"],
+    )
+    def test_apply_multi_component_map_regex_tells_signed_zeros_apart(
+        self, values, expected
+    ):
+        mcm = self._multi_map(
+            [
+                MultiValueMap(source=["regex:-.*", "x"], target=["NEG"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["ZERO"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": pd.Series(values, dtype="float64"), "NOTE": "x"})
+        result = apply_multi_component_map(df, mcm)
+        assert _as_list(result["URBANISATION"]) == expected
+
+    @pytest.mark.parametrize(
+        "catch_all", [False, True], ids=["no-catch-all", "catch-all"]
+    )
+    @pytest.mark.parametrize("order", ["forward", "reversed", "duplicated-index"])
+    @pytest.mark.parametrize("name", list(_TRICKY_COLUMNS))
+    def test_apply_component_map_matches_row_wise_rules(self, name, order, catch_all):
+        column = _tricky_column(name, order)
+        value_maps = _TRICKY_VALUE_MAPS + ([_CATCH_ALL] if catch_all else [])
+        cmap = self._component_map("CODE", "TARGET", value_maps)
+        result = apply_component_map(pd.DataFrame({"CODE": column}), cmap)
+        assert _as_list(result["TARGET"]) == _row_wise_component(column, value_maps)
+
+    @pytest.mark.parametrize("tricky_first", [True, False], ids=["first", "second"])
+    @pytest.mark.parametrize("order", ["forward", "reversed", "duplicated-index"])
+    @pytest.mark.parametrize("name", list(_TRICKY_COLUMNS))
+    def test_apply_multi_component_map_matches_row_wise_rules(
+        self, name, order, tricky_first
+    ):
+        tricky = _tricky_column(name, order)
+        constant = pd.Series("x", index=tricky.index, dtype="str")
+        columns = [tricky, constant] if tricky_first else [constant, tricky]
+        value_maps = [
+            mv
+            if tricky_first
+            else MultiValueMap(source=mv.source[::-1], target=mv.target)
+            for mv in _TRICKY_MULTI_VALUE_MAPS
+        ]
+        df = pd.DataFrame({"AREA": columns[0], "NOTE": columns[1]})
+        result = apply_multi_component_map(df, self._multi_map(value_maps))
+        assert _as_list(result["URBANISATION"]) == _row_wise_multi(columns, value_maps)
+
+    def test_apply_multi_component_map_interleaved_combinations(self, urbanisation_map):
+        df = pd.DataFrame(
+            {
+                "AREA": ["KEN", "COL", "BEL", "COL", "KEN", "BEL"],
+                "NOTE": ["two", "one", "two", "one", "two", "one"],
+            }
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == [
+            "_T",
+            "CO1",
+            "B_",
+            "CO1",
+            "_T",
+            "B_",
+        ]
+
+    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    def test_apply_multi_component_map_missing_value_stays_unmapped(
+        self, urbanisation_map, dtype
+    ):
+        df = pd.DataFrame(
+            {"AREA": ["COL", None, "BEL", "COL"], "NOTE": ["one", "one", None, "one"]},
+            dtype=dtype,
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].isna().tolist() == [False, True, True, False]
+
+    def test_apply_multi_component_map_keeps_row_index(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": ["BEL", "COL"], "NOTE": ["two", "one"]}, index=[10, 3]
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].to_dict() == {10: "B_", 3: "CO1"}
+
+    def test_apply_multi_component_map_empty_frame(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": pd.Series([], dtype="str"), "NOTE": pd.Series([], dtype="str")}
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == []
+
+    def test_map_structures_does_not_deep_copy_passthrough_columns(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "OBS_VALUE": [1.0, 2.0]})
+        sm = StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=[area_map]
+        )
+        result = map_structures(df, sm)
+        assert np.shares_memory(
+            result["OBS_VALUE"].to_numpy(), df["OBS_VALUE"].to_numpy()
+        )
+
+    def test_map_structures_result_edits_leave_input_untouched(self, area_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "OBS_VALUE": [1.0, 2.0]})
+        sm = StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=[area_map]
+        )
+        result = map_structures(df, sm)
+        result.loc[0, "OBS_VALUE"] = 99.0
+        assert df["OBS_VALUE"].tolist() == [1.0, 2.0]
+
+    @pytest.mark.parametrize(
+        "apply",
+        [
+            pytest.param(
+                lambda df, cmap, mcm: map_structures(
+                    df,
+                    StructureMap(
+                        id="SM",
+                        name="SM",
+                        agency="WB",
+                        source="",
+                        target="",
+                        maps=[FixedValueMap(target="FREQ", value="A")],
+                    ),
+                ),
+                id="map_structures-fixed",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: map_structures(
+                    df,
+                    StructureMap(
+                        id="SM",
+                        name="SM",
+                        agency="WB",
+                        source="",
+                        target="",
+                        maps=[cmap],
+                    ),
+                ),
+                id="map_structures-component",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_fixed_value_maps(df, []),
+                id="apply_fixed_value_maps-empty",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_implicit_component_maps(df, []),
+                id="apply_implicit_component_maps-empty",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_component_map(df, cmap),
+                id="apply_component_map",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_multi_component_map(df, mcm),
+                id="apply_multi_component_map",
+            ),
+        ],
+    )
+    def test_renaming_result_axes_leaves_input_untouched(
+        self, apply, area_map, urbanisation_map
+    ):
+        """Shallow copies get their own axis objects, so renames stay local."""
+        df = pd.DataFrame(
+            {"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]},
+            index=pd.Index([1, 2], name="orig"),
+        )
+        df.columns.name = "cols"
+        result = apply(df, area_map, urbanisation_map)
+        result.index.name = "renamed"
+        result.columns.name = "renamed"
+        assert (df.index.name, df.columns.name) == ("orig", "cols")
+
+    def test_apply_multi_component_map_index_named_like_source(self, urbanisation_map):
+        """An index level named like a source column does not confuse grouping."""
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]}).set_index(
+            "AREA", drop=False
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_"]
+
+    def test_map_structures_index_named_like_source(self, urbanisation_map):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]}).set_index(
+            "AREA", drop=False
+        )
+        sm = StructureMap(
+            id="SM",
+            name="SM",
+            agency="WB",
+            source="",
+            target="",
+            maps=[urbanisation_map],
+        )
+        result = map_structures(df, sm)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_"]
+
+    def test_apply_multi_component_map_repeated_source_column(self):
+        """A source listed twice is matched once per pattern position."""
+        mcm = MultiComponentMap(
+            source=["AREA", "AREA"],
+            target=["URBANISATION"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["urn:x", "urn:x2"],
+                target=["urn:y"],
+                maps=[
+                    MultiValueMap(source=["COL", "regex:C.*"], target=["C1"]),
+                    MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+                ],
+            ),
+        )
+        df = pd.DataFrame({"AREA": ["COL", "BEL"]})
+        result = apply_multi_component_map(df, mcm)
+        assert result["URBANISATION"].tolist() == ["C1", "_T"]
+
+    def test_apply_multi_component_map_duplicate_index_labels(self, urbanisation_map):
+        df = pd.DataFrame(
+            {"AREA": ["COL", "BEL", "COL"], "NOTE": ["one", "two", "one"]},
+            index=[0, 0, 1],
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert result["URBANISATION"].tolist() == ["CO1", "B_", "CO1"]
+
+    def test_apply_multi_component_map_resolves_only_distinct_source_combinations(
+        self, urbanisation_map, monkeypatch
+    ):
+        """Only the source columns of each distinct combination are matched."""
+        resolve = mapping_module._resolve_multi_values
+        seen = []
+
+        def spy(combinations, rules):
+            seen.append([len(column) for column in combinations])
+            return resolve(combinations, rules)
+
+        monkeypatch.setattr(mapping_module, "_resolve_multi_values", spy)
+        df = pd.DataFrame(
+            {
+                "AREA": ["COL", "BEL", "COL", "KEN", "BEL", "KEN"],
+                "NOTE": ["one", "two", "one", "two", "two", "two"],
+                "OBS_VALUE": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            }
+        )
+        apply_multi_component_map(df, urbanisation_map)
+        assert seen == [[3, 3]]
+
+    def test_apply_component_map_resolves_only_distinct_values(
+        self, area_map, monkeypatch
+    ):
+        resolve = mapping_module._resolve_component_values
+        seen = []
+
+        def spy(values, rep_map):
+            seen.append(len(values))
+            return resolve(values, rep_map)
+
+        monkeypatch.setattr(mapping_module, "_resolve_component_values", spy)
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL", "KEN"]})
+        apply_component_map(df, area_map)
+        assert seen == [3]
+
+
+class TestDistinctRows:
+    """_distinct_rows numbers each row's distinct combination of source values."""
+
+    @staticmethod
+    def _first_rows(sources):
+        """Return, for each row, the first row of its combination."""
+        codes, positions = mapping_module._distinct_rows(sources)
+        return positions[codes].tolist()
+
+    def test_distinct_rows_points_each_row_at_its_first_occurrence(self):
+        area = pd.Series(["x", None, "x", "y", np.nan])
+        note = pd.Series([1, 1, 1, 2, 1])
+        assert self._first_rows([area, note]) == [0, 1, 0, 3, 1]
+
+    def test_distinct_rows_numbers_combinations_densely(self):
+        """Code i is the combination whose first row is positions[i]."""
+        area = pd.Series(["x", None, "x", "y", np.nan])
+        note = pd.Series([1, 1, 1, 2, 1])
+        codes, positions = mapping_module._distinct_rows([area, note])
+        assert codes[positions].tolist() == list(range(len(positions)))
+
+    def test_distinct_rows_keeps_missing_values_together(self):
+        values = pd.Series([None, np.nan, 1, None], dtype=object)
+        assert self._first_rows([values]) == [0, 0, 2, 0]
+
+    def test_distinct_rows_splits_equal_values_that_print_differently(self):
+        values = pd.Series([1, 1.0, True, 1, "1", 1.0], dtype=object)
+        assert self._first_rows([values]) == [0, 1, 2, 0, 4, 1]
+
+    def test_distinct_rows_splits_signed_zeros(self):
+        values = pd.Series([0.0, -0.0, 0.0, -0.0])
+        assert self._first_rows([values]) == [0, 1, 0, 1]
+
+    def test_distinct_rows_groups_equal_floats(self):
+        values = pd.Series([1.5, 0.0, 1.5, np.nan, 0.0, np.nan])
+        assert self._first_rows([values]) == [0, 1, 0, 3, 1, 3]
+
+    def test_distinct_rows_rejects_no_sources(self):
+        with pytest.raises(ValueError, match="at least one source column"):
+            mapping_module._distinct_rows([])
+
+    def test_distinct_rows_merges_printed_forms_across_chunks(self, monkeypatch):
+        monkeypatch.setattr(mapping_module, "_PRINT_FORM_CHUNK_ROWS", 2)
+        values = pd.Series([1, 1.0, True, 1.0, 1, True], dtype=object)
+        assert self._first_rows([values]) == [0, 1, 2, 1, 0, 2]
+
+    def test_distinct_rows_tolerates_str_that_sets_float_flags(self):
+        """A __str__ leaving the FPU's invalid flag set must not warn.
+
+        CPython 3.14.9's str() of 1, 1.0 or True left it set, which a NumPy
+        ufunc reports as "invalid value encountered" once its loop ends.
+        """
+
+        class SetsInvalidFlag:
+            def __str__(self) -> str:
+                float("inf") - float("inf")
+                return "flagged"
+
+        flagged = SetsInvalidFlag()
+        values = pd.Series([flagged, 1, flagged], dtype=object)
+        assert self._first_rows([values]) == [0, 1, 0]
+
+
+class TestRequirePandas3:
+    """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""
+
+    @pytest.mark.parametrize("version", ["2.3.3", "1.5.3"])
+    def test_require_pandas_3_rejects_older_pandas(self, version):
+        with pytest.raises(
+            ImportError, match=rf"pandas {re.escape(version)} is installed.*uv sync"
+        ):
+            mapping_module._require_pandas_3(version)
+
+    @pytest.mark.parametrize("version", ["3.0.6", "3.1.0.dev0+1.gabc", "10.0.0"])
+    def test_require_pandas_3_accepts_pandas_3_and_later(self, version):
+        mapping_module._require_pandas_3(version)
+
+    def test_require_pandas_3_accepts_an_unparsed_version(self):
+        """A source build without version metadata reports "0+unknown"."""
+        mapping_module._require_pandas_3("0+unknown")
