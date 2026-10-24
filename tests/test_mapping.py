@@ -1123,6 +1123,64 @@ class TestMappingOnDistinctValues:
         assert _as_list(result["REF_AREA"]) == ["CO", "B_", None, "_Z"]
         assert _as_list(result["URBANISATION"]) == ["CO1", "B_", None, "_T"]
 
+    def test_apply_component_map_categorical_source_yields_str_targets(self):
+        """The target's dtype follows the value maps' targets, not the source."""
+        cmap = self._component_map(
+            "AREA",
+            "REF_AREA",
+            [ValueMap(source="COL", target="CO"), ValueMap(source="BEL", target="BE")],
+        )
+        df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype="category")
+        result = apply_component_map(df, cmap)
+        assert str(result["REF_AREA"].dtype) == "str"
+        assert _as_list(result["REF_AREA"]) == ["CO", None, "BE"]
+
+    def test_apply_component_map_regex_only_map(self):
+        cmap = self._component_map(
+            "AREA", "REF_AREA", [ValueMap(source="regex:B.*", target="B_")]
+        )
+        df = pd.DataFrame({"AREA": ["BEL", "COL", None]})
+        result = apply_component_map(df, cmap)
+        assert _as_list(result["REF_AREA"]) == ["B_", None, None]
+
+    def test_apply_component_map_regex_only_map_on_all_missing_column(self):
+        cmap = self._component_map(
+            "AREA", "REF_AREA", [ValueMap(source="regex:.*", target="_Z")]
+        )
+        df = pd.DataFrame({"AREA": pd.Series([None, None], dtype="str")})
+        result = apply_component_map(df, cmap)
+        assert result["REF_AREA"].isna().all()
+
+    def test_apply_component_map_later_duplicate_literal_wins(self):
+        cmap = self._component_map(
+            "AREA",
+            "REF_AREA",
+            [ValueMap(source="COL", target="C1"), ValueMap(source="COL", target="C2")],
+        )
+        df = pd.DataFrame({"AREA": ["COL"]})
+        assert apply_component_map(df, cmap)["REF_AREA"].tolist() == ["C2"]
+
+    def test_apply_component_map_nullable_string_source(self):
+        cmap = self._component_map(
+            "AREA",
+            "REF_AREA",
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:B.*", target="B_"),
+            ],
+        )
+        df = pd.DataFrame(
+            {"AREA": pd.array(["COL", pd.NA, "BEL", "X"], dtype="string")}
+        )
+        result = apply_component_map(df, cmap)
+        assert _as_list(result["REF_AREA"]) == ["CO", None, "B_", None]
+
+    def test_apply_component_map_catch_all_skips_a_value_with_a_newline(self, area_map):
+        """re.fullmatch(".*", text) fails on a newline; so does the catch-all."""
+        df = pd.DataFrame({"AREA": ["COL", "a\nb", "KEN"]})
+        result = apply_component_map(df, area_map)
+        assert _as_list(result["REF_AREA"]) == ["CO", None, "_Z"]
+
     @pytest.mark.parametrize(
         ("values", "expected"),
         [([1, 1.0], ["ONE", None]), ([1.0, 1], [None, "ONE"])],
@@ -1416,69 +1474,113 @@ class TestMappingOnDistinctValues:
         apply_multi_component_map(df, urbanisation_map)
         assert seen == [[3, 3]]
 
-    def test_apply_component_map_resolves_only_distinct_values(
+    def test_apply_component_map_matches_regexes_once_per_distinct_leftover(
         self, area_map, monkeypatch
     ):
-        resolve = mapping_module._resolve_component_values
+        """Only the distinct values the literals left reach the regex stage."""
+        regex_targets = mapping_module._regex_targets
         seen = []
 
-        def spy(values, rep_map):
-            seen.append(len(values))
-            return resolve(values, rep_map)
+        def spy(values, regex_maps):
+            seen.append(values.tolist())
+            return regex_targets(values, regex_maps)
 
-        monkeypatch.setattr(mapping_module, "_resolve_component_values", spy)
+        monkeypatch.setattr(mapping_module, "_regex_targets", spy)
         df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL", "KEN"]})
         apply_component_map(df, area_map)
-        assert seen == [3]
+        assert seen == [["BEL", "KEN"]]
 
 
-class TestDistinctRows:
-    """_distinct_rows numbers each row's distinct combination of source values."""
+class TestDistinctValues:
+    """_distinct_values numbers each row's combination and represents it once."""
 
     @staticmethod
-    def _first_rows(sources):
-        """Return, for each row, the first row of its combination."""
-        codes, positions = mapping_module._distinct_rows(sources)
-        return positions[codes].tolist()
+    def _codes(sources):
+        codes, _ = mapping_module._distinct_values(sources)
+        return codes.tolist()
 
-    def test_distinct_rows_points_each_row_at_its_first_occurrence(self):
+    def test_distinct_values_numbers_combinations_in_order_of_first_appearance(self):
         area = pd.Series(["x", None, "x", "y", np.nan])
         note = pd.Series([1, 1, 1, 2, 1])
-        assert self._first_rows([area, note]) == [0, 1, 0, 3, 1]
+        assert self._codes([area, note]) == [0, 1, 0, 2, 1]
 
-    def test_distinct_rows_numbers_combinations_densely(self):
-        """Code i is the combination whose first row is positions[i]."""
+    def test_distinct_values_represents_each_combination_by_its_values(self):
         area = pd.Series(["x", None, "x", "y", np.nan])
         note = pd.Series([1, 1, 1, 2, 1])
-        codes, positions = mapping_module._distinct_rows([area, note])
-        assert codes[positions].tolist() == list(range(len(positions)))
+        codes, (areas, notes) = mapping_module._distinct_values([area, note])
+        assert _as_list(areas.iloc[codes]) == _as_list(area)
+        assert notes.iloc[codes].tolist() == note.tolist()
 
-    def test_distinct_rows_keeps_missing_values_together(self):
+    def test_distinct_values_numbers_combinations_densely(self):
+        area = pd.Series(["x", None, "x", "y", np.nan])
+        note = pd.Series([1, 1, 1, 2, 1])
+        codes, representatives = mapping_module._distinct_values([area, note])
+        assert sorted(set(codes.tolist())) == [0, 1, 2]
+        assert [len(values) for values in representatives] == [3, 3]
+
+    def test_distinct_values_decodes_three_sources(self):
+        first = pd.Series(["x", "y", "x", "y", "x"])
+        second = pd.Series(["p", "p", "q", "q", "p"])
+        third = pd.Series([1, 1, 1, 2, 1])
+        codes, (firsts, seconds, thirds) = mapping_module._distinct_values(
+            [first, second, third]
+        )
+        assert codes.tolist() == [0, 1, 2, 3, 0]
+        assert firsts.tolist() == ["x", "y", "x", "y"]
+        assert seconds.tolist() == ["p", "p", "q", "q"]
+        assert thirds.tolist() == [1, 1, 1, 2]
+
+    def test_distinct_values_adds_one_missing_representative(self):
+        values = pd.Series(["a", None, "a", None], dtype="str")
+        codes, (representatives,) = mapping_module._distinct_values([values])
+        assert codes.tolist() == [0, 1, 0, 1]
+        assert _as_list(representatives) == ["a", None]
+
+    @pytest.mark.parametrize("dtype", _SOURCE_DTYPES)
+    def test_distinct_values_keeps_the_source_dtype(self, dtype):
+        values = pd.Series(["COL", None, "BEL"], dtype=dtype)
+        _, (representatives,) = mapping_module._distinct_values([values])
+        assert representatives.dtype == values.dtype
+
+    def test_distinct_values_keeps_missing_values_together(self):
         values = pd.Series([None, np.nan, 1, None], dtype=object)
-        assert self._first_rows([values]) == [0, 0, 2, 0]
+        assert self._codes([values]) == [0, 0, 1, 0]
 
-    def test_distinct_rows_splits_equal_values_that_print_differently(self):
+    def test_distinct_values_splits_equal_values_that_print_differently(self):
         values = pd.Series([1, 1.0, True, 1, "1", 1.0], dtype=object)
-        assert self._first_rows([values]) == [0, 1, 2, 0, 4, 1]
+        codes, (representatives,) = mapping_module._distinct_values([values])
+        assert codes.tolist() == [0, 1, 2, 0, 3, 1]
+        assert [str(v) for v in representatives] == ["1", "1.0", "True", "1"]
 
-    def test_distinct_rows_splits_signed_zeros(self):
+    def test_distinct_values_splits_signed_zeros(self):
         values = pd.Series([0.0, -0.0, 0.0, -0.0])
-        assert self._first_rows([values]) == [0, 1, 0, 1]
+        codes, (representatives,) = mapping_module._distinct_values([values])
+        assert codes.tolist() == [0, 1, 0, 1]
+        assert [str(v) for v in representatives] == ["0.0", "-0.0"]
 
-    def test_distinct_rows_groups_equal_floats(self):
+    def test_distinct_values_groups_equal_floats(self):
         values = pd.Series([1.5, 0.0, 1.5, np.nan, 0.0, np.nan])
-        assert self._first_rows([values]) == [0, 1, 0, 3, 1, 3]
+        assert self._codes([values]) == [0, 1, 0, 2, 1, 2]
 
-    def test_distinct_rows_rejects_no_sources(self):
+    def test_distinct_values_takes_rows_for_every_source_beside_a_split_one(self):
+        """One source needing the row pass puts every source on it."""
+        area = pd.Series([1, 1.0, 1], dtype=object)
+        note = pd.Series(["p", "q", "p"])
+        codes, (areas, notes) = mapping_module._distinct_values([area, note])
+        assert codes.tolist() == [0, 1, 0]
+        assert [type(v) for v in areas] == [int, float]
+        assert notes.tolist() == ["p", "q"]
+
+    def test_distinct_values_rejects_no_sources(self):
         with pytest.raises(ValueError, match="at least one source column"):
-            mapping_module._distinct_rows([])
+            mapping_module._distinct_values([])
 
-    def test_distinct_rows_merges_printed_forms_across_chunks(self, monkeypatch):
+    def test_distinct_values_merges_printed_forms_across_chunks(self, monkeypatch):
         monkeypatch.setattr(mapping_module, "_PRINT_FORM_CHUNK_ROWS", 2)
         values = pd.Series([1, 1.0, True, 1.0, 1, True], dtype=object)
-        assert self._first_rows([values]) == [0, 1, 2, 1, 0, 2]
+        assert self._codes([values]) == [0, 1, 2, 1, 0, 2]
 
-    def test_distinct_rows_tolerates_str_that_sets_float_flags(self):
+    def test_distinct_values_tolerates_str_that_sets_float_flags(self):
         """A __str__ leaving the FPU's invalid flag set must not warn.
 
         CPython 3.14.9's str() of 1, 1.0 or True left it set, which a NumPy
@@ -1492,7 +1594,194 @@ class TestDistinctRows:
 
         flagged = SetsInvalidFlag()
         values = pd.Series([flagged, 1, flagged], dtype=object)
-        assert self._first_rows([values]) == [0, 1, 0]
+        assert self._codes([values]) == [0, 1, 0]
+
+
+class TestLiteralCodes:
+    """_literal_codes finds each row's literal value map, whatever the storage."""
+
+    KEYS = pd.Index(["COL", "BEL"])
+
+    @pytest.mark.parametrize("dtype", _SOURCE_DTYPES)
+    def test_literal_codes_match_like_a_dict_lookup(self, dtype):
+        source = pd.Series(["COL", None, "KEN", "BEL", "COL"], dtype=dtype)
+        codes = mapping_module._literal_codes(source, self.KEYS)
+        assert codes.tolist() == [0, -1, -1, 1, 0]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pd.Series([1, 2]),
+            pd.Series([1.0, np.nan]),
+            pd.Series([True, False]),
+            pd.Series(pd.to_datetime(["2020-01-01", None])),
+        ],
+        ids=["int", "float", "bool", "datetime"],
+    )
+    def test_literal_codes_never_match_non_string_values(self, source):
+        keys = pd.Index(["1", "1.0", "True", "2020-01-01"])
+        assert mapping_module._literal_codes(source, keys).tolist() == [-1, -1]
+
+    def test_literal_codes_of_an_all_missing_column(self):
+        source = pd.Series([None, None], dtype="str")
+        assert mapping_module._literal_codes(source, self.KEYS).tolist() == [-1, -1]
+
+    def test_literal_codes_of_an_empty_column(self):
+        source = pd.Series([], dtype="str")
+        assert mapping_module._literal_codes(source, self.KEYS).tolist() == []
+
+    def test_literal_codes_look_python_strings_up_without_factorizing(
+        self, monkeypatch
+    ):
+        dtype = pd.StringDtype("python", na_value=np.nan)
+        source = pd.Series(["COL", "BEL"], dtype=dtype)
+        monkeypatch.setattr(pd, "factorize", lambda *a, **k: pytest.fail("factorized"))
+        assert mapping_module._literal_codes(source, self.KEYS).tolist() == [0, 1]
+
+    def test_literal_codes_factorize_arrow_strings_first(self, monkeypatch):
+        dtype = pd.StringDtype("pyarrow", na_value=np.nan)
+        source = pd.Series(["COL", "BEL", "COL"], dtype=dtype)
+        factorize = pd.factorize
+        seen = []
+
+        def spy(values, *args, **kwargs):
+            seen.append(len(values))
+            return factorize(values, *args, **kwargs)
+
+        monkeypatch.setattr(pd, "factorize", spy)
+        assert mapping_module._literal_codes(source, self.KEYS).tolist() == [0, 1, 0]
+        assert seen == [3]
+
+
+class TestRegexTargets:
+    """_regex_targets matches printed values against regex maps in apply order."""
+
+    @staticmethod
+    def _targets(values, *maps):
+        value_maps = [ValueMap(source=source, target=target) for source, target in maps]
+        return mapping_module._regex_targets(pd.Series(values), value_maps)
+
+    def test_regex_targets_first_match_wins(self):
+        result = self._targets(
+            ["B1", "C1", "ZZ"], ("regex:B.*", "B_"), ("regex:.*1", "ONE")
+        )
+        assert _as_list(result) == ["B_", "ONE", None]
+
+    def test_regex_targets_apply_the_catch_all_last(self):
+        result = self._targets(["B1", "ZZ"], ("regex:B.*", "B_"), ("regex:.*", "_Z"))
+        assert result.tolist() == ["B_", "_Z"]
+
+    def test_regex_targets_first_catch_all_wins(self):
+        result = self._targets(["x"], ("regex:.*", "_1"), ("regex:.*", "_2"))
+        assert result.tolist() == ["_1"]
+
+    def test_regex_targets_catch_all_skips_values_with_a_newline(self):
+        assert re.fullmatch(".*", "a\nb") is None
+        result = self._targets(["a\nb", "ab"], ("regex:.*", "_Z"))
+        assert _as_list(result) == [None, "_Z"]
+
+    def test_regex_targets_infer_str_once_any_value_matched(self):
+        result = self._targets(["BEL", "X"], ("regex:B.*", "B_"))
+        assert str(result.dtype) == "str"
+        assert _as_list(result) == ["B_", None]
+
+    def test_regex_targets_stay_object_when_nothing_matched(self):
+        result = self._targets(["X", "Y"], ("regex:B.*", "B_"))
+        assert result.dtype == object
+        assert result.tolist() == [None, None]
+
+    def test_regex_targets_match_the_printed_form(self):
+        values = pd.Series([1, 1.0, pd.Timestamp("2020-01-01")], dtype=object)
+        value_maps = [
+            ValueMap(source="regex:1", target="ONE"),
+            ValueMap(source="regex:2020-01-01.*", target="DATE"),
+        ]
+        result = mapping_module._regex_targets(values, value_maps)
+        assert _as_list(result) == ["ONE", None, "DATE"]
+
+    def test_regex_targets_keep_the_values_index(self):
+        values = pd.Series(["BEL", "X"], index=[5, 7])
+        result = mapping_module._regex_targets(
+            values, [ValueMap(source="regex:.*", target="_Z")]
+        )
+        assert result.index.tolist() == [5, 7]
+
+    def test_regex_targets_compile_each_pattern_once(self, monkeypatch):
+        compile_ = re.compile
+        compiled = []
+
+        def spy(pattern, *args, **kwargs):
+            compiled.append(pattern)
+            return compile_(pattern, *args, **kwargs)
+
+        monkeypatch.setattr(mapping_module.re, "compile", spy)
+        self._targets(["a", "b", "c", "a"], ("regex:a", "A"), ("regex:b", "B"))
+        assert compiled == ["a", "b"]
+
+
+class TestUnmappedWarnings:
+    """The unmapped-count warning counts rows, however the maps were applied."""
+
+    @staticmethod
+    def _component_map(value_maps):
+        return ComponentMap(
+            source="AREA",
+            target="REF_AREA",
+            values=RepresentationMap(
+                id="RM", name="RM", agency="WB", source="x", target="y", maps=value_maps
+            ),
+        )
+
+    def test_component_map_counts_unmatched_and_missing_rows(self, caplog):
+        cmap = self._component_map([ValueMap(source="COL", target="CO")])
+        df = pd.DataFrame({"AREA": ["COL", "X", None, "Y", "COL"]})
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, cmap)
+        assert "3 values could not be mapped" in caplog.text
+
+    def test_component_map_counts_what_the_regexes_leave(self, caplog):
+        cmap = self._component_map(
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:B.*", target="B_"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["COL", "BEL", None, "Y", "BEL"]})
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, cmap)
+        assert "2 values could not be mapped" in caplog.text
+
+    def test_component_map_warns_nothing_when_every_row_maps(self, caplog):
+        cmap = self._component_map(
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "X"]})
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, cmap)
+        assert "could not be mapped" not in caplog.text
+
+    def test_multi_component_map_counts_rows(self, caplog):
+        mcm = MultiComponentMap(
+            source=["AREA", "NOTE"],
+            target=["URB"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["x", "y"],
+                target=["z"],
+                maps=[MultiValueMap(source=["COL", "one"], target=["CO1"])],
+            ),
+        )
+        df = pd.DataFrame(
+            {"AREA": ["COL", "COL", None, "X"], "NOTE": ["one", "two", "one", "one"]}
+        )
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, mcm)
+        assert "3 rows could not be mapped" in caplog.text
 
 
 class TestRequirePandas3:

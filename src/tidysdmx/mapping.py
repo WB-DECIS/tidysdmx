@@ -3,10 +3,12 @@
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from pandas.api.extensions import ExtensionArray
 from pysdmx.model.map import (
     ComponentMap,
     FixedValueMap,
@@ -52,6 +54,12 @@ _SUPPORTED_MAP_TYPES: tuple[type, ...] = (
     MultiComponentMap,
 )
 
+# A value map whose source starts with this prefix holds a regular expression,
+# which must match the whole printed value; any other source is a literal.
+_REGEX_PREFIX: str = "regex:"
+# The regex value map that matches every value the others leave: a default.
+_CATCH_ALL: str = "regex:.*"
+
 # Rows stringified at a time when equal source values must be told apart by
 # their printed form (see _print_form_key), so that the strings held at once
 # stay bounded however long the column is.
@@ -80,9 +88,9 @@ def _value_map_rank(patterns: Sequence[str]) -> int:
     Returns:
         The priority rank: 0 (literal), 1 (regex), or 2 (catch-all).
     """
-    if all(p == "regex:.*" for p in patterns):
+    if all(p == _CATCH_ALL for p in patterns):
         return 2
-    if any(p.startswith("regex:") for p in patterns):
+    if any(p.startswith(_REGEX_PREFIX) for p in patterns):
         return 1
     return 0
 
@@ -285,16 +293,22 @@ def apply_component_map(
 ) -> pd.DataFrame:
     """Apply a single ComponentMap with a RepresentationMap to a DataFrame.
 
-    Missing source values (NaN/None) remain unmapped: they are never matched
-    by regex value maps or the catch-all (``"regex:.*"``) and yield NaN in the
-    target column.
-
-    Each distinct source value is matched once and the result broadcast to
-    every row, so value-map matching grows with the number of distinct values
+    Literal (exact) value maps always win, and are looked up for every row in
+    one vectorised pass. Rows they leave unmatched fall through to the regex
+    value maps, with any catch-all (``"regex:.*"``) evaluated last. A regex
+    is matched once per distinct leftover value and the result broadcast back
+    to the rows, so regex matching grows with the number of distinct values
     rather than rows. Values count as distinct by printed form as well as by
     equality, because a regex matches ``str(value)``: 1 and 1.0 compare equal
     but are matched apart. In object columns holding non-string values, that
     takes one ``str()`` call per such row.
+
+    Missing source values (NaN/None) remain unmapped: they are never matched
+    by regex value maps or the catch-all, and yield NaN in the target column.
+
+    The target column has the dtype of the value maps' targets (``str``),
+    whatever the source column's dtype, or ``object`` once regex value maps
+    were applied.
 
     Args:
         df: Source data.
@@ -319,96 +333,222 @@ def apply_component_map(
     if source_col not in df.columns:
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
 
-    # Resolve each distinct source value once, then broadcast the result back
-    # to every row by its code: matching then costs a few hashing passes over
-    # the rows plus work proportional to the number of distinct values,
-    # instead of a Python-level regex call per row. Missing values form a
-    # group of their own, which stays unmapped.
-    source = df[source_col]
-    codes, positions = _distinct_rows([source])
-    literal_mapping, regex_maps, resolved = _resolve_component_values(
-        source.iloc[positions].reset_index(drop=True), rep_map
-    )
+    literal_mapping, regex_maps = _split_value_maps(rep_map)
+    mapped, n_unmapped = _map_values(df[source_col], literal_mapping, regex_maps)
 
-    # The ExtensionArray's own take(), not pd.api.extensions.take(): the latter
-    # passes axis= through to it, which pandas' Arrow-backed arrays reject, and
-    # pandas 3 backs str columns with Arrow wherever pyarrow is installed.
-    # dtype= keeps the resolved dtype: an object result (the regex path) would
-    # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
+    # dtype= keeps the mapped dtype: an object result (the regex path) would
+    # otherwise be re-inferred as "str". copy=False, because ``mapped`` is a
+    # temporary nothing else holds.
     result_df = df.copy(deep=False)
     result_df[target_col] = pd.Series(
-        resolved.array.take(codes),
-        index=df.index,
-        dtype=resolved.dtype,
+        mapped, index=df.index, dtype=mapped.dtype, copy=False
     )
 
-    n_pairs = len(literal_mapping) + len(regex_maps)
     logger.log(
         _progress_level(verbose),
         "Mapped '%s' → '%s' using %d pairs.",
         source_col,
         target_col,
-        n_pairs,
+        len(literal_mapping) + len(regex_maps),
     )
-    unmapped = result_df[target_col].isna().sum()
-    if unmapped > 0:
-        logger.warning("%d values could not be mapped (set to NaN).", unmapped)
+    if n_unmapped > 0:
+        logger.warning("%d values could not be mapped (set to NaN).", n_unmapped)
 
     return result_df
 
 
-def _resolve_component_values(
-    values: pd.Series, rep_map: RepresentationMap
-) -> tuple[dict[str, str], list[ValueMap], pd.Series]:
-    """Map source values through a RepresentationMap's value maps.
-
-    Literal (exact) value maps are applied first via a vectorised lookup and
-    always win. Values left unmapped then fall through to the regex value maps,
-    with any catch-all (``"regex:.*"``) evaluated last. Missing values are never
-    matched by a regex.
+def _split_value_maps(
+    rep_map: RepresentationMap,
+) -> tuple[dict[str, str], list[ValueMap]]:
+    """Separate a RepresentationMap's literal value maps from its regex ones.
 
     Args:
-        values: The source values to map, typically the distinct values of a
-            source column.
         rep_map: The RepresentationMap holding the value maps.
 
     Returns:
-        The literal lookup, the rank-sorted regex value maps, and the mapped
-        values, aligned with ``values``.
+        The literal lookup, source value → target (of two maps with the same
+        source, the later one wins), and the regex value maps in apply order:
+        by ``_value_map_rank``, so a pure catch-all comes last, and in stored
+        order within a rank.
     """
     literal_mapping = {
         vm.source: vm.target
         for vm in rep_map.maps
-        if not vm.source.startswith("regex:")
+        if not vm.source.startswith(_REGEX_PREFIX)
     }
     regex_maps = sorted(
-        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
+        (vm for vm in rep_map.maps if vm.source.startswith(_REGEX_PREFIX)),
         key=lambda vm: _value_map_rank([vm.source]),
     )
+    return literal_mapping, regex_maps
 
-    mapped = values.map(literal_mapping)
 
-    if regex_maps:
+def _map_values(
+    source: pd.Series,
+    literal_mapping: dict[str, str],
+    regex_maps: Sequence[ValueMap],
+) -> tuple[ExtensionArray | np.ndarray, int]:
+    """Map a source column's values through literal, then regex, value maps.
 
-        def _regex_target(value: object) -> object:
-            for vm in regex_maps:
-                pattern = vm.source.removeprefix("regex:")
-                if re.fullmatch(pattern, str(value)):
-                    return vm.target
+    Args:
+        source: The source column.
+        literal_mapping: Literal source value → target.
+        regex_maps: The regex value maps, in apply order.
+
+    Returns:
+        The mapped values, one per row of ``source``: an ExtensionArray of the
+        literal targets' dtype, or an object array once regex value maps were
+        applied. And how many of them are missing.
+    """
+    # Series.map(literal_mapping) would build this mapper and look the rows up
+    # in its index. Doing so by hand keeps the match codes, which say which
+    # rows are left for the regexes and how many stay unmapped, so neither
+    # needs a pass over the result. An empty mapper is float64, as Series.map's.
+    mapper = (
+        pd.Series(literal_mapping) if literal_mapping else pd.Series(dtype="float64")
+    )
+    codes = (
+        _literal_codes(source, mapper.index)
+        if literal_mapping
+        else np.full(len(source), -1, dtype=np.intp)
+    )
+    leftover = codes < 0
+
+    if regex_maps and leftover.any():
+        # Each distinct leftover value is matched once and the result broadcast
+        # by code. Missing values are never matched: str(NaN) is "nan", which a
+        # regex (especially the catch-all) would otherwise match.
+        pending_codes, (values,) = _distinct_values([source[leftover]])
+        present = values.notna()
+        if present.any():
+            # Regex targets land in an object column, as they always have.
+            mapped = np.asarray(
+                mapper.astype(object).array.take(codes, allow_fill=True),
+                dtype=object,
+            )
+            targets = _regex_targets(values[present], regex_maps)
+            targets = targets.reindex(values.index)
+            mapped[leftover] = np.asarray(targets, dtype=object)[pending_codes]
+            # Rows the literals matched are mapped; only leftovers can be missing.
+            return mapped, _count_unmapped(targets, pending_codes)
+
+    return mapper.array.take(codes, allow_fill=True), int(leftover.sum())
+
+
+def _literal_codes(source: pd.Series, keys: pd.Index) -> np.ndarray:
+    """Return each row's position in ``keys``, or -1 where it matches none.
+
+    Matching is ``Index.get_indexer``'s, which is also what ``Series.map`` does
+    with a dict: 1 never matches "1", and a missing value matches nothing.
+
+    Python-backed string and object columns are looked up row by row, where
+    pandas reuses each str's cached hash; that beats factorizing the column
+    first, whose string hash table re-hashes every value. Every other column
+    is factorized and only its distinct values looked up: Arrow-backed strings
+    dictionary-encode faster than they convert to Python objects, and
+    comparing str keys with numeric or datetime rows is slow although none
+    ever matches.
+
+    Args:
+        source: The source column.
+        keys: The literal source values; unique.
+
+    Returns:
+        An integer array aligned with ``source``.
+    """
+    array = source.array
+    if isinstance(array, pd.arrays.StringArray) or (
+        isinstance(array, pd.arrays.NumpyExtensionArray) and array.dtype == object
+    ):
+        # The keys in the source's own dtype: looking Python-backed rows up in
+        # an Arrow-backed Index (the default wherever pyarrow is installed)
+        # converts every row first, which is slower than factorizing.
+        return keys.astype(source.dtype).get_indexer(source)
+    value_codes, uniques = pd.factorize(source)
+    # Missing values factorize to -1, which picks the -1 appended here.
+    return np.append(keys.get_indexer(uniques), -1)[value_codes]
+
+
+def _regex_targets(values: pd.Series, regex_maps: Sequence[ValueMap]) -> pd.Series:
+    """Match each value against the regex value maps; the first match wins.
+
+    Args:
+        values: Non-missing values, typically the distinct values a literal
+            lookup left unmatched.
+        regex_maps: The regex value maps, in apply order.
+
+    Returns:
+        The matching map's target per value, aligned with ``values`` and
+        missing where none matches, with the dtype ``Series.map`` would infer:
+        ``str`` once any value matched, ``object`` otherwise.
+    """
+    # A regex matches the printed form; a string prints as itself.
+    printed = (
+        values
+        if isinstance(values.dtype, pd.StringDtype)
+        else values.map(str, na_action="ignore")
+    )
+    patterns = [
+        (re.compile(vm.source.removeprefix(_REGEX_PREFIX)), vm.target)
+        for vm in regex_maps
+        if vm.source != _CATCH_ALL
+    ]
+    if patterns:
+
+        def _first_match(text: str) -> str | None:
+            for pattern, target in patterns:
+                if pattern.fullmatch(text):
+                    return target
             return None
 
-        # Missing source values stay unmapped: str(NaN) is "nan", which a
-        # regex (especially the catch-all "regex:.*") would otherwise match.
-        unmatched = mapped.isna() & values.notna()
-        if unmatched.any():
-            mapped = mapped.astype(object)
-            mapped.loc[unmatched] = values.loc[unmatched].map(_regex_target)
+        targets = np.array(printed.map(_first_match), dtype=object)
+    else:
+        targets = np.full(len(values), None, dtype=object)
 
-    return literal_mapping, regex_maps, mapped
+    catch_all = next((vm.target for vm in regex_maps if vm.source == _CATCH_ALL), None)
+    if catch_all is not None:
+        # The catch-all is a mask, not a regex call per value. Its "." does not
+        # match a newline, so re.fullmatch(".*", text) fails on exactly the
+        # values that contain one.
+        has_newline = printed.str.contains("\n", regex=False).to_numpy(dtype=bool)
+        targets[pd.isna(targets) & ~has_newline] = catch_all
+    # Rebuilt through the constructor, so the dtype is inferred as Series.map
+    # infers it and missing values are spelled the same way.
+    return pd.Series(targets, index=values.index)
 
 
-def _distinct_rows(sources: Sequence[pd.Series]) -> tuple[np.ndarray, np.ndarray]:
-    """Number the distinct combinations of source values, row by row.
+@dataclass(frozen=True)
+class _FactorizedSource:
+    """A source column factorized, its missing values coded ``len(uniques)``."""
+
+    source: pd.Series
+    codes: np.ndarray
+    uniques: pd.Index
+    has_missing: bool
+    # See _print_form_key.
+    print_form: tuple[np.ndarray, int] | None
+
+    def representatives(self) -> pd.Series:
+        """Return the distinct values in code order, plus a missing one if coded."""
+        values = pd.Series(self.uniques, dtype=self.source.dtype)
+        if self.has_missing:
+            values = values.reindex(range(len(self.uniques) + 1))
+        return values
+
+
+def _factorize_source(source: pd.Series) -> _FactorizedSource:
+    codes, uniques = pd.factorize(source)
+    missing = codes < 0
+    has_missing = bool(missing.any())
+    codes[missing] = len(uniques)
+    print_form = _print_form_key(source, codes, uniques)
+    return _FactorizedSource(source, codes, uniques, has_missing, print_form)
+
+
+def _distinct_values(
+    sources: Sequence[pd.Series],
+) -> tuple[np.ndarray, list[pd.Series]]:
+    """Number the distinct combinations of source values, each represented once.
 
     Values are grouped by equality and, where equal values can print
     differently, by printed form too, since a regex value map matches
@@ -419,32 +559,90 @@ def _distinct_rows(sources: Sequence[pd.Series]) -> tuple[np.ndarray, np.ndarray
         sources: The source columns, aligned row by row.
 
     Returns:
-        ``codes``, numbering each row's combination densely from 0, and
-        ``positions``, the first row of each combination, so that
-        ``codes[positions[i]] == i``.
+        ``codes``, numbering each row's combination densely from 0 in order
+        of first appearance, and one Series per source whose element i is
+        that source's value in combination i.
 
     Raises:
         ValueError: If ``sources`` is empty.
     """
-    codes: np.ndarray | None = None
-    for source in sources:
-        value_codes, uniques = pd.factorize(source)
-        value_codes[value_codes < 0] = len(uniques)
-        keys = [(value_codes, len(uniques) + 1)]
-        print_form = _print_form_key(source, value_codes, uniques)
-        if print_form is not None:
-            keys.append(print_form)
-        for key, n_keys in keys:
-            # codes and key are both at most len(source), so the pair number
-            # stays below (len(source) + 1) ** 2, far inside int64.
-            codes = key if codes is None else pd.factorize(codes * n_keys + key)[0]
-    if codes is None:
+    if not sources:
         raise ValueError("A map needs at least one source column to group by.")
+    parts = [_factorize_source(source) for source in sources]
+    if any(part.print_form is not None for part in parts):
+        # Equal values that print differently need a real row each, which
+        # only a pass over the rows can find.
+        return _distinct_rows(parts)
+
+    # Otherwise a source's representatives are its distinct values, in order
+    # of first appearance, plus one missing value when any row lacks one, so
+    # a row's value code is its representative's position.
+    representatives = [part.representatives() for part in parts]
+    codes = parts[0].codes
+    steps: list[tuple[np.ndarray, int]] = []
+    for part, values in zip(parts[1:], representatives[1:], strict=True):
+        # codes and part.codes are both at most len(source), so the pair
+        # number stays below (len(source) + 1) ** 2, far inside int64.
+        codes, pairs = pd.factorize(codes * len(values) + part.codes)
+        steps.append((pairs, len(values)))
+    if not steps:
+        return codes, representatives
+
+    # Decode each combination back into per-source positions, last source
+    # first: a pair number is (combination so far, this source's code).
+    combination = np.arange(len(steps[-1][0]))
+    decoded: list[pd.Series] = []
+    for (pairs, n_values), values in zip(
+        reversed(steps), reversed(representatives[1:]), strict=True
+    ):
+        combination, position = np.divmod(pairs[combination], n_values)
+        decoded.append(values.iloc[position].reset_index(drop=True))
+    decoded.append(representatives[0].iloc[combination].reset_index(drop=True))
+    return codes, decoded[::-1]
+
+
+def _distinct_rows(
+    parts: Sequence[_FactorizedSource],
+) -> tuple[np.ndarray, list[pd.Series]]:
+    """Number the distinct combinations by row, telling printed forms apart.
+
+    Args:
+        parts: The factorized source columns; at least one.
+
+    Returns:
+        As ``_distinct_values``, each combination represented by its first row.
+    """
+    keys: list[tuple[np.ndarray, int]] = []
+    for part in parts:
+        keys.append((part.codes, len(part.uniques) + 1))
+        if part.print_form is not None:
+            keys.append(part.print_form)
+    codes = keys[0][0]
+    for key, n_keys in keys[1:]:
+        # codes and key are both at most len(source), so the pair number
+        # stays below (len(source) + 1) ** 2, far inside int64.
+        codes = pd.factorize(codes * n_keys + key)[0]
 
     first = pd.Series(codes).drop_duplicates()
     positions = np.empty(len(first), dtype=np.intp)
     positions[first.to_numpy()] = first.index.to_numpy()
-    return codes, positions
+    return codes, [part.source.iloc[positions].reset_index(drop=True) for part in parts]
+
+
+def _count_unmapped(resolved: pd.Series, codes: np.ndarray) -> int:
+    """Count the rows whose combination, ``codes[row]``, resolved to missing.
+
+    Args:
+        resolved: The resolved target per combination.
+        codes: Each row's combination.
+
+    Returns:
+        The number of such rows.
+    """
+    missing = resolved.isna().to_numpy()
+    if not missing.any():
+        return 0
+    return int(np.bincount(codes, minlength=len(missing))[missing].sum())
 
 
 def _print_form_key(
@@ -581,14 +779,16 @@ def apply_multi_component_map(
     # Series, so a label that also names an index level, or appears twice in
     # source_cols, is no problem.
     sources = [df[col] for col in source_cols]
-    codes, positions = _distinct_rows(sources)
-    # Gather only the source columns, one row per combination: element i of
-    # each Series belongs to the combination with code i.
-    combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]
-    resolved = _resolve_multi_values(combinations, rules)
+    codes, combinations = _distinct_values(sources)
+    # Inferring the dtype over the combinations gives what inferring it over
+    # the rows did, as they hold the same values: "str", with NaN for the
+    # unmapped, once any rule matched; object, with None, otherwise.
+    resolved = pd.Series(_resolve_multi_values(combinations, rules))
 
     result_df = df.copy(deep=False)
-    result_df[target_col] = pd.Series(resolved[codes], index=df.index)
+    result_df[target_col] = pd.Series(
+        resolved.array.take(codes), index=df.index, dtype=resolved.dtype, copy=False
+    )
 
     logger.log(
         _progress_level(verbose),
@@ -597,9 +797,9 @@ def apply_multi_component_map(
         target_col,
         len(rules),
     )
-    unmapped = result_df[target_col].isna().sum()
-    if unmapped > 0:
-        logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
+    n_unmapped = _count_unmapped(resolved, codes)
+    if n_unmapped > 0:
+        logger.warning("%d rows could not be mapped (set to NaN).", n_unmapped)
 
     return result_df
 
