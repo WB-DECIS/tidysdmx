@@ -1354,6 +1354,22 @@ class TestDistinctRows:
         values = pd.Series([1, 1.0, True, 1.0, 1, True], dtype=object)
         assert self._first_rows([values]) == [0, 1, 2, 1, 0, 2]
 
+    def test_distinct_rows_tolerates_str_that_sets_float_flags(self):
+        """A __str__ leaving the FPU's invalid flag set must not warn.
+
+        CPython 3.14.9's str() of 1, 1.0 or True left it set, which a NumPy
+        ufunc reports as "invalid value encountered" once its loop ends.
+        """
+
+        class SetsInvalidFlag:
+            def __str__(self) -> str:
+                float("inf") - float("inf")
+                return "flagged"
+
+        flagged = SetsInvalidFlag()
+        values = pd.Series([flagged, 1, flagged], dtype=object)
+        assert self._first_rows([values]) == [0, 1, 0]
+
 
 class TestRequirePandas3:
     """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""

@@ -487,16 +487,18 @@ def _print_form_key(
     rows = np.flatnonzero(np.append(split, False)[codes])
 
     # Stringify in chunks, merging each chunk's distinct forms into one
-    # numbering. np.frompyfunc(str) leaves them Python strings, where
+    # numbering. An object array keeps them Python strings, where
     # Series.map(str) would convert them to the "str" dtype and make that
-    # merge slow.
-    to_str = np.frompyfunc(str, 1, 1)
+    # merge slow. Not np.frompyfunc(str): a ufunc checks the FPU status flags
+    # after its loop, so a __str__ that leaves one set (CPython 3.14.9's for
+    # 1, 1.0 or True) raises a spurious "invalid value" RuntimeWarning.
     values = source.to_numpy()
     key = np.zeros(len(source), dtype=np.intp)
     forms: dict[str, int] = {}
     for start in range(0, len(rows), _PRINT_FORM_CHUNK_ROWS):
         chunk = rows[start : start + _PRINT_FORM_CHUNK_ROWS]
-        chunk_codes, chunk_forms = pd.factorize(to_str(values[chunk]))
+        printed = np.fromiter(map(str, values[chunk]), dtype=object, count=len(chunk))
+        chunk_codes, chunk_forms = pd.factorize(printed)
         ids = np.fromiter(
             (forms.setdefault(form, len(forms) + 1) for form in chunk_forms),
             dtype=np.intp,
