@@ -1218,6 +1218,69 @@ class TestMappingOnDistinctValues:
         result.loc[0, "OBS_VALUE"] = 99.0
         assert df["OBS_VALUE"].tolist() == [1.0, 2.0]
 
+    @pytest.mark.parametrize(
+        "apply",
+        [
+            pytest.param(
+                lambda df, cmap, mcm: map_structures(
+                    df,
+                    StructureMap(
+                        id="SM",
+                        name="SM",
+                        agency="WB",
+                        source="",
+                        target="",
+                        maps=[FixedValueMap(target="FREQ", value="A")],
+                    ),
+                ),
+                id="map_structures-fixed",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: map_structures(
+                    df,
+                    StructureMap(
+                        id="SM",
+                        name="SM",
+                        agency="WB",
+                        source="",
+                        target="",
+                        maps=[cmap],
+                    ),
+                ),
+                id="map_structures-component",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_fixed_value_maps(df, []),
+                id="apply_fixed_value_maps-empty",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_implicit_component_maps(df, []),
+                id="apply_implicit_component_maps-empty",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_component_map(df, cmap),
+                id="apply_component_map",
+            ),
+            pytest.param(
+                lambda df, cmap, mcm: apply_multi_component_map(df, mcm),
+                id="apply_multi_component_map",
+            ),
+        ],
+    )
+    def test_renaming_result_axes_leaves_input_untouched(
+        self, apply, area_map, urbanisation_map
+    ):
+        """Shallow copies get their own axis objects, so renames stay local."""
+        df = pd.DataFrame(
+            {"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]},
+            index=pd.Index([1, 2], name="orig"),
+        )
+        df.columns.name = "cols"
+        result = apply(df, area_map, urbanisation_map)
+        result.index.name = "renamed"
+        result.columns.name = "renamed"
+        assert (df.index.name, df.columns.name) == ("orig", "cols")
+
     def test_apply_multi_component_map_index_named_like_source(self, urbanisation_map):
         """An index level named like a source column does not confuse grouping."""
         df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]}).set_index(
