@@ -939,7 +939,14 @@ _TRICKY_COLUMNS = {
     "float64-zeros": lambda: pd.Series([0.0, -0.0, 1.0, np.nan, -0.0]),
     "Float64-zeros": lambda: pd.Series([0.0, -0.0, 1.0, None, -0.0], dtype="Float64"),
     "float32-zeros": lambda: pd.Series([0.0, -0.0, 0.1, np.nan], dtype="float32"),
-    "str": lambda: pd.Series(["COL", "BEL", None, "COL", "1"], dtype="str"),
+    "str-python": lambda: pd.Series(
+        ["COL", "BEL", None, "COL", "1"],
+        dtype=pd.StringDtype("python", na_value=np.nan),
+    ),
+    "str-pyarrow": lambda: pd.Series(
+        ["COL", "BEL", None, "COL", "1"],
+        dtype=pd.StringDtype("pyarrow", na_value=np.nan),
+    ),
     "category": lambda: pd.Series(
         pd.Categorical(["COL", "BEL", None, "COL"], categories=["BEL", "COL", "ZZZ"])
     ),
@@ -966,6 +973,17 @@ _TRICKY_VALUE_MAPS = [
     ValueMap(source="regex:2020-01-01.*", target="DATE"),
 ]
 _CATCH_ALL = ValueMap(source="regex:.*", target="_Z")
+
+# The dtypes a source column arrives in. pandas 3's default "str" is backed by
+# Arrow wherever pyarrow is installed and by Python objects otherwise, and the
+# mapping takes a different path for each, so both storages are named rather
+# than left to the environment.
+_SOURCE_DTYPES = [
+    pytest.param(pd.StringDtype("python", na_value=np.nan), id="str-python"),
+    pytest.param(pd.StringDtype("pyarrow", na_value=np.nan), id="str-pyarrow"),
+    pytest.param("object", id="object"),
+    pytest.param("category", id="category"),
+]
 
 # The tricky column comes first; "x" matches the constant second column.
 _TRICKY_MULTI_VALUE_MAPS = [
@@ -1035,13 +1053,13 @@ class TestMappingOnDistinctValues:
             ]
         )
 
-    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    @pytest.mark.parametrize("dtype", _SOURCE_DTYPES)
     def test_apply_component_map_repeated_values_across_dtypes(self, area_map, dtype):
         df = pd.DataFrame({"AREA": ["COL", "BEL", "COL", "KEN", "BEL"]}, dtype=dtype)
         result = apply_component_map(df, area_map)
         assert result["REF_AREA"].tolist() == ["CO", "B_", "CO", "_Z", "B_"]
 
-    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    @pytest.mark.parametrize("dtype", _SOURCE_DTYPES)
     def test_apply_component_map_missing_source_stays_unmapped(self, area_map, dtype):
         df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype=dtype)
         result = apply_component_map(df, area_map)
@@ -1061,6 +1079,62 @@ class TestMappingOnDistinctValues:
         df = pd.DataFrame({"AREA": pd.Series([], dtype="str")})
         result = apply_component_map(df, area_map)
         assert result["REF_AREA"].tolist() == []
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_apply_component_map_on_either_string_storage(self, area_map, storage):
+        """Arrow-backed str columns map like Python-backed ones (one path crashed)."""
+        dtype = pd.StringDtype(storage, na_value=np.nan)
+        df = pd.DataFrame({"AREA": pd.Series(["COL", "BEL", None, "KEN"], dtype=dtype)})
+        result = apply_component_map(df, area_map)
+        assert _as_list(result["REF_AREA"]) == ["CO", "B_", None, "_Z"]
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_apply_component_map_literal_targets_keep_str_dtype(self, storage):
+        cmap = self._component_map(
+            "AREA", "REF_AREA", [ValueMap(source="COL", target="CO")]
+        )
+        dtype = pd.StringDtype(storage, na_value=np.nan)
+        df = pd.DataFrame({"AREA": pd.Series(["COL", "X", None], dtype=dtype)})
+        result = apply_component_map(df, cmap)
+        assert str(result["REF_AREA"].dtype) == "str"
+        assert _as_list(result["REF_AREA"]) == ["CO", None, None]
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_apply_multi_component_map_on_either_string_storage(
+        self, urbanisation_map, storage
+    ):
+        dtype = pd.StringDtype(storage, na_value=np.nan)
+        df = pd.DataFrame(
+            {
+                "AREA": pd.Series(["COL", "BEL", None, "KEN"], dtype=dtype),
+                "NOTE": pd.Series(["one", "two", "one", "x"], dtype=dtype),
+            }
+        )
+        result = apply_multi_component_map(df, urbanisation_map)
+        assert _as_list(result["URBANISATION"]) == ["CO1", "B_", None, "_T"]
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_map_structures_on_either_string_storage(
+        self, area_map, urbanisation_map, storage
+    ):
+        dtype = pd.StringDtype(storage, na_value=np.nan)
+        df = pd.DataFrame(
+            {
+                "AREA": pd.Series(["COL", "BEL", None, "KEN"], dtype=dtype),
+                "NOTE": pd.Series(["one", "two", "one", "x"], dtype=dtype),
+            }
+        )
+        sm = StructureMap(
+            id="SM",
+            name="SM",
+            agency="WB",
+            source="",
+            target="",
+            maps=[area_map, urbanisation_map],
+        )
+        result = map_structures(df, sm)
+        assert _as_list(result["REF_AREA"]) == ["CO", "B_", None, "_Z"]
+        assert _as_list(result["URBANISATION"]) == ["CO1", "B_", None, "_T"]
 
     @pytest.mark.parametrize(
         ("values", "expected"),
@@ -1174,7 +1248,7 @@ class TestMappingOnDistinctValues:
             "B_",
         ]
 
-    @pytest.mark.parametrize("dtype", ["str", "object", "category"])
+    @pytest.mark.parametrize("dtype", _SOURCE_DTYPES)
     def test_apply_multi_component_map_missing_value_stays_unmapped(
         self, urbanisation_map, dtype
     ):

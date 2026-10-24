@@ -106,6 +106,12 @@ dev = [
     # Draws the Performance page's charts (benchmarks/report.py). In `dev`, not
     # `docs`, so CI's test job renders them too; docs builds sync `dev` anyway.
     "matplotlib>=3.9",
+    # pandas 3 backs str columns with Arrow wherever pyarrow is installed (as on
+    # Databricks) and with Python objects otherwise, and tidysdmx.mapping takes
+    # a different path for each. With pyarrow here, the suite runs on Arrow
+    # strings by default and the mapping tests cover both storages explicitly.
+    # pyarrow remains optional for users: it is not a runtime dependency.
+    "pyarrow>=19",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool

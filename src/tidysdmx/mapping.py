@@ -330,11 +330,14 @@ def apply_component_map(
         source.iloc[positions].reset_index(drop=True), rep_map
     )
 
+    # The ExtensionArray's own take(), not pd.api.extensions.take(): the latter
+    # passes axis= through to it, which pandas' Arrow-backed arrays reject, and
+    # pandas 3 backs str columns with Arrow wherever pyarrow is installed.
     # dtype= keeps the resolved dtype: an object result (the regex path) would
     # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
     result_df = df.copy(deep=False)
     result_df[target_col] = pd.Series(
-        pd.api.extensions.take(resolved.array, codes),
+        resolved.array.take(codes),
         index=df.index,
         dtype=resolved.dtype,
     )
