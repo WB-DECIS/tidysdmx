@@ -14,7 +14,7 @@
 # module entry point, so those two keep their console scripts.
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check
+.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench performance-page
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -53,14 +53,22 @@ build: ## Build the sdist and wheel, check their metadata, and import the wheel
 	uv run --isolated --no-project --with dist/*.whl \
 		python -c "import tidysdmx; print(tidysdmx.__version__)"
 
+# The results the Performance page renders from: what `make bench` writes
+# locally, and what docs.yml downloads from the newest release that has one.
+PERF_RESULTS ?= benchmarks/results/latest.json
+
+performance-page: ## Render the Performance page from PERF_RESULTS (a placeholder if absent)
+	uv run python -m benchmarks.report --format page --input $(PERF_RESULTS) \
+		--output performance/index.qmd
+
 # great-docs has no `python -m` entry point (its CLI is a bare click group with
 # no __main__), and neither has quarto, which great-docs shells out to. Both
 # therefore stay console scripts. This is a docs-only path — it never runs on
 # the commit or push path, so it cannot block a commit.
-docs: ## Build the documentation site
+docs: performance-page ## Build the documentation site
 	uv run --group docs great-docs build
 
-docs-preview: ## Serve the documentation site locally with live reload
+docs-preview: performance-page ## Serve the documentation site locally with live reload
 	uv run --group docs great-docs preview
 
 # Advisory IDs the audit may skip, space-separated (PYSEC-... or GHSA-...).
@@ -86,5 +94,15 @@ audit: ## Audit locked dependencies for known vulnerabilities
 
 release-dry: ## Show the version the next release would produce, changing nothing
 	uv run --group release python -m semantic_release -v --noop version
+
+# Extra arguments for `make bench`, e.g. BENCH_ARGS="--sizes 1000 10000 --baselines 1".
+BENCH_ARGS ?=
+
+# --no-project: the orchestrator is standard library only, and each version
+# under test gets a venv of its own under .bench/. --python 3.11 because it
+# needs datetime.UTC, so a machine whose default Python is older fails clearly.
+bench: ## Benchmark map_structures: the working tree against the last 3 releases
+	uv run --no-project --python 3.11 python -m benchmarks.run --target WORKTREE --baselines 3 \
+		--out $(PERF_RESULTS) $(BENCH_ARGS)
 
 check: lint typecheck cov ## Lint, typecheck and gated tests — CI runs these plus `build`

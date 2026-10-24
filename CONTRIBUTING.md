@@ -53,6 +53,7 @@ Run `make help` for the full list. The ones you will use:
 | `make cov` | unit tests with coverage, enforcing the gate |
 | `make build` | build the sdist and wheel, check their metadata, import the wheel |
 | `make docs` / `make docs-preview` | build / live-preview the documentation site |
+| `make bench` | benchmark `map_structures`: the working tree vs the last 3 releases |
 | `make audit` | check locked dependencies for known vulnerabilities |
 | `make release-dry` | show the version the next release would produce |
 | `make check` | lint + typecheck + cov — CI runs these plus `make build` |
@@ -61,6 +62,14 @@ Without `make` (Windows), call the underlying commands directly — they are all
 one line, e.g. `uv run python -m pytest -m "not integration"`,
 `uv run python -m ruff check .`, `uv run python -m mypy`. Read the `Makefile`
 for the exact recipe.
+
+Building the docs without `make` needs one more step first. Render the
+Performance page, or great-docs skips that section:
+
+```bash
+uv run python -m benchmarks.report --format page \
+  --input benchmarks/results/latest.json --output performance/index.qmd
+```
 
 To run a single test:
 
@@ -235,6 +244,22 @@ longer version.
 Every PR runs lint, typing, tests on every supported Python version, a
 packaging check, a dependency audit and a workflow security lint. A green board
 is the bar for merging.
+
+### Benchmarks on pull requests
+
+A PR that touches `src/tidysdmx/mapping.py`, `benchmarks/` or `pyproject.toml`
+(which declares the dependencies the benchmark installs) gets a benchmark
+comment comparing its head with the base branch and the latest release on the
+same runner. Each push updates it. To benchmark a PR outside those paths, add
+the `benchmark` label. Draft and fork PRs are skipped, and so are Dependabot's:
+the benchmark installs each version with the dependencies that version
+declares and never reads `uv.lock`, so a lockfile-only bump cannot change what
+it measures. The full grid takes a while, and the check is not required for
+merging.
+
+To measure locally, `make bench` compares your working tree with the last
+three releases and `make docs-preview` shows the result on the Performance
+page. Laptop numbers describe the laptop; compare them only with each other.
 
 ## Code of Conduct
 

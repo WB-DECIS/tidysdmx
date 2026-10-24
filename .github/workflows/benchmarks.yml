@@ -1,0 +1,108 @@
+name: Benchmarks
+
+# Measures map_structures for one ref against named refs and earlier releases,
+# and stores the results as the `benchmark-results` artifact. It only reads:
+# release.yml attaches the JSON to a Release and benchmarks-pr.yml posts the PR
+# comment, each with the one write permission it needs. They live in the
+# callers because a called workflow's jobs cannot ask for more than the caller
+# grants, even when they would be skipped.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref (or commit) to profile
+        type: string
+        required: true
+      target-label:
+        description: Label for the ref in the results (default the ref)
+        type: string
+        default: ""
+      compare:
+        description: Another ref to measure alongside, as LABEL=REF or REF
+        type: string
+        default: ""
+      baselines:
+        description: How many earlier releases to measure
+        type: number
+        default: 3
+      sizes:
+        description: Row counts, space-separated
+        type: string
+        default: "1000 10000 100000 1000000"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (or commit) to profile
+        type: string
+        required: true
+      target-label:
+        description: Label for the ref in the results (default the ref)
+        type: string
+        default: ""
+      compare:
+        description: Another ref to measure alongside, as LABEL=REF or REF
+        type: string
+        default: ""
+      baselines:
+        description: How many earlier releases to measure
+        type: number
+        default: 3
+      sizes:
+        description: Row counts, space-separated
+        type: string
+        default: "1000 10000 100000 1000000"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    # A full grid over four versions; v0.8.0's row-wise multi-map path alone
+    # can take minutes at 1M rows.
+    timeout-minutes: 75
+    steps:
+      # The harness comes from this workflow's own commit; the versions under
+      # test are exported from git by ref, so every tag and branch must be here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+      - name: Benchmark
+        env:
+          REF: ${{ inputs.ref }}
+          TARGET_LABEL: ${{ inputs.target-label }}
+          COMPARE: ${{ inputs.compare }}
+          BASELINES: ${{ inputs.baselines }}
+          SIZES: ${{ inputs.sizes }}
+        run: |
+          args=(--target "$REF" --baselines "$BASELINES" --out benchmarks-results.json)
+          if [ -n "$TARGET_LABEL" ]; then args+=(--target-label "$TARGET_LABEL"); fi
+          if [ -n "$COMPARE" ]; then args+=(--compare "$COMPARE"); fi
+          read -r -a sizes <<< "$SIZES"
+          uv run --no-project python -m benchmarks.run "${args[@]}" --sizes "${sizes[@]}"
+      - name: Report
+        if: ${{ !cancelled() && hashFiles('benchmarks-results.json') != '' }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          uv run --no-project python -m benchmarks.report --format summary \
+            --input benchmarks-results.json --run-url "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+          uv run --no-project python -m benchmarks.report --format pr-comment \
+            --input benchmarks-results.json --run-url "$RUN_URL" --output pr-comment.md
+      - name: Store results
+        if: ${{ !cancelled() && hashFiles('benchmarks-results.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-results
+          path: |
+            benchmarks-results.json
+            pr-comment.md
+          if-no-files-found: error
