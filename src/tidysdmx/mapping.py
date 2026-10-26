@@ -3,6 +3,7 @@
 import logging
 import re
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,9 +12,36 @@ from pysdmx.model.map import (
     FixedValueMap,
     ImplicitComponentMap,
     MultiComponentMap,
+    RepresentationMap,
     StructureMap,
+    ValueMap,
 )
 from typeguard import typechecked
+
+
+def _require_pandas_3(version: str) -> None:
+    """Refuse to run on a pandas older than 3.
+
+    The maps return shallow copies, which only pandas 3's Copy-on-Write keeps
+    isolated from their input: on pandas 2, editing a returned frame would
+    silently edit the caller's DataFrame. pip enforces ``pandas>=3``, but a
+    ``--no-deps`` install or a stale environment does not.
+
+    Args:
+        version: A pandas version string, such as ``pd.__version__``.
+
+    Raises:
+        ImportError: If ``version`` is older than 3.
+    """
+    major = version.partition(".")[0]
+    if major.isdigit() and int(major) < 3:
+        raise ImportError(
+            f"tidysdmx requires pandas>=3 (Copy-on-Write), but pandas {version} "
+            "is installed. Upgrade pandas, or run `uv sync` in a checkout."
+        )
+
+
+_require_pandas_3(pd.__version__)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +51,11 @@ _SUPPORTED_MAP_TYPES: tuple[type, ...] = (
     ComponentMap,
     MultiComponentMap,
 )
+
+# Rows stringified at a time when equal source values must be told apart by
+# their printed form (see _print_form_key), so that the strings held at once
+# stay bounded however long the column is.
+_PRINT_FORM_CHUNK_ROWS: int = 2**20
 
 
 def _progress_level(verbose: bool) -> int:
@@ -79,7 +112,9 @@ def map_structures(
 
     Returns:
         A new DataFrame holding ``df``'s columns plus every target column,
-        added or overwritten.
+        added or overwritten. Passthrough columns are not copied up front:
+        pandas' Copy-on-Write copies one only if it is later modified, so
+        editing the result never changes ``df``.
 
     Raises:
         KeyError: If a ComponentMap or MultiComponentMap source column is not
@@ -94,8 +129,10 @@ def map_structures(
 
     # Maps read from ``df`` and write only their target into ``result_df``, so
     # no map sees another's output. Chaining them instead let METRIC → METRIC
-    # overwrite METRIC before METRIC → UNIT_MEASURE ran (issue #265).
-    result_df = df.copy()
+    # overwrite METRIC before METRIC → UNIT_MEASURE ran (issue #265). The copy
+    # is shallow: under pandas' Copy-on-Write, ``result_df`` is still isolated
+    # from ``df``, but its passthrough columns cost no memory until written to.
+    result_df = df.copy(deep=False)
 
     if fixed_value_maps:
         result_df = apply_fixed_value_maps(df, fixed_value_maps)
@@ -183,7 +220,7 @@ def apply_fixed_value_maps(
             "All elements in fixed_value_maps must be FixedValueMap instances."
         )
 
-    result_df = df.copy()
+    result_df = df.copy(deep=False)
 
     for fmap in fixed_value_maps:
         result_df[fmap.target] = fmap.value
@@ -217,7 +254,7 @@ def apply_implicit_component_maps(
             "All elements in implicit_maps must be ImplicitComponentMap instances."
         )
 
-    result_df = df.copy()
+    result_df = df.copy(deep=False)
 
     for imap in implicit_maps:
         source_col = imap.source
@@ -252,6 +289,13 @@ def apply_component_map(
     by regex value maps or the catch-all (``"regex:.*"``) and yield NaN in the
     target column.
 
+    Each distinct source value is matched once and the result broadcast to
+    every row, so value-map matching grows with the number of distinct values
+    rather than rows. Values count as distinct by printed form as well as by
+    equality, because a regex matches ``str(value)``: 1 and 1.0 compare equal
+    but are matched apart. In object columns holding non-string values, that
+    takes one ``str()`` call per such row.
+
     Args:
         df: Source data.
         component_map: ComponentMap with source, target, and values.
@@ -266,51 +310,35 @@ def apply_component_map(
         TypeError: If ``component_map.values`` is a URN string rather than an
             embedded RepresentationMap.
     """
-    result_df = df.copy()
-
     source_col = component_map.source
     target_col = component_map.target
     rep_map = component_map.values
     if isinstance(rep_map, str):
         raise _unresolved_values_error("ComponentMap", source_col, rep_map)
 
-    if source_col not in result_df.columns:
+    if source_col not in df.columns:
         raise KeyError(f"Source column '{source_col}' not found in DataFrame.")
 
-    # Apply literal (exact) value maps first via a fast vectorised lookup;
-    # these always win. Source values left unmapped then fall through to the
-    # regex value maps, with any catch-all ("regex:.*") evaluated last.
-    literal_mapping = {
-        vm.source: vm.target
-        for vm in rep_map.maps
-        if not vm.source.startswith("regex:")
-    }
-    regex_maps = sorted(
-        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
-        key=lambda vm: _value_map_rank([vm.source]),
+    # Resolve each distinct source value once, then broadcast the result back
+    # to every row by its code: matching then costs a few hashing passes over
+    # the rows plus work proportional to the number of distinct values,
+    # instead of a Python-level regex call per row. Missing values form a
+    # group of their own, which stays unmapped.
+    source = df[source_col]
+    reads_regex = any(vm.source.startswith("regex:") for vm in rep_map.maps)
+    codes, positions = _distinct_rows([source], [reads_regex])
+    literal_mapping, regex_maps, resolved = _resolve_component_values(
+        source.iloc[positions].reset_index(drop=True), rep_map
     )
 
-    mapped = result_df[source_col].map(literal_mapping)
-
-    if regex_maps:
-
-        def _regex_target(value: object) -> object:
-            for vm in regex_maps:
-                pattern = vm.source.removeprefix("regex:")
-                if re.fullmatch(pattern, str(value)):
-                    return vm.target
-            return None
-
-        # Missing source values stay unmapped: str(NaN) is "nan", which a
-        # regex (especially the catch-all "regex:.*") would otherwise match.
-        unmatched = mapped.isna() & result_df[source_col].notna()
-        if unmatched.any():
-            mapped = mapped.astype(object)
-            mapped.loc[unmatched] = result_df.loc[unmatched, source_col].map(
-                _regex_target
-            )
-
-    result_df[target_col] = mapped
+    # dtype= keeps the resolved dtype: an object result (the regex path) would
+    # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
+    result_df = df.copy(deep=False)
+    result_df[target_col] = pd.Series(
+        pd.api.extensions.take(resolved.array, codes),
+        index=df.index,
+        dtype=resolved.dtype,
+    )
 
     n_pairs = len(literal_mapping) + len(regex_maps)
     logger.log(
@@ -325,6 +353,173 @@ def apply_component_map(
         logger.warning("%d values could not be mapped (set to NaN).", unmapped)
 
     return result_df
+
+
+def _resolve_component_values(
+    values: pd.Series, rep_map: RepresentationMap
+) -> tuple[dict[str, str], list[ValueMap], pd.Series]:
+    """Map source values through a RepresentationMap's value maps.
+
+    Literal (exact) value maps are applied first via a vectorised lookup and
+    always win. Values left unmapped then fall through to the regex value maps,
+    with any catch-all (``"regex:.*"``) evaluated last. Missing values are never
+    matched by a regex.
+
+    Args:
+        values: The source values to map, typically the distinct values of a
+            source column.
+        rep_map: The RepresentationMap holding the value maps.
+
+    Returns:
+        The literal lookup, the rank-sorted regex value maps, and the mapped
+        values, aligned with ``values``.
+    """
+    literal_mapping = {
+        vm.source: vm.target
+        for vm in rep_map.maps
+        if not vm.source.startswith("regex:")
+    }
+    regex_maps = sorted(
+        (vm for vm in rep_map.maps if vm.source.startswith("regex:")),
+        key=lambda vm: _value_map_rank([vm.source]),
+    )
+
+    mapped = values.map(literal_mapping)
+
+    if regex_maps:
+
+        def _regex_target(value: object) -> object:
+            for vm in regex_maps:
+                pattern = vm.source.removeprefix("regex:")
+                if re.fullmatch(pattern, str(value)):
+                    return vm.target
+            return None
+
+        # Missing source values stay unmapped: str(NaN) is "nan", which a
+        # regex (especially the catch-all "regex:.*") would otherwise match.
+        unmatched = mapped.isna() & values.notna()
+        if unmatched.any():
+            mapped = mapped.astype(object)
+            mapped.loc[unmatched] = values.loc[unmatched].map(_regex_target)
+
+    return literal_mapping, regex_maps, mapped
+
+
+def _distinct_rows(
+    sources: Sequence[pd.Series], split_print_forms: Sequence[bool] | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Number the distinct combinations of source values, row by row.
+
+    Values are grouped by equality and, for a source a regex value map reads,
+    by printed form too, since a regex matches ``str(value)`` and equal values
+    can print differently (see ``_print_form_key``). Literal value maps match
+    equal values alike, so a source only literal maps read skips that pass.
+    All missing values of a source form one group.
+
+    Args:
+        sources: The source columns, aligned row by row.
+        split_print_forms: For each source, whether a regex value map reads
+            it. None treats every source as read by a regex.
+
+    Returns:
+        ``codes``, numbering each row's combination densely from 0, and
+        ``positions``, the first row of each combination, so that
+        ``codes[positions[i]] == i``.
+
+    Raises:
+        ValueError: If ``sources`` is empty.
+    """
+    if split_print_forms is None:
+        split_print_forms = [True] * len(sources)
+    codes: np.ndarray | None = None
+    for source, split in zip(sources, split_print_forms, strict=True):
+        value_codes, uniques = pd.factorize(source)
+        value_codes[value_codes < 0] = len(uniques)
+        keys = [(value_codes, len(uniques) + 1)]
+        print_form = _print_form_key(source, value_codes, uniques) if split else None
+        if print_form is not None:
+            keys.append(print_form)
+        for key, n_keys in keys:
+            # codes and key are both at most len(source), so the pair number
+            # stays below (len(source) + 1) ** 2, far inside int64.
+            codes = key if codes is None else pd.factorize(codes * n_keys + key)[0]
+    if codes is None:
+        raise ValueError("A map needs at least one source column to group by.")
+
+    first = pd.Series(codes).drop_duplicates()
+    positions = np.empty(len(first), dtype=np.intp)
+    positions[first.to_numpy()] = first.index.to_numpy()
+    return codes, positions
+
+
+def _print_form_key(
+    source: pd.Series, codes: np.ndarray, uniques: pd.Index
+) -> tuple[np.ndarray, int] | None:
+    """Tell apart values of ``source`` that compare equal but print differently.
+
+    Grouping by equality alone would match 1, 1.0 and True (or 0.0 and -0.0)
+    once, through whichever came first, but a regex value map matches
+    ``str(value)``, which differs between them. Only float columns holding
+    -0.0, and object or complex columns holding non-string values, can hold
+    such values, and only in a group that occurs more than once, so only
+    those rows are stringified.
+
+    Args:
+        source: A source column.
+        codes: ``source``'s factorize codes, with missing values at
+            ``len(uniques)``.
+        uniques: ``source``'s distinct values, from ``pd.factorize``.
+
+    Returns:
+        A key for each row and the key's number of distinct values, or None
+        when no two equal values of ``source`` print differently.
+    """
+    if source.dtype.kind == "f":
+        values = source.to_numpy(dtype=np.float64, na_value=np.nan)
+        negative_zero = (values == 0) & np.signbit(values)
+        if not negative_zero.any():
+            return None
+        return negative_zero.astype(np.intp), 2
+
+    if not (pd.api.types.is_object_dtype(source.dtype) or source.dtype.kind == "c"):
+        return None
+    if pd.api.types.infer_dtype(uniques, skipna=True) == "string":
+        return None
+    # A string equals only strings, which print as themselves, and a group of
+    # one row holds one printed form, so only rows whose group holds a
+    # non-string and repeats need their printed form. Stringifying every row
+    # of a high-cardinality numeric column cost gigabytes for nothing. The
+    # missing values' code, len(uniques), is never split.
+    repeated = np.bincount(codes, minlength=len(uniques) + 1)[: len(uniques)] > 1
+    split = repeated & np.fromiter(
+        (not isinstance(value, str) for value in uniques),
+        dtype=bool,
+        count=len(uniques),
+    )
+    if not split.any():
+        return None
+    rows = np.flatnonzero(np.append(split, False)[codes])
+
+    # Stringify in chunks, merging each chunk's distinct forms into one
+    # numbering. An object array keeps them Python strings, where
+    # Series.map(str) would convert them to the "str" dtype and make that
+    # merge slow. Not np.frompyfunc(str): a ufunc checks the FPU status flags
+    # after its loop, so a __str__ that leaves one set (CPython 3.14.9's for
+    # 1, 1.0 or True) raises a spurious "invalid value" RuntimeWarning.
+    values = source.to_numpy()
+    key = np.zeros(len(source), dtype=np.intp)
+    forms: dict[str, int] = {}
+    for start in range(0, len(rows), _PRINT_FORM_CHUNK_ROWS):
+        chunk = rows[start : start + _PRINT_FORM_CHUNK_ROWS]
+        printed = np.fromiter(map(str, values[chunk]), dtype=object, count=len(chunk))
+        chunk_codes, chunk_forms = pd.factorize(printed)
+        ids = np.fromiter(
+            (forms.setdefault(form, len(forms) + 1) for form in chunk_forms),
+            dtype=np.intp,
+            count=len(chunk_forms),
+        )
+        key[chunk] = ids[chunk_codes]
+    return key, len(forms) + 1
 
 
 @typechecked
@@ -348,6 +543,12 @@ def apply_multi_component_map(
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
 
+    Each distinct combination of source values is matched once and the result
+    broadcast to every row, so rule matching grows with the number of
+    distinct combinations rather than the number of rows. As in
+    ``apply_component_map``, values that compare equal but print differently
+    (1 and 1.0) count as distinct.
+
     Args:
         df: Source data.
         multi_component_map: MultiComponentMap with source columns, target
@@ -362,16 +563,15 @@ def apply_multi_component_map(
         KeyError: If a source column is not in ``df``.
         TypeError: If ``multi_component_map.values`` is a URN string rather
             than an embedded MultiRepresentationMap.
+        ValueError: If ``multi_component_map`` lists no source columns.
     """
-    result_df = df.copy()
-
-    source_cols = multi_component_map.source
+    source_cols = list(multi_component_map.source)
     target_col = multi_component_map.target[0]
     rep_map = multi_component_map.values
     if isinstance(rep_map, str):
-        raise _unresolved_values_error("MultiComponentMap", list(source_cols), rep_map)
+        raise _unresolved_values_error("MultiComponentMap", source_cols, rep_map)
 
-    missing_cols = [col for col in source_cols if col not in result_df.columns]
+    missing_cols = [col for col in source_cols if col not in df.columns]
     if missing_cols:
         raise KeyError(f"Missing source columns: {missing_cols}")
 
@@ -384,56 +584,32 @@ def apply_multi_component_map(
     # round-trip).
     rules.sort(key=lambda rule: _value_map_rank(rule["patterns"]))
 
-    str_cols: dict[str, pd.Series] = {}
-
-    def _stringified(col: str) -> pd.Series:
-        # Per-cell str() (not .astype("string")) keeps the exact regex
-        # semantics of the previous row-wise implementation and of
-        # apply_component_map: .astype("string") formats some dtypes
-        # differently, and array-dependently (e.g. it trims " 00:00:00"
-        # from datetime columns, but only when every value is midnight).
-        # na_action="ignore" keeps missing values missing so that na=False
-        # below treats them as non-matches and they stay unmapped.
-        if col not in str_cols:
-            str_cols[col] = result_df[col].map(str, na_action="ignore")
-        return str_cols[col]
-
-    # Build one boolean mask per rule, vectorised across the source columns,
-    # then resolve them with np.select: rules are already rank-sorted, and
-    # np.select picks the first true condition per row, so the first matching
-    # rule wins. This replaces a row-wise .apply(axis=1) so matching cost
-    # scales with the number of rules/columns instead of the number of rows.
-    n_rows = len(result_df)
-    conditions = []
-    choices = []
-    for rule in rules:
-        mask = np.ones(n_rows, dtype=bool)
-        # strict=True preserves the contract that each rule must supply one
-        # pattern per source column.
-        for col, pattern in zip(source_cols, rule["patterns"], strict=True):
-            col_series = result_df[col]
-            if pattern.startswith("regex:"):
-                regex = pattern.removeprefix("regex:")
-                col_mask = (
-                    _stringified(col)
-                    .str.fullmatch(regex, na=False)
-                    .to_numpy(dtype=bool)
-                )
-            else:
-                # fillna(False) guards nullable-boolean comparison results
-                # (e.g. the "string" dtype) so missing values never match and
-                # the conversion to a plain bool array cannot fail on pd.NA.
-                col_mask = (col_series == pattern).fillna(False).to_numpy(dtype=bool)
-            mask &= col_mask
-        conditions.append(mask)
-        choices.append(rule["target"])
-
-    if conditions:
-        result_df[target_col] = pd.Series(
-            np.select(conditions, choices, default=None), index=result_df.index
+    # Resolve each distinct combination of source values once, then broadcast
+    # back to every row by its code. Evaluating the rules over all rows
+    # instead held one row-length mask per rule, which ran out of memory on
+    # large frames. Rows with a missing value land in combinations of their
+    # own, which the rules then leave unmapped. Each source is taken as a
+    # Series, so a label that also names an index level, or appears twice in
+    # source_cols, is no problem.
+    sources = [df[col] for col in source_cols]
+    # Only a source some rule reads with a regex needs its printed forms. A
+    # rule with too few patterns is left for _resolve_multi_values to reject.
+    reads_regex = [
+        any(
+            pattern.startswith("regex:")
+            for rule in rules
+            for pattern in rule["patterns"][i : i + 1]
         )
-    else:
-        result_df[target_col] = None
+        for i in range(len(sources))
+    ]
+    codes, positions = _distinct_rows(sources, reads_regex)
+    # Gather only the source columns, one row per combination: element i of
+    # each Series belongs to the combination with code i.
+    combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]
+    resolved = _resolve_multi_values(combinations, rules)
+
+    result_df = df.copy(deep=False)
+    result_df[target_col] = pd.Series(resolved[codes], index=df.index)
 
     logger.log(
         _progress_level(verbose),
@@ -447,3 +623,68 @@ def apply_multi_component_map(
         logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
 
     return result_df
+
+
+def _resolve_multi_values(
+    combinations: list[pd.Series],
+    rules: list[dict[str, Any]],
+) -> np.ndarray:
+    """Return the first matching rule's target for each source combination.
+
+    Args:
+        combinations: One Series per source column, in the order of each
+            rule's patterns; element i of every Series forms combination i.
+        rules: Rank-sorted rules, each with ``"patterns"`` (one per source
+            column) and ``"target"``.
+
+    Returns:
+        An object array with one entry per combination, holding the matched
+        target, or None where no rule matches.
+    """
+    str_cols: dict[int, pd.Series] = {}
+
+    def _stringified(position: int) -> pd.Series:
+        # Per-cell str() (not .astype("string")) keeps the exact regex
+        # semantics of the previous row-wise implementation and of
+        # apply_component_map: .astype("string") formats some dtypes
+        # differently, and array-dependently (e.g. it trims " 00:00:00"
+        # from datetime columns, but only when every value is midnight).
+        # na_action="ignore" keeps missing values missing so that na=False
+        # below treats them as non-matches and they stay unmapped.
+        if position not in str_cols:
+            str_cols[position] = combinations[position].map(str, na_action="ignore")
+        return str_cols[position]
+
+    # Build one boolean mask per rule, vectorised across the source columns,
+    # then resolve them with np.select: rules are already rank-sorted, and
+    # np.select picks the first true condition per row, so the first matching
+    # rule wins.
+    n_rows = len(combinations[0])
+    conditions = []
+    choices = []
+    for rule in rules:
+        mask = np.ones(n_rows, dtype=bool)
+        # strict=True preserves the contract that each rule must supply one
+        # pattern per source column.
+        for position, (col_series, pattern) in enumerate(
+            zip(combinations, rule["patterns"], strict=True)
+        ):
+            if pattern.startswith("regex:"):
+                regex = pattern.removeprefix("regex:")
+                col_mask = (
+                    _stringified(position)
+                    .str.fullmatch(regex, na=False)
+                    .to_numpy(dtype=bool)
+                )
+            else:
+                # fillna(False) guards nullable-boolean comparison results
+                # (e.g. the "string" dtype) so missing values never match and
+                # the conversion to a plain bool array cannot fail on pd.NA.
+                col_mask = (col_series == pattern).fillna(False).to_numpy(dtype=bool)
+            mask &= col_mask
+        conditions.append(mask)
+        choices.append(rule["target"])
+
+    if not conditions:
+        return np.full(n_rows, None, dtype=object)
+    return np.select(conditions, choices, default=None)
