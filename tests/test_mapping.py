@@ -1,4 +1,5 @@
 import datetime
+import functools
 import logging
 import re
 from decimal import Decimal
@@ -918,6 +919,18 @@ def _row_wise_multi(columns, value_maps):
     ]
 
 
+# Every string storage pandas 3 offers. "str" is the first or the second
+# depending on whether pyarrow is installed (Databricks has it), so each is
+# named explicitly. Whatever the source's storage, Series.map() returns an
+# Arrow-backed "str" whenever pyarrow is installed.
+_STRING_DTYPES = {
+    "str-python": pd.StringDtype("python", na_value=np.nan),
+    "str-pyarrow": pd.StringDtype("pyarrow", na_value=np.nan),
+    "string-python": pd.StringDtype("python"),
+    "string-pyarrow": pd.StringDtype("pyarrow"),
+    "arrow-large-string": "large_string[pyarrow]",
+}
+
 # Built fresh per test: Series are mutable.
 _TRICKY_COLUMNS = {
     "object-numbers": lambda: pd.Series(
@@ -940,6 +953,12 @@ _TRICKY_COLUMNS = {
     "Float64-zeros": lambda: pd.Series([0.0, -0.0, 1.0, None, -0.0], dtype="Float64"),
     "float32-zeros": lambda: pd.Series([0.0, -0.0, 0.1, np.nan], dtype="float32"),
     "str": lambda: pd.Series(["COL", "BEL", None, "COL", "1"], dtype="str"),
+    **{
+        f"{name}-storage": functools.partial(
+            pd.Series, ["COL", "BEL", None, "COL", "1"], dtype=dtype
+        )
+        for name, dtype in _STRING_DTYPES.items()
+    },
     "category": lambda: pd.Series(
         pd.Categorical(["COL", "BEL", None, "COL"], categories=["BEL", "COL", "ZZZ"])
     ),
@@ -1046,6 +1065,39 @@ class TestMappingOnDistinctValues:
         df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype=dtype)
         result = apply_component_map(df, area_map)
         assert result["REF_AREA"].isna().tolist() == [False, True, False]
+
+    @pytest.fixture
+    def literal_area_map(self):
+        return self._component_map(
+            "AREA",
+            "REF_AREA",
+            [ValueMap(source="COL", target="CO"), ValueMap(source="BEL", target="BE")],
+        )
+
+    @pytest.mark.parametrize(
+        "dtype", list(_STRING_DTYPES.values()), ids=list(_STRING_DTYPES)
+    )
+    def test_apply_component_map_literal_only_across_string_storages(
+        self, literal_area_map, dtype
+    ):
+        """A literal-only result is Arrow-backed when pyarrow is installed.
+
+        Broadcasting it through pd.api.extensions.take() raised TypeError:
+        ArrowExtensionArray.take() takes no axis.
+        """
+        df = pd.DataFrame({"AREA": pd.Series(["COL", "BEL", "COL"], dtype=dtype)})
+        result = apply_component_map(df, literal_area_map)
+        assert result["REF_AREA"].tolist() == ["CO", "BE", "CO"]
+
+    @pytest.mark.parametrize(
+        "dtype", list(_STRING_DTYPES.values()), ids=list(_STRING_DTYPES)
+    )
+    def test_apply_component_map_literal_only_missing_stays_unmapped(
+        self, literal_area_map, dtype
+    ):
+        df = pd.DataFrame({"AREA": pd.Series(["COL", None, "KEN"], dtype=dtype)})
+        result = apply_component_map(df, literal_area_map)
+        assert result["REF_AREA"].isna().tolist() == [False, True, True]
 
     def test_apply_component_map_regex_result_keeps_object_dtype(self, area_map):
         df = pd.DataFrame({"AREA": ["COL", "BEL", "KEN"]})
