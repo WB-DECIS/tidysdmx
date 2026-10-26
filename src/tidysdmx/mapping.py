@@ -332,10 +332,13 @@ def apply_component_map(
     )
 
     # dtype= keeps the resolved dtype: an object result (the regex path) would
-    # otherwise be re-inferred as "str" when rebuilt from a NumPy array.
+    # otherwise be re-inferred as "str" when rebuilt from a NumPy array. The
+    # array's own take(), not pd.api.extensions.take(): without allow_fill that
+    # passes axis=, which Arrow-backed arrays (pandas 3's "str" whenever pyarrow
+    # is installed) reject. codes hold no -1, so nothing needs filling.
     result_df = df.copy(deep=False)
     result_df[target_col] = pd.Series(
-        pd.api.extensions.take(resolved.array, codes),
+        resolved.array.take(codes),
         index=df.index,
         dtype=resolved.dtype,
     )
