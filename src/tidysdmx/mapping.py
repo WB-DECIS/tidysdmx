@@ -325,7 +325,8 @@ def apply_component_map(
     # instead of a Python-level regex call per row. Missing values form a
     # group of their own, which stays unmapped.
     source = df[source_col]
-    codes, positions = _distinct_rows([source])
+    reads_regex = any(vm.source.startswith("regex:") for vm in rep_map.maps)
+    codes, positions = _distinct_rows([source], [reads_regex])
     literal_mapping, regex_maps, resolved = _resolve_component_values(
         source.iloc[positions].reset_index(drop=True), rep_map
     )
@@ -404,16 +405,21 @@ def _resolve_component_values(
     return literal_mapping, regex_maps, mapped
 
 
-def _distinct_rows(sources: Sequence[pd.Series]) -> tuple[np.ndarray, np.ndarray]:
+def _distinct_rows(
+    sources: Sequence[pd.Series], split_print_forms: Sequence[bool] | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """Number the distinct combinations of source values, row by row.
 
-    Values are grouped by equality and, where equal values can print
-    differently, by printed form too, since a regex value map matches
-    ``str(value)`` (see ``_print_form_key``). All missing values of a source
-    form one group.
+    Values are grouped by equality and, for a source a regex value map reads,
+    by printed form too, since a regex matches ``str(value)`` and equal values
+    can print differently (see ``_print_form_key``). Literal value maps match
+    equal values alike, so a source only literal maps read skips that pass.
+    All missing values of a source form one group.
 
     Args:
         sources: The source columns, aligned row by row.
+        split_print_forms: For each source, whether a regex value map reads
+            it. None treats every source as read by a regex.
 
     Returns:
         ``codes``, numbering each row's combination densely from 0, and
@@ -423,12 +429,14 @@ def _distinct_rows(sources: Sequence[pd.Series]) -> tuple[np.ndarray, np.ndarray
     Raises:
         ValueError: If ``sources`` is empty.
     """
+    if split_print_forms is None:
+        split_print_forms = [True] * len(sources)
     codes: np.ndarray | None = None
-    for source in sources:
+    for source, split in zip(sources, split_print_forms, strict=True):
         value_codes, uniques = pd.factorize(source)
         value_codes[value_codes < 0] = len(uniques)
         keys = [(value_codes, len(uniques) + 1)]
-        print_form = _print_form_key(source, value_codes, uniques)
+        print_form = _print_form_key(source, value_codes, uniques) if split else None
         if print_form is not None:
             keys.append(print_form)
         for key, n_keys in keys:
@@ -453,7 +461,8 @@ def _print_form_key(
     once, through whichever came first, but a regex value map matches
     ``str(value)``, which differs between them. Only float columns holding
     -0.0, and object or complex columns holding non-string values, can hold
-    such values.
+    such values, and only in a group that occurs more than once, so only
+    those rows are stringified.
 
     Args:
         source: A source column.
@@ -476,14 +485,19 @@ def _print_form_key(
         return None
     if pd.api.types.infer_dtype(uniques, skipna=True) == "string":
         return None
-    # A string equals only strings, which print as themselves, so only rows
-    # whose group holds a non-string need their printed form. The missing
-    # values' code, len(uniques), is never split.
-    split = np.fromiter(
+    # A string equals only strings, which print as themselves, and a group of
+    # one row holds one printed form, so only rows whose group holds a
+    # non-string and repeats need their printed form. Stringifying every row
+    # of a high-cardinality numeric column cost gigabytes for nothing. The
+    # missing values' code, len(uniques), is never split.
+    repeated = np.bincount(codes, minlength=len(uniques) + 1)[: len(uniques)] > 1
+    split = repeated & np.fromiter(
         (not isinstance(value, str) for value in uniques),
         dtype=bool,
         count=len(uniques),
     )
+    if not split.any():
+        return None
     rows = np.flatnonzero(np.append(split, False)[codes])
 
     # Stringify in chunks, merging each chunk's distinct forms into one
@@ -578,7 +592,17 @@ def apply_multi_component_map(
     # Series, so a label that also names an index level, or appears twice in
     # source_cols, is no problem.
     sources = [df[col] for col in source_cols]
-    codes, positions = _distinct_rows(sources)
+    # Only a source some rule reads with a regex needs its printed forms. A
+    # rule with too few patterns is left for _resolve_multi_values to reject.
+    reads_regex = [
+        any(
+            pattern.startswith("regex:")
+            for rule in rules
+            for pattern in rule["patterns"][i : i + 1]
+        )
+        for i in range(len(sources))
+    ]
+    codes, positions = _distinct_rows(sources, reads_regex)
     # Gather only the source columns, one row per combination: element i of
     # each Series belongs to the combination with code i.
     combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]

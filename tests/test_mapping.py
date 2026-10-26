@@ -1433,6 +1433,110 @@ class TestDistinctRows:
         values = pd.Series([flagged, 1, flagged], dtype=object)
         assert self._first_rows([values]) == [0, 1, 0]
 
+    def test_distinct_rows_keeps_equal_values_together_without_regex(self):
+        """Literal rules match equal values alike, so print forms are not split."""
+        values = pd.Series([1, 1.0, True, 1.0], dtype=object)
+        codes, positions = mapping_module._distinct_rows([values], [False])
+        assert positions[codes].tolist() == [0, 0, 0, 0]
+
+    def test_print_form_key_ignores_values_that_occur_once(self):
+        """A value seen once cannot share its group with another printed form."""
+        values = pd.Series([1, 2.5, 3, 7], dtype=object)
+        codes, uniques = pd.factorize(values)
+        assert mapping_module._print_form_key(values, codes, uniques) is None
+
+    def test_print_form_key_splits_only_repeated_groups(self):
+        values = pd.Series([1, 1.0, 2, 3.5], dtype=object)
+        codes, uniques = pd.factorize(values)
+        key, _ = mapping_module._print_form_key(values, codes, uniques)
+        assert (key[0] != key[1], key[2] == key[3] == 0) == (True, True)
+
+
+class TestPrintFormsOnlyForRegex:
+    """Print forms are computed only for sources that a regex pattern reads."""
+
+    @staticmethod
+    def _spy(monkeypatch):
+        calls = []
+        original = mapping_module._print_form_key
+
+        def spy(source, codes, uniques):
+            calls.append(source.name)
+            return original(source, codes, uniques)
+
+        monkeypatch.setattr(mapping_module, "_print_form_key", spy)
+        return calls
+
+    @staticmethod
+    def _rep_map(sources):
+        return RepresentationMap(
+            id="RM",
+            name="RM",
+            agency="WB",
+            source="urn:x",
+            target="urn:y",
+            maps=[ValueMap(source=s, target="T") for s in sources],
+        )
+
+    @staticmethod
+    def _multi_map(patterns):
+        return MultiComponentMap(
+            source=["CODE", "NOTE"],
+            target=["OUT"],
+            values=MultiRepresentationMap(
+                id="MRM",
+                name="MRM",
+                agency="WB",
+                source=["urn:x", "urn:x2"],
+                target=["urn:y"],
+                maps=[MultiValueMap(source=list(p), target=["T"]) for p in patterns],
+            ),
+        )
+
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame(
+            {
+                "CODE": pd.Series([1, 1.0, True, 2], dtype=object),
+                "NOTE": pd.Series([1, 1.0, 1, 1], dtype=object),
+            }
+        )
+
+    def test_apply_component_map_literal_only_skips_print_forms(self, df, monkeypatch):
+        calls = self._spy(monkeypatch)
+        cmap = ComponentMap(source="CODE", target="OUT", values=self._rep_map(["1"]))
+        apply_component_map(df, cmap)
+        assert calls == []
+
+    def test_apply_component_map_regex_computes_print_forms(self, df, monkeypatch):
+        calls = self._spy(monkeypatch)
+        cmap = ComponentMap(
+            source="CODE", target="OUT", values=self._rep_map(["1", "regex:1.*"])
+        )
+        apply_component_map(df, cmap)
+        assert calls == ["CODE"]
+
+    def test_apply_multi_component_map_literal_only_skips_print_forms(
+        self, df, monkeypatch
+    ):
+        calls = self._spy(monkeypatch)
+        apply_multi_component_map(df, self._multi_map([("1", "1")]))
+        assert calls == []
+
+    def test_apply_multi_component_map_splits_only_regex_positions(
+        self, df, monkeypatch
+    ):
+        calls = self._spy(monkeypatch)
+        apply_multi_component_map(df, self._multi_map([("1", "regex:1.*")]))
+        assert calls == ["NOTE"]
+
+    def test_apply_multi_component_map_regex_position_still_splits(self, df):
+        """1 and 1.0 still match a regex separately at a regex position."""
+        result = apply_multi_component_map(
+            df, self._multi_map([("regex:.*", "regex:1")])
+        )
+        assert result["OUT"].isna().tolist() == [False, True, False, False]
+
 
 class TestRequirePandas3:
     """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""
