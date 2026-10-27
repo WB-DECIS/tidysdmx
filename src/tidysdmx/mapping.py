@@ -285,9 +285,11 @@ def apply_component_map(
 ) -> pd.DataFrame:
     """Apply a single ComponentMap with a RepresentationMap to a DataFrame.
 
-    Missing source values (NaN/None) remain unmapped: they are never matched
-    by regex value maps or the catch-all (``"regex:.*"``) and yield NaN in the
-    target column.
+    Missing source values (NaN/None) are matched only by the catch-all
+    (``"regex:.*"``, the COMP_MAPPING ``DEFAULT_VALUE``), never by a literal
+    or any other regex value map. With a catch-all they take its target, and
+    a warning reports how many did; without one they yield NaN in the target
+    column.
 
     Each distinct source value is matched once and the result broadcast to
     every row, so value-map matching grows with the number of distinct values
@@ -323,7 +325,7 @@ def apply_component_map(
     # to every row by its code: matching then costs a few hashing passes over
     # the rows plus work proportional to the number of distinct values,
     # instead of a Python-level regex call per row. Missing values form a
-    # group of their own, which stays unmapped.
+    # group of their own, which only the catch-all maps.
     source = df[source_col]
     reads_regex = any(vm.source.startswith("regex:") for vm in rep_map.maps)
     codes, positions = _distinct_rows([source], [reads_regex])
@@ -351,6 +353,15 @@ def apply_component_map(
         target_col,
         n_pairs,
     )
+    default = _catch_all_target(regex_maps)
+    n_missing = source.isna().sum()
+    if default is not None and n_missing > 0:
+        logger.warning(
+            "%d missing source value(s) in '%s' assigned the default '%s'.",
+            n_missing,
+            source_col,
+            default,
+        )
     unmapped = result_df[target_col].isna().sum()
     if unmapped > 0:
         logger.warning("%d values could not be mapped (set to NaN).", unmapped)
@@ -365,8 +376,8 @@ def _resolve_component_values(
 
     Literal (exact) value maps are applied first via a vectorised lookup and
     always win. Values left unmapped then fall through to the regex value maps,
-    with any catch-all (``"regex:.*"``) evaluated last. Missing values are never
-    matched by a regex.
+    with any catch-all (``"regex:.*"``) evaluated last. Missing values are
+    matched by the catch-all alone, never by a literal or another regex.
 
     Args:
         values: The source values to map, typically the distinct values of a
@@ -398,14 +409,30 @@ def _resolve_component_values(
                     return vm.target
             return None
 
-        # Missing source values stay unmapped: str(NaN) is "nan", which a
-        # regex (especially the catch-all "regex:.*") would otherwise match.
+        # Missing source values skip the regex pass: str(NaN) is "nan", which
+        # a regex such as "regex:n.*" would otherwise match.
         unmatched = mapped.isna() & values.notna()
         if unmatched.any():
             mapped = mapped.astype(object)
             mapped.loc[unmatched] = values.loc[unmatched].map(_regex_target)
 
+        # The catch-all (DEFAULT_VALUE) means "anything not listed", so it
+        # covers missing source values too.
+        default = _catch_all_target(regex_maps)
+        missing = values.isna()
+        if default is not None and missing.any():
+            mapped = mapped.astype(object)
+            mapped.loc[missing] = default
+
     return literal_mapping, regex_maps, mapped
+
+
+def _catch_all_target(regex_maps: Sequence[ValueMap]) -> str | None:
+    """Return the target of the first catch-all (``"regex:.*"``) value map."""
+    return next(
+        (vm.target for vm in regex_maps if _value_map_rank([vm.source]) == 2),
+        None,
+    )
 
 
 def _distinct_rows(
@@ -539,9 +566,11 @@ def apply_multi_component_map(
     matching rule wins. Patterns prefixed with ``"regex:"`` must match the full
     stringified value (``Series.str.fullmatch``).
 
-    Rows with a missing value (NaN/None) in any source column remain
-    unmapped: they are never matched by any rule (including the catch-all)
-    and yield NaN in the target column.
+    Rows with a missing value (NaN/None) in any source column are matched
+    only by the pure catch-all (the COMP_MAPPING ``DEFAULT_VALUE``), never by
+    a literal or partially-regex rule. With a catch-all they take its target,
+    and a warning reports how many did; without one they yield NaN in the
+    target column.
 
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
@@ -591,7 +620,7 @@ def apply_multi_component_map(
     # back to every row by its code. Evaluating the rules over all rows
     # instead held one row-length mask per rule, which ran out of memory on
     # large frames. Rows with a missing value land in combinations of their
-    # own, which the rules then leave unmapped. Each source is taken as a
+    # own, which only the catch-all maps. Each source is taken as a
     # Series, so a label that also names an index level, or appears twice in
     # source_cols, is no problem.
     sources = [df[col] for col in source_cols]
@@ -621,6 +650,20 @@ def apply_multi_component_map(
         target_col,
         len(rules),
     )
+    default = next(
+        (rule["target"] for rule in rules if _value_map_rank(rule["patterns"]) == 2),
+        None,
+    )
+    if default is not None:
+        n_missing = np.logical_or.reduce([s.isna().to_numpy() for s in sources]).sum()
+        if n_missing > 0:
+            logger.warning(
+                "%d row(s) with a missing source value in %s assigned the "
+                "default '%s'.",
+                n_missing,
+                source_cols,
+                default,
+            )
     unmapped = result_df[target_col].isna().sum()
     if unmapped > 0:
         logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
@@ -653,7 +696,7 @@ def _resolve_multi_values(
         # differently, and array-dependently (e.g. it trims " 00:00:00"
         # from datetime columns, but only when every value is midnight).
         # na_action="ignore" keeps missing values missing so that na=False
-        # below treats them as non-matches and they stay unmapped.
+        # below treats them as non-matches; only the catch-all maps them.
         if position not in str_cols:
             str_cols[position] = combinations[position].map(str, na_action="ignore")
         return str_cols[position]
@@ -667,6 +710,9 @@ def _resolve_multi_values(
     choices = []
     for rule in rules:
         mask = np.ones(n_rows, dtype=bool)
+        # The catch-all (DEFAULT_VALUE) means "anything not listed", so it also
+        # matches a missing value, which every other rule skips.
+        catch_all = _value_map_rank(rule["patterns"]) == 2
         # strict=True preserves the contract that each rule must supply one
         # pattern per source column.
         for position, (col_series, pattern) in enumerate(
@@ -679,6 +725,9 @@ def _resolve_multi_values(
                     .str.fullmatch(regex, na=False)
                     .to_numpy(dtype=bool)
                 )
+                if catch_all:
+                    # Not |=: under Copy-on-Write to_numpy() can be read-only.
+                    col_mask = col_mask | col_series.isna().to_numpy(dtype=bool)
             else:
                 # fillna(False) guards nullable-boolean comparison results
                 # (e.g. the "string" dtype) so missing values never match and
