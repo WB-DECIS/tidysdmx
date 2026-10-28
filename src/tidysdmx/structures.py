@@ -306,8 +306,9 @@ def build_value_map_list(
             Defaults to "valid_to".
         default_value: Optional catch-all target value. When provided, a final
             ValueMap with source ``"regex:.*"`` is appended so that source
-            values not listed in the DataFrame resolve to this value instead of
-            remaining unmapped. Defaults to None (no catch-all).
+            values not listed in the DataFrame, and missing (NaN/None) source
+            values, resolve to this value instead of remaining unmapped.
+            Defaults to None (no catch-all).
 
     Returns:
         List of ValueMap objects created from the DataFrame.
@@ -393,9 +394,9 @@ def build_multi_value_map_list(  # noqa: C901 - column/validity handling; splits
             Defaults to "valid_to".
         default_value: Optional catch-all target value. When provided, a final
             MultiValueMap with source ``"regex:.*"`` for every source component
-            is appended so that source-value tuples not listed in the DataFrame
-            resolve to this value instead of remaining unmapped. Defaults to
-            None (no catch-all).
+            is appended so that source-value tuples not listed in the DataFrame,
+            and tuples with a missing (NaN/None) value, resolve to this value
+            instead of remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         List of MultiValueMap objects created from the DataFrame.
@@ -528,8 +529,9 @@ def build_representation_map(
             Defaults to "valid_to".
         generate_urn: If True, automatically generate URN. Defaults to True.
         default_value: Optional catch-all target value. When provided, source
-            values not listed in the DataFrame resolve to this value instead of
-            remaining unmapped. Defaults to None (no catch-all).
+            values not listed in the DataFrame, and missing (NaN/None) source
+            values, resolve to this value instead of remaining unmapped.
+            Defaults to None (no catch-all).
 
     Returns:
         A RepresentationMap object containing the mappings.
@@ -628,9 +630,9 @@ def build_multi_representation_map(
         generate_urn: If True and ``id`` is provided, generate a URN for the
             MultiRepresentationMap. Defaults to True.
         default_value: Optional catch-all target value. When provided,
-            source-value tuples not listed in the DataFrame resolve to this
-            value instead of remaining unmapped. Defaults to None (no
-            catch-all).
+            source-value tuples not listed in the DataFrame, and tuples with a
+            missing (NaN/None) value, resolve to this value instead of
+            remaining unmapped. Defaults to None (no catch-all).
 
     Returns:
         The constructed MultiRepresentationMap object.
@@ -752,8 +754,9 @@ def build_single_component_map(
         generate_urn: If True, generate URN for the RepresentationMap.
             Defaults to True.
         default_value: Optional catch-all target value. When provided, source
-            values not listed in the DataFrame resolve to this value instead of
-            remaining unmapped. Defaults to None (no catch-all).
+            values not listed in the DataFrame, and missing (NaN/None) source
+            values, resolve to this value instead of remaining unmapped.
+            Defaults to None (no catch-all).
 
     Returns:
         A ComponentMap object mapping the source to the target component.
@@ -868,8 +871,9 @@ def build_multi_component_map(
         generate_urn: If True and ``id`` is provided, generate a URN for the
             underlying MultiRepresentationMap. Defaults to True.
         default_value: Optional catch-all target value. When provided,
-            source-value tuples not listed in ``df`` resolve to this value
-            instead of remaining unmapped. Defaults to None (no catch-all).
+            source-value tuples not listed in ``df``, and tuples with a missing
+            (NaN/None) value, resolve to this value instead of remaining
+            unmapped. Defaults to None (no catch-all).
 
     Returns:
         A MultiComponentMap mapping the source components to the target(s).

@@ -287,8 +287,8 @@ class TestApplyComponentMap:
         result = apply_component_map(df, cm)
         assert list(result["REGION"]) == ["EU", "_Z"]
 
-    def test_na_source_not_caught_by_catch_all(self):
-        """Missing source values stay NaN instead of receiving the default."""
+    def test_missing_source_gets_default(self):
+        """Missing source values receive the catch-all (DEFAULT_VALUE) target."""
         cm = self._component_map_with_catch_all(
             [
                 ValueMap(source="FR", target="EU"),
@@ -298,8 +298,36 @@ class TestApplyComponentMap:
         df = pd.DataFrame({"AREA": ["FR", np.nan, None]})
 
         result = apply_component_map(df, cm)
-        assert result["REGION"].iloc[0] == "EU"
-        assert result["REGION"].iloc[1:].isna().all()
+        assert list(result["REGION"]) == ["EU", "_Z", "_Z"]
+
+    def test_missing_source_skips_non_catch_all_regex(self):
+        """A missing value is not matched as "nan" by a narrower regex."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="regex:n.*", target="N_"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["nl", np.nan]})
+
+        result = apply_component_map(df, cm)
+        assert list(result["REGION"]) == ["N_", "_Z"]
+
+    def test_missing_source_default_logs_warning(self, caplog):
+        """A warning counts the missing source values given the default."""
+        cm = self._component_map_with_catch_all(
+            [
+                ValueMap(source="FR", target="EU"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["FR", np.nan, None, "BR"]})
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, cm)
+        assert "2 missing source value(s) in 'AREA' assigned the default '_Z'." in (
+            caplog.messages
+        )
 
 
 # Only the tests that use the ifpri_asti_sm cassette are integration-marked
@@ -410,8 +438,8 @@ class TestApplyMultiComponentMap:
         result = apply_multi_component_map(df, mcm)
         assert list(result["URBANISATION"]) == ["RUR", "_Z"]
 
-    def test_na_source_not_caught_by_catch_all(self):
-        """Rows with any missing source value stay NaN, bypassing the catch-all."""
+    def test_missing_source_gets_default(self):
+        """Rows with any missing source value receive the catch-all target."""
         mcm = self._multi_map_with_catch_all(
             [
                 MultiValueMap(source=["COL", "one"], target=["RUR"]),
@@ -423,8 +451,75 @@ class TestApplyMultiComponentMap:
         )
 
         result = apply_multi_component_map(df, mcm)
-        assert result["URBANISATION"].iloc[0] == "RUR"
-        assert result["URBANISATION"].iloc[1:].isna().all()
+        assert list(result["URBANISATION"]) == ["RUR", "_Z", "_Z"]
+
+    def test_missing_source_skips_partial_regex(self):
+        """A rule that is only partly "regex:.*" does not match a missing value."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["regex:.*", "one"], target=["ANY1"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": ["COL", np.nan], "NOTE": ["one", "one"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert list(result["URBANISATION"]) == ["ANY1", "_Z"]
+
+    def test_missing_source_without_catch_all_stays_none(self):
+        """Without a catch-all, rows with a missing source value stay unmapped."""
+        mcm = self._multi_map_with_catch_all(
+            [MultiValueMap(source=["regex:.*", "one"], target=["ANY1"])]
+        )
+        df = pd.DataFrame({"AREA": ["COL", np.nan], "NOTE": ["one", "one"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert _as_list(result["URBANISATION"]) == ["ANY1", None]
+
+    def test_missing_source_default_logs_warning(self, caplog):
+        """A warning counts the rows with a missing source given the default."""
+        mcm = self._multi_map_with_catch_all(
+            [
+                MultiValueMap(source=["COL", "one"], target=["RUR"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"]),
+            ]
+        )
+        df = pd.DataFrame(
+            {"AREA": ["COL", np.nan, "XYZ", None], "NOTE": ["one", "one", None, None]}
+        )
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, mcm)
+        assert (
+            "3 row(s) with a missing source value in ['AREA', 'NOTE'] assigned "
+            "the default '_Z'." in caplog.messages
+        )
+
+    def test_catch_all_still_fullmatches_present_values(self):
+        """Only missing values bypass the regex; present ones are still matched.
+
+        "regex:.*" does not fullmatch a value holding a newline, in
+        apply_component_map and here alike.
+        """
+        mcm = self._multi_map_with_catch_all(
+            [MultiValueMap(source=["regex:.*", "regex:.*"], target=["_Z"])]
+        )
+        df = pd.DataFrame({"AREA": ["a\nb", None], "NOTE": ["one", "one"]})
+
+        result = apply_multi_component_map(df, mcm)
+        assert _as_list(result["URBANISATION"]) == [None, "_Z"]
+
+    def test_short_catch_all_rule_still_rejected(self):
+        """An all-"regex:.*" rule with too few patterns is malformed, not a default.
+
+        pysdmx refuses to build such a MultiRepresentationMap, so the rule is
+        handed to the resolver directly.
+        """
+        combinations = [pd.Series(["COL"]), pd.Series(["one"])]
+        rules = [{"patterns": ["regex:.*"], "target": "_Z"}]
+
+        with pytest.raises(ValueError, match="zip"):
+            mapping_module._resolve_multi_values(combinations, rules)
 
     def test_all_unmapped_values_are_none(self):
         """Rows matching no rule yield None when there is no catch-all."""
@@ -836,6 +931,43 @@ class TestMapStructuresSourceIsolation:
         pd.testing.assert_frame_equal(metric_df, original)
 
 
+class TestMapStructuresTemplateDefaultValue:
+    """COMP_MAPPING's DEFAULT_VALUE reaches missing source values end to end."""
+
+    @pytest.fixture
+    def structure_map(self):
+        mappings = {
+            "INFO": pd.DataFrame({"Key": ["dataflow"], "Value": ["WB:DF_GEM(1.0)"]}),
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["AREA", "FREQ|AREA"],
+                    "TARGET": ["REF_AREA", "INDICATOR"],
+                    "MAPPING_RULES": ["representation", "multi_representation"],
+                    "DEFAULT_VALUE": ["_Z", "_X"],
+                }
+            ),
+            "REP_MAPPING": pd.DataFrame(
+                {
+                    "S:AREA": ["FR", "DE"],
+                    "T:REF_AREA": ["FRA", "DEU"],
+                    "S:FREQ": ["A", "Q"],
+                    "T:INDICATOR": ["GDP_A", "GDP_Q"],
+                }
+            ),
+        }
+        return build_structure_map_from_template_wb(mappings)
+
+    def test_map_structures_missing_source_gets_default_value(self, structure_map):
+        df = pd.DataFrame(
+            {"AREA": ["FR", None, "BR", "DE"], "FREQ": ["A", "A", "A", None]}
+        )
+
+        result = map_structures(df, structure_map)
+
+        assert result["REF_AREA"].tolist() == ["FRA", "_Z", "_Z", "DEU"]
+        assert result["INDICATOR"].tolist() == ["GDP_A", "_X", "_X", "_X"]
+
+
 # region row-wise oracle
 # The pre-branch implementations matched every row on its own. These helpers
 # restate their rules row by row, with no grouping at all, so the
@@ -879,11 +1011,16 @@ def _row_wise_component(column, value_maps):
         (vm for vm in value_maps if vm.source.startswith("regex:")),
         key=lambda vm: _rank([vm.source]),
     )
+    # Only the catch-all (DEFAULT_VALUE) maps a missing value.
+    default = next((vm.target for vm in regexes if _rank([vm.source]) == 2), None)
     result = []
     for value, literal in zip(
         column.tolist(), _as_list(column.map(literals)), strict=True
     ):
-        if literal is not None or pd.isna(value):
+        if pd.isna(value):
+            result.append(default)
+            continue
+        if literal is not None:
             result.append(literal)
             continue
         result.append(
@@ -902,8 +1039,17 @@ def _row_wise_component(column, value_maps):
 def _row_wise_multi(columns, value_maps):
     """Apply apply_multi_component_map's rules to each row of ``columns`` alone."""
     rules = sorted(value_maps, key=lambda mv: _rank(mv.source))
+    # The catch-all (DEFAULT_VALUE) also matches a missing value.
     hits = [
-        [_row_wise_matches(c, p) for c, p in zip(columns, mv.source, strict=True)]
+        [
+            [
+                hit or (_rank(mv.source) == 2 and missing)
+                for hit, missing in zip(
+                    _row_wise_matches(c, p), c.isna().tolist(), strict=True
+                )
+            ]
+            for c, p in zip(columns, mv.source, strict=True)
+        ]
         for mv in rules
     ]
     return [
@@ -1061,10 +1207,10 @@ class TestMappingOnDistinctValues:
         assert result["REF_AREA"].tolist() == ["CO", "B_", "CO", "_Z", "B_"]
 
     @pytest.mark.parametrize("dtype", ["str", "object", "category"])
-    def test_apply_component_map_missing_source_stays_unmapped(self, area_map, dtype):
+    def test_apply_component_map_missing_source_gets_catch_all(self, area_map, dtype):
         df = pd.DataFrame({"AREA": ["COL", None, "BEL"]}, dtype=dtype)
         result = apply_component_map(df, area_map)
-        assert result["REF_AREA"].isna().tolist() == [False, True, False]
+        assert result["REF_AREA"].tolist() == ["CO", "_Z", "B_"]
 
     @pytest.fixture
     def literal_area_map(self):
@@ -1227,15 +1373,17 @@ class TestMappingOnDistinctValues:
         ]
 
     @pytest.mark.parametrize("dtype", ["str", "object", "category"])
-    def test_apply_multi_component_map_missing_value_stays_unmapped(
+    def test_apply_multi_component_map_missing_value_gets_catch_all(
         self, urbanisation_map, dtype
     ):
+        # ("BEL", None) takes the catch-all's "_T", not "B_": the partly-regex
+        # rule ["regex:B.*", "regex:.*"] never matches a missing value.
         df = pd.DataFrame(
             {"AREA": ["COL", None, "BEL", "COL"], "NOTE": ["one", "one", None, "one"]},
             dtype=dtype,
         )
         result = apply_multi_component_map(df, urbanisation_map)
-        assert result["URBANISATION"].isna().tolist() == [False, True, True, False]
+        assert result["URBANISATION"].tolist() == ["CO1", "_T", "_T", "CO1"]
 
     def test_apply_multi_component_map_keeps_row_index(self, urbanisation_map):
         df = pd.DataFrame(

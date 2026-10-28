@@ -182,7 +182,7 @@ write_excel_mapping_template(
 
 The writer emits a legacy layout: `build_excel_workbook` (which `write_excel_mapping_template` saves) produces a lowercase `comp_mapping` sheet with `source` / `target` / `mapping_rules` columns, plus one tab per `rep_maps` entry with `source` / `target` / `valid_from` / `valid_to` headers. The reader, `build_structure_map_from_template_wb` (via `_validate_mapping_template_wb`), requires `INFO`, `COMP_MAPPING` and `REP_MAPPING` sheets and fails with `Missing required sheet` for all three. There is no working write→read round trip today; a workbook the reader accepts has to be laid out by hand in the format below.
 
-The format the reader accepts has an `INFO` sheet (key/value metadata such as the agency), a `COMP_MAPPING` sheet (`SOURCE` / `TARGET` / `MAPPING_RULES` columns, plus optional `SOURCE_CL` / `TARGET_CL` / `DEFAULT_VALUE`; `MAPPING_RULES` accepts `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
+The format the reader accepts has an `INFO` sheet (key/value metadata such as the agency), a `COMP_MAPPING` sheet (`SOURCE` / `TARGET` / `MAPPING_RULES` columns, plus optional `SOURCE_CL` / `TARGET_CL` / `DEFAULT_VALUE`, the last a `regex:.*` catch-all target for source values that are unlisted or missing; `MAPPING_RULES` accepts `"implicit"`, `"fixed:<VALUE>"`, `"representation"`, or `"multi_representation"`) and a `REP_MAPPING` sheet holding value-level mappings (source columns prefixed `S:`, target columns prefixed `T:`).
 
 For a **single** coded component, use `"representation"` with one component ID in `SOURCE`:
 
