@@ -73,7 +73,8 @@ commands, and update the `Makefile` rather than inventing new invocations.
 - `make bench` — benchmark `map_structures`: working tree vs the last 3 releases
   (`BENCH_ARGS="--sizes 1000 10000 --baselines 1"` for a quick run)
 - `make bench-pipeline` — generate mock WB_IDS bronze data (`WB_IDS_ROWS`, default 1M)
-  and time + memory-profile the whole WB template pipeline on it
+  and time + memory-profile the whole WB template pipeline on it;
+  `PIPELINE_ARGS="--chunk-rows 5000000 --skip-unused --categories"` runs it chunked
 
 Single test: `uv run python -m pytest -k test_name -v`
 
