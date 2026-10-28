@@ -1,5 +1,6 @@
 """Filter SDMX DataFrames against schema codelist constraints."""
 
+import numpy as np
 import pandas as pd
 from pysdmx.model import Schema
 from typeguard import typechecked
@@ -14,8 +15,10 @@ def filter_rows(
 ) -> pd.DataFrame:
     """Filter out rows where values are not in the allowed codelist.
 
-    Compares as strings but does not change DataFrame dtypes.
-    Does not mutate the input DataFrame.
+    Compares as strings but does not change DataFrame dtypes. Only the
+    distinct values of a column are compared, so a column costs its number
+    of distinct values rather than its rows. Does not mutate the input
+    DataFrame.
 
     Args:
         df: The input DataFrame.
@@ -27,15 +30,19 @@ def filter_rows(
     if not codelist_ids:
         return df.copy()
 
-    rows_to_drop = pd.Series(False, index=df.index)
+    rows_to_drop = np.zeros(len(df), dtype=bool)
 
     for col, allowed in codelist_ids.items():
         if col not in df.columns:
             continue
         allowed_str = set(map(str, allowed))
-        col_as_str = df[col].astype(str)
-        unselected_mask = ~col_as_str.isin(allowed_str) & df[col].notna()
-        rows_to_drop |= unselected_mask
+        # Judge each distinct value once, then look the verdicts up by row.
+        codes, uniques = pd.factorize(df[col])
+        allowed_unique = pd.Series(uniques).astype(str).isin(allowed_str).to_numpy()
+        present = codes >= 0  # a missing value (code -1) is never dropped
+        unselected = np.zeros(len(df), dtype=bool)
+        unselected[present] = ~allowed_unique[codes[present]]
+        rows_to_drop |= unselected
 
     return df.loc[~rows_to_drop].copy()
 

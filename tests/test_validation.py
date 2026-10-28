@@ -1,7 +1,10 @@
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
+from typeguard import TypeCheckError
 
 from tidysdmx.validation import (
+    DatasetValidator,
     validate_codelist_ids,
     validate_columns,
     validate_dataset_local,
@@ -577,3 +580,235 @@ class TestValidateDatasetLocal:
         )
         with pytest.warns(FutureWarning, match="`valid` argument"):
             validate_dataset_local(df, valid=valid_info)
+
+
+class TestValidationOnDistinctValues:
+    """The value checks judge each distinct value once; the reports are unchanged."""
+
+    def test_validate_codelist_ids_compares_an_int_column_as_text(self):
+        df = pd.DataFrame({"TIME_PERIOD": [2020, 2021, 2020]})
+        validate_codelist_ids(df, {"TIME_PERIOD": ["2020", "2021"]})
+        with pytest.raises(ValueError, match=r"'TIME_PERIOD': 2021"):
+            validate_codelist_ids(df, {"TIME_PERIOD": ["2020"]})
+
+    def test_validate_codelist_ids_reports_a_missing_value_as_nan(self):
+        df = pd.DataFrame({"INDICATOR": ["IND1", None]})
+        with pytest.raises(ValueError, match=r"'INDICATOR': nan"):
+            validate_codelist_ids(df, {"INDICATOR": ["IND1"]})
+
+    def test_validate_codelist_ids_keeps_first_appearance_order(self):
+        df = pd.DataFrame({"CODE": ["B", "A", "B", "C", "A"]})
+        with pytest.raises(ValueError, match=r"'CODE': B\n  'CODE': A\n  'CODE': C"):
+            validate_codelist_ids(df, {"CODE": ["Z"]})
+
+    def test_validate_codelist_ids_reports_a_categorical_by_its_values(self):
+        """An unused category is not a value, so it is not a violation."""
+        df = pd.DataFrame(
+            {"CODE": pd.Categorical(["A", "A"], categories=["A", "UNUSED"])}
+        )
+        validate_codelist_ids(df, {"CODE": ["A"]})
+
+    def test_validate_no_missing_values_lists_the_index_labels(self):
+        df = pd.DataFrame({"col1": [1, None]}, index=[10, 11])
+        with pytest.raises(ValueError, match=r"Found 1 row\(s\)[^\n]*\n[^\n]*\n11 "):
+            validate_no_missing_values(df, mandatory_columns=["col1"])
+
+    def test_validate_duplicates_lists_each_key_once(self):
+        df = pd.DataFrame({"K": ["a", "a", "a", "b"], "V": [1, 2, 3, 4]})
+        with pytest.raises(
+            ValueError, match=r"Found 3 duplicate rows across 1 key combination"
+        ):
+            validate_duplicates(df, dim_comp=["K"])
+
+    def test_validate_duplicates_truncates_at_max_errors(self):
+        df = pd.DataFrame({"K": ["a", "a", "b", "b"], "V": [1, 2, 3, 4]})
+        with pytest.raises(ValueError, match=r"… and 1 more \(max_errors=1\)"):
+            validate_duplicates(df, dim_comp=["K"], max_errors=1)
+
+
+class TestDatasetValidator:
+    """DatasetValidator accumulates validate_dataset_local's checks over chunks."""
+
+    @staticmethod
+    def _frame(**overrides):
+        """A frame valid against the ``sdmx_schema`` fixture, with overrides."""
+        data = {
+            "STRUCTURE": ["dataflow"] * 4,
+            "STRUCTURE_ID": ["tidysdmx:tx1(1.0)"] * 4,
+            "ACTION": ["I"] * 4,
+            "INDICATOR": ["IND1", "IND1", "IND3", "IND3"],
+            "TIME_PERIOD": ["2020", "2021", "2020", "2021"],
+            "SEX": ["M", "M", "F", "F"],
+            "OBS_VALUE": [1, 2, 3, 4],
+        }
+        data.update(overrides)
+        return pd.DataFrame(data)
+
+    @staticmethod
+    def _chunked(schema, chunks, **kwargs):
+        validator = DatasetValidator(schema, **kwargs)
+        for chunk in chunks:
+            validator.update(chunk)
+        return validator.errors()
+
+    def test_dataset_validator_valid_chunks_give_an_empty_frame(self, sdmx_schema):
+        df = self._frame()
+        errors = self._chunked(sdmx_schema, [df.iloc[:2], df.iloc[2:]])
+        assert errors.empty
+        assert list(errors.columns) == ["Validation", "Error"]
+
+    def test_dataset_validator_no_update_gives_an_empty_frame(self, sdmx_schema):
+        errors = DatasetValidator(sdmx_schema).errors()
+        assert errors.empty
+        assert list(errors.columns) == ["Validation", "Error"]
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            pytest.param({}, id="valid"),
+            pytest.param({"EXTRA": [1, 2, 3, 4]}, id="unexpected-column"),
+            pytest.param(
+                {"INDICATOR": ["IND1", "BAD", "IND3", "WORSE"]}, id="invalid-codes"
+            ),
+            pytest.param({"TIME_PERIOD": ["2020"] * 4}, id="duplicates"),
+            pytest.param({"SEX": ["M", None, "F", None]}, id="missing-values"),
+            pytest.param(
+                {
+                    "INDICATOR": ["BAD", "BAD", None, "IND3"],
+                    "TIME_PERIOD": ["2020", "2020", "2020", "2021"],
+                    "SEX": ["M", "M", None, "F"],
+                    "EXTRA": [0, 0, 0, 0],
+                },
+                id="everything",
+            ),
+        ],
+    )
+    def test_dataset_validator_one_update_matches_validate_dataset_local(
+        self, sdmx_schema, overrides
+    ):
+        df = self._frame(**overrides)
+        assert_frame_equal(
+            self._chunked(sdmx_schema, [df]),
+            validate_dataset_local(df, schema=sdmx_schema),
+        )
+
+    def test_dataset_validator_one_update_matches_missing_mandatory_column(
+        self, sdmx_schema
+    ):
+        df = self._frame().drop(columns=["SEX"])
+        assert_frame_equal(
+            self._chunked(sdmx_schema, [df]),
+            validate_dataset_local(df, schema=sdmx_schema),
+        )
+
+    def test_dataset_validator_one_update_matches_max_errors(self, sdmx_schema):
+        df = self._frame(
+            INDICATOR=["A", "B", "C", "D"],
+            TIME_PERIOD=["2020"] * 4,
+            SEX=[None] * 4,
+            EXTRA=[0] * 4,
+            MORE=[0] * 4,
+        )
+        assert_frame_equal(
+            self._chunked(sdmx_schema, [df], max_errors=1),
+            validate_dataset_local(df, schema=sdmx_schema, max_errors=1),
+        )
+
+    def test_dataset_validator_merges_codelist_violations_across_chunks(
+        self, sdmx_schema
+    ):
+        first = self._frame(INDICATOR=["BAD1", "IND1", "BAD1", "IND3"])
+        second = self._frame(INDICATOR=["BAD2", "BAD1", "IND1", "IND3"])
+        errors = self._chunked(sdmx_schema, [first, second])
+        assert errors["Error"].tolist() == [
+            "'INDICATOR': BAD1",
+            "'INDICATOR': BAD2",
+        ]
+
+    def test_dataset_validator_sums_missing_value_counts(self, sdmx_schema):
+        first = self._frame(SEX=["M", None, "F", "F"])
+        second = self._frame(SEX=[None, None, "F", "F"])
+        errors = self._chunked(sdmx_schema, [first, second])
+        assert errors["Validation"].tolist() == ["missing_values"]
+        message = errors["Error"].iloc[0]
+        assert message.startswith("Found 3 row(s) with missing values")
+        assert message.count("\n") == 4  # a header line plus three rows
+
+    def test_dataset_validator_reports_duplicates_within_a_chunk(self, sdmx_schema):
+        duplicated = self._frame(TIME_PERIOD=["2020", "2020", "2020", "2021"])
+        errors = self._chunked(sdmx_schema, [duplicated, self._frame()])
+        assert errors["Validation"].tolist() == ["duplicates"]
+        assert (
+            errors["Error"]
+            .iloc[0]
+            .startswith("Found 2 duplicate rows across 1 key combination(s)")
+        )
+
+    def test_dataset_validator_does_not_see_a_key_shared_by_two_chunks(
+        self, sdmx_schema
+    ):
+        """The documented limit: duplicates are found within each chunk only."""
+        df = self._frame()
+        assert self._chunked(sdmx_schema, [df, df]).empty
+
+    def test_dataset_validator_caps_merged_errors_at_max_errors(self, sdmx_schema):
+        first = self._frame(INDICATOR=["BAD1", "BAD2", "IND1", "IND3"])
+        second = self._frame(INDICATOR=["BAD3", "BAD4", "IND1", "IND3"])
+        errors = self._chunked(sdmx_schema, [first, second], max_errors=3)
+        assert errors["Error"].tolist() == [
+            "'INDICATOR': BAD1",
+            "'INDICATOR': BAD2",
+            "'INDICATOR': BAD3",
+        ]
+
+    def test_dataset_validator_reports_an_unexpected_column_once(self, sdmx_schema):
+        extra = self._frame(EXTRA=[0] * 4)
+        errors = self._chunked(sdmx_schema, [self._frame(), extra, extra])
+        assert errors["Error"].tolist() == ["Unexpected column: 'EXTRA'"]
+
+    def test_dataset_validator_skips_value_checks_without_mandatory_columns(
+        self, sdmx_schema
+    ):
+        incomplete = self._frame(INDICATOR=["BAD"] * 4).drop(columns=["SEX"])
+        complete = self._frame(INDICATOR=["WORSE"] * 4)
+        errors = self._chunked(sdmx_schema, [incomplete, complete])
+        assert errors["Validation"].tolist() == ["mandatory_columns", "codelist_ids"]
+        assert errors["Error"].tolist() == [
+            "Missing mandatory columns: ['SEX']",
+            "'INDICATOR': WORSE",
+        ]
+
+    def test_dataset_validator_errors_can_be_read_between_updates(self, sdmx_schema):
+        validator = DatasetValidator(sdmx_schema)
+        validator.update(self._frame(INDICATOR=["BAD"] * 4))
+        assert len(validator.errors()) == 1
+        validator.update(self._frame(SEX=[None] * 4))
+        assert validator.errors()["Validation"].tolist() == [
+            "codelist_ids",
+            "missing_values",
+        ]
+
+    def test_dataset_validator_counts_rows(self, sdmx_schema):
+        validator = DatasetValidator(sdmx_schema)
+        assert validator.rows == 0
+        validator.update(self._frame())
+        validator.update(self._frame().iloc[:1])
+        assert validator.rows == 5
+
+    def test_dataset_validator_accepts_an_empty_chunk(self, sdmx_schema):
+        errors = self._chunked(sdmx_schema, [self._frame().iloc[:0], self._frame()])
+        assert errors.empty
+
+    def test_dataset_validator_takes_sdmx_cols(self, sdmx_schema):
+        bare = self._frame().drop(columns=["STRUCTURE", "STRUCTURE_ID", "ACTION"])
+        assert self._chunked(sdmx_schema, [bare], sdmx_cols=[]).empty
+        errors = self._chunked(sdmx_schema, [bare])
+        assert errors["Validation"].tolist() == ["mandatory_columns"]
+
+    def test_dataset_validator_rejects_a_non_schema(self):
+        with pytest.raises(TypeCheckError, match="schema"):
+            DatasetValidator("not a schema")
+
+    def test_dataset_validator_rejects_a_non_frame_chunk(self, sdmx_schema):
+        with pytest.raises(TypeCheckError, match="df"):
+            DatasetValidator(sdmx_schema).update(["not", "a", "frame"])
