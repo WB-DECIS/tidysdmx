@@ -14,7 +14,7 @@
 # module entry point, so those two keep their console scripts.
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench performance-page
+.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench performance-page wb-ids-mock bench-pipeline
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -104,5 +104,17 @@ BENCH_ARGS ?=
 bench: ## Benchmark map_structures: the working tree against the last 3 releases
 	uv run --no-project --python 3.11 python -m benchmarks.run --target WORKTREE --baselines 3 \
 		--out $(PERF_RESULTS) $(BENCH_ARGS)
+
+# Rows of mock WB_IDS bronze data (the real file has 147,000,092, about 15 GB).
+# Generated files go to the gitignored benchmarks/results/; see docs/datasets/wb-ids.md.
+WB_IDS_ROWS ?= 1000000
+WB_IDS_CSV = benchmarks/results/wb_ids/WB_IDS_BRONZE_mock_$(WB_IDS_ROWS).csv
+
+wb-ids-mock: ## Generate a mock WB_IDS bronze CSV of WB_IDS_ROWS rows
+	uv run python -m benchmarks.wb_ids.generate --rows $(WB_IDS_ROWS) --out $(WB_IDS_CSV)
+
+bench-pipeline: wb-ids-mock ## Run and measure the WB template pipeline on that mock CSV
+	uv run python -m benchmarks.wb_ids.pipeline --csv $(WB_IDS_CSV) \
+		--out benchmarks/results/wb_ids/pipeline_$(WB_IDS_ROWS).json
 
 check: lint typecheck cov ## Lint, typecheck and gated tests — CI runs these plus `build`
