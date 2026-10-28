@@ -7,9 +7,11 @@ name: Pipeline benchmark
 # no real data is needed; docs/datasets/wb-ids.md explains the dataset and how
 # the mock compares with it. Manual only: nothing gates on the numbers.
 #
-# A standard runner has about 16 GB of RAM and 14 GB of free disk, so the real
-# file's full size (147M rows, 15 GB of CSV, ~20 GB once loaded) does not fit;
-# 10M rows is the largest size that leaves comfortable headroom today.
+# A standard runner has about 16 GB of RAM and 14 GB of free disk. Run whole,
+# the real file's full size (147M rows, 15 GB of CSV, ~20 GB once loaded) does
+# not fit, and 10M rows is the largest size that leaves comfortable headroom;
+# run in chunks (`--chunk-rows`), memory is bounded by the chunk and only the
+# disk limits the size.
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +19,10 @@ on:
         description: Mock rows, space-separated for several runs (real file 147000092)
         type: string
         default: "1000000 10000000"
+      args:
+        description: Runner arguments, e.g. --chunk-rows 2000000 --skip-unused --categories
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -39,15 +45,17 @@ jobs:
       - name: Generate and run
         env:
           ROWS: ${{ inputs.rows }}
+          ARGS: ${{ inputs.args }}
         run: |
           mkdir -p pipeline-results
           read -r -a sizes <<< "$ROWS"
+          read -r -a args <<< "$ARGS"
           for rows in "${sizes[@]}"; do
             csv="mock_${rows}.csv"
             uv run python -m benchmarks.wb_ids.generate --rows "$rows" --out "$csv"
             uv run python -m benchmarks.wb_ids.pipeline --csv "$csv" \
               --out "pipeline-results/pipeline_${rows}.json" \
-              --summary "$GITHUB_STEP_SUMMARY"
+              --summary "$GITHUB_STEP_SUMMARY" "${args[@]}"
             rm -f "$csv"
           done
       - name: Store results

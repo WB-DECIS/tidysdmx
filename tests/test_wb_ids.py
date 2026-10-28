@@ -27,7 +27,14 @@ from benchmarks.wb_ids import (
 )
 from benchmarks.wb_ids.generate import _codes, _universe, generate, load_profile
 from benchmarks.wb_ids.memory import PeakRss
-from benchmarks.wb_ids.pipeline import requested_series, run_pipeline, to_markdown
+from benchmarks.wb_ids.pipeline import (
+    describe_mode,
+    main,
+    read_csv_kwargs,
+    requested_series,
+    run_pipeline,
+    to_markdown,
+)
 from benchmarks.wb_ids.profile import COLUMNS, dumps, profile_csv
 from benchmarks.wb_ids.schema import (
     from_spec,
@@ -64,6 +71,23 @@ def mock_profile(mock_csv):
 @pytest.fixture(scope="module")
 def pipeline_result():
     return run_pipeline(SAMPLE_CSV)
+
+
+@pytest.fixture(scope="module")
+def outputs(tmp_path_factory):
+    """Each mode's run and standardised output file, on the committed sample."""
+    folder = tmp_path_factory.mktemp("wb_ids_modes")
+    runs = {
+        "whole": {},
+        "chunked": {"chunk_rows": 1000},
+        "chunked-lean": {"chunk_rows": 1000, "skip_unused": True, "categories": True},
+        "whole-lean": {"skip_unused": True, "categories": True},
+    }
+    results = {}
+    for name, options in runs.items():
+        out_csv = folder / f"{name}.csv"
+        results[name] = (run_pipeline(SAMPLE_CSV, out_csv=out_csv, **options), out_csv)
+    return results
 
 
 def _read(path: Path) -> pd.DataFrame:
@@ -353,6 +377,93 @@ class TestPipeline:
     def test_requested_series_needs_the_sheet(self):
         with pytest.raises(ValueError, match="no REQUESTED_IND_RAW sheet"):
             requested_series({})
+
+    def test_pipeline_records_the_whole_frame_mode(self, pipeline_result):
+        assert pipeline_result["input"]["chunk_rows"] is None
+        assert pipeline_result["input"]["chunks"] == 1
+        assert describe_mode(pipeline_result) == "whole frame"
+
+
+class TestChunkedPipeline:
+    """The chunked run is a drop-in for the whole-frame run."""
+
+    def test_chunked_pipeline_runs_every_step_in_order(self, outputs):
+        result, _ = outputs["chunked"]
+        assert [step["step"] for step in result["steps"]] == [
+            "read_template",
+            "load",
+            "filter",
+            "structure_map",
+            "map",
+            "standardize",
+            "validate",
+            "write",
+        ]
+
+    def test_chunked_pipeline_reads_the_file_in_chunks(self, outputs):
+        result, _ = outputs["chunked"]
+        assert result["input"]["chunk_rows"] == 1000
+        assert result["input"]["chunks"] == SAMPLE_ROWS // 1000
+        assert describe_mode(result) == "chunks of 1,000 rows (4 chunks)"
+
+    def test_chunked_pipeline_sums_rows_over_chunks(self, outputs):
+        whole, _ = outputs["whole"]
+        chunked, _ = outputs["chunked"]
+        for name in ("load", "filter", "map", "standardize"):
+            rows = {step["step"]: step["rows"] for step in chunked["steps"]}
+            assert rows[name] == next(
+                step["rows"] for step in whole["steps"] if step["step"] == name
+            )
+
+    @pytest.mark.parametrize("name", ["chunked", "chunked-lean", "whole-lean"])
+    def test_pipeline_modes_find_the_same_errors(self, outputs, name):
+        whole, _ = outputs["whole"]
+        other, _ = outputs[name]
+        assert other["validation"] == whole["validation"]
+
+    @pytest.mark.parametrize("name", ["chunked", "chunked-lean", "whole-lean"])
+    def test_pipeline_modes_write_identical_output(self, outputs, name):
+        _, whole_csv = outputs["whole"]
+        _, other_csv = outputs[name]
+        assert other_csv.read_bytes() == whole_csv.read_bytes()
+
+    def test_lean_mode_is_described(self, outputs):
+        result, _ = outputs["chunked-lean"]
+        assert describe_mode(result) == (
+            "chunks of 1,000 rows (4 chunks), without Series_Name, "
+            "code columns as category"
+        )
+        assert "chunks of 1,000 rows" in to_markdown(result).splitlines()[0]
+
+    def test_read_csv_kwargs_drop_series_name_and_type_the_codes(self):
+        kwargs = read_csv_kwargs(skip_unused=True, categories=True)
+        assert "Series_Name" not in kwargs["usecols"]
+        assert kwargs["dtype"]["Series"] == "category"
+        assert kwargs["dtype"]["footnote"] == "str"
+        assert read_csv_kwargs(skip_unused=False, categories=False) == {}
+
+    def test_run_pipeline_rejects_a_non_positive_chunk_size(self):
+        with pytest.raises(ValueError, match="chunk_rows must be positive"):
+            run_pipeline(SAMPLE_CSV, chunk_rows=0)
+
+    def test_main_takes_the_chunked_flags(self, tmp_path, capsys):
+        out = tmp_path / "run.json"
+        code = main(
+            [
+                "--chunk-rows",
+                "2000",
+                "--skip-unused",
+                "--categories",
+                "--out",
+                str(out),
+                "--out-csv",
+                str(tmp_path / "out.csv"),
+            ]
+        )
+        assert code == 0
+        run = json.loads(out.read_text(encoding="utf-8"))
+        assert run["input"]["chunks"] == 2
+        assert "chunks of 2,000 rows (2 chunks)" in capsys.readouterr().out
 
 
 class TestPeakRss:
