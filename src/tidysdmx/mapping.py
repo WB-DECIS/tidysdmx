@@ -2,7 +2,7 @@
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import numpy as np
@@ -104,6 +104,21 @@ def map_structures(
     and in stored order within a type, so when several maps write the same
     target, the last one wins.
 
+    Each distinct value of a source column is resolved once and the result
+    broadcast to its rows, and a source column that several maps read is
+    grouped into its distinct values once for the whole call, so mapping costs
+    a few passes over the rows plus work proportional to the number of
+    distinct values.
+
+    A categorical source column gives a categorical target column whose
+    categories are the map's target values in stored order, so every frame
+    mapped with the same StructureMap gets the same categorical dtype and
+    ``pd.concat`` keeps it. Other source dtypes give the dtypes
+    ``apply_component_map`` and ``apply_multi_component_map`` document. A
+    column an ImplicitComponentMap copies keeps its source dtype, and for a
+    categorical its source's own categories; a FixedValueMap writes a ``str``
+    column.
+
     Args:
         df: The source dataset.
         structure_map: A StructureMap containing various mapping components.
@@ -149,14 +164,14 @@ def map_structures(
             if imap.source in df.columns:
                 result_df[imap.target] = implicit_df[imap.target]
 
+    # One grouping of each source column tuple serves every map that reads it.
+    groups = _SourceGroups(df, [*component_maps, *multi_component_maps])
+
     for cmap in component_maps:
-        mapped = apply_component_map(df, cmap, verbose=verbose)
-        result_df[cmap.target] = mapped[cmap.target]
+        result_df[cmap.target] = _map_component(df, cmap, verbose, groups)
 
     for mcm in multi_component_maps:
-        target = mcm.target[0]
-        mapped = apply_multi_component_map(df, mcm, verbose=verbose)
-        result_df[target] = mapped[target]
+        result_df[mcm.target[0]] = _map_multi_component(df, mcm, verbose, groups)
 
     return result_df
 
@@ -199,6 +214,77 @@ def _unresolved_values_error(kind: str, source: object, urn: str) -> TypeError:
         "resolves them; FmrClient.fetch_representation_map(urn) fetches the one "
         "this map references."
     )
+
+
+class _SourceGroups:
+    """The distinct-row numbering of each source column tuple, computed once.
+
+    Several maps in one StructureMap often read the same source column (the
+    WB IDS template maps ``Series`` onto eight targets), and grouping the rows
+    by distinct value is the costly pass of each map, so ``map_structures``
+    does it once per source tuple for the whole call. A tuple that any regex
+    value map reads is grouped with printed forms split (see
+    ``_distinct_rows``). That grouping is finer than grouping by equality,
+    and a literal value map gives equal values the same target, so it is
+    right for the literal maps on the same tuple too.
+    """
+
+    def __init__(
+        self, df: pd.DataFrame, maps: Sequence[ComponentMap | MultiComponentMap]
+    ) -> None:
+        self._df = df
+        self._reads_regex: dict[tuple[str, ...], list[bool]] = {}
+        self._groups: dict[tuple[str, ...], tuple[np.ndarray, np.ndarray]] = {}
+        for m in maps:
+            read = _regex_reads(m)
+            if read is None:
+                continue
+            sources, flags = read
+            known = self._reads_regex.setdefault(sources, [False] * len(sources))
+            for i, flag in enumerate(flags):
+                known[i] = known[i] or flag
+
+    def get(self, sources: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
+        """Return ``_distinct_rows`` for ``sources``, computing it on first use.
+
+        Raises:
+            ValueError: If ``sources`` is empty.
+        """
+        if sources not in self._groups:
+            columns = [self._df[name] for name in sources]
+            flags = self._reads_regex.get(sources, [True] * len(sources))
+            self._groups[sources] = _distinct_rows(columns, flags)
+        return self._groups[sources]
+
+
+def _regex_reads(
+    component_map: ComponentMap | MultiComponentMap,
+) -> tuple[tuple[str, ...], list[bool]] | None:
+    """Return a map's source columns and, per column, whether a regex reads it.
+
+    None when the map's values are an unresolved URN: applying it raises, so
+    it needs no grouping.
+    """
+    if isinstance(component_map, ComponentMap):
+        rep_map = component_map.values
+        if isinstance(rep_map, str):
+            return None
+        return (component_map.source,), [
+            any(vm.source.startswith("regex:") for vm in rep_map.maps)
+        ]
+    multi_rep_map = component_map.values
+    if isinstance(multi_rep_map, str):
+        return None
+    sources = tuple(component_map.source)
+    # A rule with too few patterns is left for _resolve_multi_values to reject.
+    return sources, [
+        any(
+            pattern.startswith("regex:")
+            for mv in multi_rep_map.maps
+            for pattern in mv.source[i : i + 1]
+        )
+        for i in range(len(sources))
+    ]
 
 
 @typechecked
@@ -298,6 +384,12 @@ def apply_component_map(
     but are matched apart. In object columns holding non-string values, that
     takes one ``str()`` call per such row.
 
+    A categorical source gives a categorical target whose categories are the
+    map's target values in stored order (see ``map_structures``). Any other
+    source gives a ``str`` column from the literal lookup, which becomes an
+    object column once a regex value map or the catch-all has been applied to
+    a value.
+
     Args:
         df: Source data.
         component_map: ComponentMap with source, target, and values.
@@ -311,6 +403,35 @@ def apply_component_map(
         KeyError: If the source column is not in ``df``.
         TypeError: If ``component_map.values`` is a URN string rather than an
             embedded RepresentationMap.
+    """
+    target = _map_component(
+        df, component_map, verbose, _SourceGroups(df, [component_map])
+    )
+    result_df = df.copy(deep=False)
+    result_df[component_map.target] = target
+    return result_df
+
+
+def _map_component(
+    df: pd.DataFrame,
+    component_map: ComponentMap,
+    verbose: bool,
+    groups: _SourceGroups,
+) -> pd.Series:
+    """Resolve a ComponentMap into its target column; see ``apply_component_map``.
+
+    Args:
+        df: Source data.
+        component_map: ComponentMap with source, target, and values.
+        verbose: If True, log progress at INFO level (DEBUG otherwise).
+        groups: The distinct-row grouping of the source columns.
+
+    Returns:
+        The target column, indexed like ``df``.
+
+    Raises:
+        KeyError: If the source column is not in ``df``.
+        TypeError: If ``component_map.values`` is a URN string.
     """
     source_col = component_map.source
     target_col = component_map.target
@@ -327,23 +448,36 @@ def apply_component_map(
     # instead of a Python-level regex call per row. Missing values form a
     # group of their own, which only the catch-all maps.
     source = df[source_col]
-    reads_regex = any(vm.source.startswith("regex:") for vm in rep_map.maps)
-    codes, positions = _distinct_rows([source], [reads_regex])
-    literal_mapping, regex_maps, resolved = _resolve_component_values(
-        source.iloc[positions].reset_index(drop=True), rep_map
-    )
+    codes, positions = groups.get((source_col,))
+    distinct = source.iloc[positions].reset_index(drop=True)
+    categorical = isinstance(source.dtype, pd.CategoricalDtype)
+    if categorical:
+        # Resolve the distinct values as plain objects: Series.map on a
+        # Categorical returns a Categorical or a str column depending on which
+        # categories happen to be mapped, and the target is rebuilt from the
+        # resolved values and the row codes below anyway.
+        distinct = distinct.astype(object)
+    literal_mapping, regex_maps, resolved = _resolve_component_values(distinct, rep_map)
 
-    # dtype= keeps the resolved dtype: an object result (the regex path) would
-    # otherwise be re-inferred as "str" when rebuilt from a NumPy array. The
-    # array's own take(), not pd.api.extensions.take(): without allow_fill that
-    # passes axis=, which Arrow-backed arrays (pandas 3's "str" whenever pyarrow
-    # is installed) reject. codes hold no -1, so nothing needs filling.
-    result_df = df.copy(deep=False)
-    result_df[target_col] = pd.Series(
-        resolved.array.take(codes),
-        index=df.index,
-        dtype=resolved.dtype,
-    )
+    if categorical:
+        target = _categorical_target(
+            resolved,
+            codes,
+            _distinct_targets(vm.target for vm in rep_map.maps),
+            df.index,
+        )
+    else:
+        # dtype= keeps the resolved dtype: an object result (the regex path)
+        # would otherwise be re-inferred as "str" when rebuilt from a NumPy
+        # array. The array's own take(), not pd.api.extensions.take(): without
+        # allow_fill that passes axis=, which Arrow-backed arrays (pandas 3's
+        # "str" whenever pyarrow is installed) reject. codes hold no -1, so
+        # nothing needs filling.
+        target = pd.Series(
+            resolved.array.take(codes),
+            index=df.index,
+            dtype=resolved.dtype,
+        )
 
     n_pairs = len(literal_mapping) + len(regex_maps)
     logger.log(
@@ -362,11 +496,11 @@ def apply_component_map(
             source_col,
             default,
         )
-    unmapped = result_df[target_col].isna().sum()
+    unmapped = target.isna().sum()
     if unmapped > 0:
         logger.warning("%d values could not be mapped (set to NaN).", unmapped)
 
-    return result_df
+    return target
 
 
 def _resolve_component_values(
@@ -581,6 +715,10 @@ def apply_multi_component_map(
     ``apply_component_map``, values that compare equal but print differently
     (1 and 1.0) count as distinct.
 
+    When every source column is categorical the target is categorical, with
+    the map's target values in stored order as categories (see
+    ``map_structures``); otherwise it is an object column.
+
     Args:
         df: Source data.
         multi_component_map: MultiComponentMap with source columns, target
@@ -595,6 +733,39 @@ def apply_multi_component_map(
         KeyError: If a source column is not in ``df``.
         TypeError: If ``multi_component_map.values`` is a URN string rather
             than an embedded MultiRepresentationMap.
+        ValueError: If ``multi_component_map`` lists no source columns.
+    """
+    target = _map_multi_component(
+        df, multi_component_map, verbose, _SourceGroups(df, [multi_component_map])
+    )
+    result_df = df.copy(deep=False)
+    result_df[multi_component_map.target[0]] = target
+    return result_df
+
+
+def _map_multi_component(
+    df: pd.DataFrame,
+    multi_component_map: MultiComponentMap,
+    verbose: bool,
+    groups: _SourceGroups,
+) -> pd.Series:
+    """Resolve a MultiComponentMap into its target column.
+
+    See ``apply_multi_component_map`` for the matching rules.
+
+    Args:
+        df: Source data.
+        multi_component_map: MultiComponentMap with source columns, target
+            column, and values.
+        verbose: If True, log progress at INFO level (DEBUG otherwise).
+        groups: The distinct-row grouping of the source columns.
+
+    Returns:
+        The target column, indexed like ``df``.
+
+    Raises:
+        KeyError: If a source column is not in ``df``.
+        TypeError: If ``multi_component_map.values`` is a URN string.
         ValueError: If ``multi_component_map`` lists no source columns.
     """
     source_cols = list(multi_component_map.source)
@@ -624,24 +795,27 @@ def apply_multi_component_map(
     # Series, so a label that also names an index level, or appears twice in
     # source_cols, is no problem.
     sources = [df[col] for col in source_cols]
-    # Only a source some rule reads with a regex needs its printed forms. A
-    # rule with too few patterns is left for _resolve_multi_values to reject.
-    reads_regex = [
-        any(
-            pattern.startswith("regex:")
-            for rule in rules
-            for pattern in rule["patterns"][i : i + 1]
-        )
-        for i in range(len(sources))
-    ]
-    codes, positions = _distinct_rows(sources, reads_regex)
+    codes, positions = groups.get(tuple(source_cols))
     # Gather only the source columns, one row per combination: element i of
     # each Series belongs to the combination with code i.
     combinations = [s.iloc[positions].reset_index(drop=True) for s in sources]
+    categorical = bool(sources) and all(
+        isinstance(s.dtype, pd.CategoricalDtype) for s in sources
+    )
+    if categorical:
+        # As in _map_component: match plain objects, rebuild the column below.
+        combinations = [c.astype(object) for c in combinations]
     resolved = _resolve_multi_values(combinations, rules)
 
-    result_df = df.copy(deep=False)
-    result_df[target_col] = pd.Series(resolved[codes], index=df.index)
+    if categorical:
+        target = _categorical_target(
+            pd.Series(resolved, dtype=object),
+            codes,
+            _distinct_targets(mv.target[0] for mv in rep_map.maps),
+            df.index,
+        )
+    else:
+        target = pd.Series(resolved[codes], index=df.index)
 
     logger.log(
         _progress_level(verbose),
@@ -664,11 +838,57 @@ def apply_multi_component_map(
                 source_cols,
                 default,
             )
-    unmapped = result_df[target_col].isna().sum()
+    unmapped = target.isna().sum()
     if unmapped > 0:
         logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
 
-    return result_df
+    return target
+
+
+def _distinct_targets(targets: Iterable[str]) -> list[str]:
+    """Return the distinct target values of a representation map, in stored order."""
+    return list(dict.fromkeys(targets))
+
+
+def _categorical_target(
+    resolved: pd.Series,
+    codes: np.ndarray,
+    targets: Sequence[str],
+    index: pd.Index,
+) -> pd.Series:
+    """Broadcast resolved distinct values to the rows as a categorical column.
+
+    The categories are ``targets``, the map's target values in stored order,
+    not the values this frame happens to hold, so every frame mapped with the
+    same map gets the same dtype and ``pd.concat`` keeps it categorical. An
+    unmapped source value stays missing.
+
+    Args:
+        resolved: The target value of each distinct source value or
+            combination, missing where no value map matched.
+        codes: Each row's distinct-value number (see ``_distinct_rows``).
+        targets: The map's distinct target values, in stored order.
+        index: The index of the frame being mapped.
+
+    Returns:
+        The target column, categorical, indexed by ``index``.
+
+    Raises:
+        ValueError: If a resolved value is not one of ``targets``.
+    """
+    # get_indexer, not pd.Categorical(resolved, categories=targets): the latter
+    # warns (and pandas 4 raises) on a value outside the categories, where the
+    # check below is meant to be the one that fails.
+    distinct_codes = pd.Index(targets).get_indexer(resolved)
+    if int((distinct_codes < 0).sum()) != int(resolved.isna().sum()):
+        raise ValueError(
+            "A mapped value is not one of the map's target values, so it has "
+            "no category; this is a bug in tidysdmx.mapping."
+        )
+    return pd.Series(
+        pd.Categorical.from_codes(distinct_codes[codes], categories=targets),
+        index=index,
+    )
 
 
 def _resolve_multi_values(
