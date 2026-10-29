@@ -65,23 +65,28 @@ jobs:
       - name: Show Quarto version
         run: uv run quarto --version
       # The Performance page renders from the newest release that carries
-      # benchmark results (release.yml attaches them). For a release redeploy
-      # that is the new release, unless its benchmark failed; without any, the
-      # page shows a placeholder and the build goes on.
-      - name: Fetch the latest performance profile
+      # benchmark results (release.yml attaches them: benchmarks-vX.Y.Z.json for
+      # map_structures, pipeline-vX.Y.Z.json for the WB template pipeline), each
+      # suite found on its own. For a release redeploy that is the new release,
+      # unless its benchmark failed; without any, that section of the page
+      # shows a placeholder and the build goes on.
+      - name: Fetch the latest performance profiles
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p benchmarks/results
-          for tag in $(gh release list --limit 20 --json tagName --jq '.[].tagName'); do
-            if gh release download "$tag" --pattern 'benchmarks-*.json' \
-                --output benchmarks/results/latest.json --clobber 2>/dev/null; then
-              echo "Performance profile: $tag"
-              exit 0
-            fi
-          done
-          echo "::notice::No release carries benchmark results yet; the Performance page shows a placeholder."
+          fetch() {
+            for tag in $(gh release list --limit 20 --json tagName --jq '.[].tagName'); do
+              if gh release download "$tag" --pattern "$1" --output "$2" --clobber 2>/dev/null; then
+                echo "$3 profile: $tag"
+                return 0
+              fi
+            done
+            echo "::notice::No release carries $3 benchmark results yet; that section of the Performance page shows a placeholder."
+          }
+          fetch 'benchmarks-v*.json' benchmarks/results/latest.json map_structures
+          fetch 'pipeline-v*.json' benchmarks/results/pipeline.json pipeline
       - name: Build docs
         run: make docs
       - name: Upload docs artifact
