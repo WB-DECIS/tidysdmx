@@ -446,6 +446,22 @@ class TestChunkedPipeline:
         with pytest.raises(ValueError, match="chunk_rows must be positive"):
             run_pipeline(SAMPLE_CSV, chunk_rows=0)
 
+    def test_chunked_pipeline_refuses_an_input_with_no_requested_series(self, tmp_path):
+        """Fail, as whole-frame mode does, rather than report a clean run.
+
+        An untouched stale output file would otherwise pass for the result.
+        """
+        rows = [
+            ["AFG", "WLD", "NOT_REQUESTED", "Nothing", "2020", "1.0", "", ""],
+            ["AFG", "WLD", "NOT_REQUESTED", "Nothing", "2021", "2.0", "", ""],
+        ]
+        csv = _write_csv(tmp_path / "unrequested.csv", rows)
+        stale = tmp_path / "out.csv"
+        stale.write_text("stale\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="No rows matched the requested series"):
+            run_pipeline(csv, chunk_rows=1, out_csv=stale)
+        assert stale.read_text(encoding="utf-8") == "stale\n"
+
     def test_main_takes_the_chunked_flags(self, tmp_path, capsys):
         out = tmp_path / "run.json"
         code = main(

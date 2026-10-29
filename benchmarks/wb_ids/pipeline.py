@@ -235,7 +235,8 @@ def run_pipeline(
         Per-step time and memory, and what the final validation reported.
 
     Raises:
-        ValueError: If ``chunk_rows`` is given but not positive.
+        ValueError: If ``chunk_rows`` is given but not positive, or if no row
+            matches the template's requested series.
     """
     if chunk_rows is not None and chunk_rows <= 0:
         raise ValueError(f"chunk_rows must be positive, got {chunk_rows}")
@@ -355,6 +356,12 @@ def _run_chunked(
             )
             # Drop the last reference before the next chunk is read.
             del chunk
+    if validator.rows == 0:
+        # Whole-frame mode fails the same way, in standardize_output.
+        raise ValueError(
+            "No rows matched the requested series, so there is nothing to map, "
+            "validate or write."
+        )
     errors = steps.measure("validate", validator.errors)
     return chunks, errors
 
