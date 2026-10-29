@@ -1619,6 +1619,19 @@ class TestMapStructuresSharedGrouping:
         assert counted_distinct_rows == [["AREA"]]
         assert result["AREA_3"].tolist() == ["CO", "B_", "CO"]
 
+    def test_source_groups_drop_a_grouping_after_its_last_reader(self):
+        """A grouping lives only while a map still needs it (memory, not speed)."""
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]})
+        groups = mapping_module._SourceGroups(
+            df, [self._area_map("A"), self._area_map("B")]
+        )
+        first = groups.get(("AREA",))
+        assert groups.get(("AREA",)) is first
+        assert groups._groups == {}
+        # Unregistered sources are grouped for one reader and dropped at once.
+        groups.get(("NOTE",))
+        assert groups._groups == {}
+
     def test_map_structures_groups_each_source_tuple_separately(
         self, counted_distinct_rows, urbanisation_map
     ):

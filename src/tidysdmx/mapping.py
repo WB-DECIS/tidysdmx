@@ -234,27 +234,43 @@ class _SourceGroups:
     ) -> None:
         self._df = df
         self._reads_regex: dict[tuple[str, ...], list[bool]] = {}
+        self._readers: dict[tuple[str, ...], int] = {}
         self._groups: dict[tuple[str, ...], tuple[np.ndarray, np.ndarray]] = {}
         for m in maps:
             read = _regex_reads(m)
             if read is None:
                 continue
             sources, flags = read
+            self._readers[sources] = self._readers.get(sources, 0) + 1
             known = self._reads_regex.setdefault(sources, [False] * len(sources))
             for i, flag in enumerate(flags):
                 known[i] = known[i] or flag
 
     def get(self, sources: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
-        """Return ``_distinct_rows`` for ``sources``, computing it on first use.
+        """Return ``_distinct_rows`` for ``sources``.
+
+        Computed on first use and dropped once the last map that reads
+        ``sources`` has taken it, so a grouping is held only while a map still
+        needs it: with one map per source column, nothing outlives the map
+        that used it, and the call's peak memory is the same as applying the
+        maps one by one.
 
         Raises:
             ValueError: If ``sources`` is empty.
         """
-        if sources not in self._groups:
+        group = self._groups.get(sources)
+        if group is None:
             columns = [self._df[name] for name in sources]
             flags = self._reads_regex.get(sources, [True] * len(sources))
-            self._groups[sources] = _distinct_rows(columns, flags)
-        return self._groups[sources]
+            group = _distinct_rows(columns, flags)
+        remaining = self._readers.get(sources, 1) - 1
+        if remaining > 0:
+            self._readers[sources] = remaining
+            self._groups[sources] = group
+        else:
+            self._readers.pop(sources, None)
+            self._groups.pop(sources, None)
+        return group
 
 
 def _regex_reads(
