@@ -23,20 +23,24 @@ DTYPES = {
 }
 
 validator = DatasetValidator(schema)
+written = False
 with pd.read_csv(
     "WB_IDS_BRONZE.csv", chunksize=5_000_000, usecols=KEEP, dtype=DTYPES
 ) as reader:
-    for i, chunk in enumerate(reader):
+    for chunk in reader:
         chunk = chunk[chunk["Series"].isin(requested)]
         if chunk.empty:
             continue
         mapped = map_structures(chunk, structure_map)
         out = standardize_output(mapped, artefact_id=artefact_id, schema=schema)
         validator.update(out)
-        out.to_csv("WB_IDS.csv", mode="w" if i == 0 else "a", header=i == 0, index=False)
+        out.to_csv("WB_IDS.csv", mode="a" if written else "w", header=not written, index=False)
+        written = True
 
 errors = validator.errors()
 ```
+
+The first chunk written out creates the file and its header, whichever chunk that is: a chunk can lose every row to the filter, so the input chunk's number is not what decides.
 
 Memory is now bounded by the chunk, whatever the file's size. The template, the structure map and the schema are built once; the loop only moves data.
 
