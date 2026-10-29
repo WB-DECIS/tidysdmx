@@ -5,7 +5,7 @@ import pandas as pd
 from pysdmx.model import Schema
 from typeguard import typechecked
 
-from .utils import extract_validation_info
+from .utils import _prints_equal_values_alike, extract_validation_info
 
 
 @typechecked
@@ -16,9 +16,11 @@ def filter_rows(
     """Filter out rows where values are not in the allowed codelist.
 
     Compares as strings but does not change DataFrame dtypes. Only the
-    distinct values of a column are compared, so a column costs its number
-    of distinct values rather than its rows. Does not mutate the input
-    DataFrame.
+    distinct values of a column are compared where equal values print alike
+    (strings, integers, categoricals), so such a column costs its number of
+    distinct values rather than its rows; an object column holding
+    non-strings, or a float column, is compared row by row. Does not mutate
+    the input DataFrame.
 
     Args:
         df: The input DataFrame.
@@ -37,11 +39,15 @@ def filter_rows(
             continue
         allowed_str = set(map(str, allowed))
         # Judge each distinct value once, then look the verdicts up by row.
-        codes, uniques = pd.factorize(df[col])
-        allowed_unique = pd.Series(uniques).astype(str).isin(allowed_str).to_numpy()
+        if _prints_equal_values_alike(df[col]):
+            codes, uniques = pd.factorize(df[col])
+            allowed_unique = pd.Series(uniques).astype(str).isin(allowed_str)
+        else:
+            codes, uniques = pd.factorize(df[col].astype(str))
+            allowed_unique = pd.Series(uniques).isin(allowed_str)
         present = codes >= 0  # a missing value (code -1) is never dropped
         unselected = np.zeros(len(df), dtype=bool)
-        unselected[present] = ~allowed_unique[codes[present]]
+        unselected[present] = ~allowed_unique.to_numpy()[codes[present]]
         rows_to_drop |= unselected
 
     return df.loc[~rows_to_drop].copy()

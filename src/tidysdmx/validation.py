@@ -10,7 +10,11 @@ import pandas as pd
 from pysdmx.model.dataflow import Schema
 from typeguard import typechecked
 
-from .utils import extract_validation_info, sdmx_reference_cols_for
+from .utils import (
+    _prints_equal_values_alike,
+    extract_validation_info,
+    sdmx_reference_cols_for,
+)
 
 _DEFAULT_SDMX_COLS: tuple[str, ...] = ("STRUCTURE", "STRUCTURE_ID", "ACTION")
 
@@ -63,10 +67,11 @@ def _invalid_values(column: pd.Series, valid_ids: set[str]) -> list[str]:
 
     Values compare as ``str``, in order of first appearance, so a missing
     value counts as (and is reported as) the text it prints as, ``nan``.
-    Only the distinct values are converted to text, so a column costs its
-    number of distinct values rather than its rows. An object column holding
-    values that compare equal but print differently (``1``, ``1.0``,
-    ``True``) reports the first of them only.
+    Only the distinct values are converted to text where equal values print
+    alike (strings, integers, categoricals), so such a column costs its
+    number of distinct values rather than its rows; an object column holding
+    non-strings, or a float column, is converted row by row, since ``1`` and
+    ``1.0`` compare equal but print differently.
 
     Args:
         column: The coded column.
@@ -75,7 +80,10 @@ def _invalid_values(column: pd.Series, valid_ids: set[str]) -> list[str]:
     Returns:
         The printed form of each distinct invalid value.
     """
-    as_str = pd.Series(column.unique()).astype(str)
+    if _prints_equal_values_alike(column):
+        as_str = pd.Series(column.unique()).astype(str)
+    else:
+        as_str = pd.Series(column.astype(str).unique())
     return [str(value) for value in as_str[~as_str.isin(valid_ids)]]
 
 

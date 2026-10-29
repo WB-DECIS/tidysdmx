@@ -601,6 +601,25 @@ class TestValidationOnDistinctValues:
         with pytest.raises(ValueError, match=r"'CODE': B\n  'CODE': A\n  'CODE': C"):
             validate_codelist_ids(df, {"CODE": ["Z"]})
 
+    @pytest.mark.parametrize(
+        ("allowed", "reported"),
+        [(["1"], "1.0"), (["1.0"], "1")],
+        ids=["int-allowed", "float-allowed"],
+    )
+    def test_validate_codelist_ids_keeps_equal_values_that_print_apart(
+        self, allowed, reported
+    ):
+        """1 and 1.0 compare equal but are compared as text, like before."""
+        df = pd.DataFrame({"CODE": pd.Series([1, 1.0, 1], dtype=object)})
+        with pytest.raises(ValueError, match="Invalid codelist values") as info:
+            validate_codelist_ids(df, {"CODE": allowed})
+        assert str(info.value).splitlines()[1:] == [f"  'CODE': {reported}"]
+
+    def test_validate_codelist_ids_tells_negative_zero_apart(self):
+        df = pd.DataFrame({"CODE": [0.0, -0.0]})
+        with pytest.raises(ValueError, match=r"'CODE': -0.0"):
+            validate_codelist_ids(df, {"CODE": ["0.0"]})
+
     def test_validate_codelist_ids_reports_a_categorical_by_its_values(self):
         """An unused category is not a value, so it is not a violation."""
         df = pd.DataFrame(
