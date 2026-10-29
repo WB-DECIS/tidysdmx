@@ -25,6 +25,7 @@ second loads the code columns and ``Year`` as ``category``, which
 
 import argparse
 import gc
+import importlib.metadata
 import json
 import platform
 import sys
@@ -33,27 +34,32 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
 
 import numpy as np
 import pandas as pd
-import pyarrow as pa
 import pysdmx
 
 import tidysdmx
-from benchmarks.records import Machine
+from benchmarks.records import PIPELINE_STEPS, Machine
 from benchmarks.wb_ids import SAMPLE_CSV, SCHEMA_JSON, TEMPLATE_XLSX
 from benchmarks.wb_ids.memory import PeakRss, machine
 from benchmarks.wb_ids.profile import CODE_COLUMNS, COLUMNS, TEXT_COLUMNS
 from benchmarks.wb_ids.schema import ARTEFACT_ID, load_schema
+
+# Only the functions every release has: the benchmark suite runs this module
+# inside earlier versions' environments too. DatasetValidator, which the
+# chunked mode needs, is imported where that mode starts.
 from tidysdmx import (
-    DatasetValidator,
     build_structure_map_from_template_wb,
     map_structures,
     parse_mapping_template_wb,
     standardize_output,
     validate_dataset_local,
 )
+
+if TYPE_CHECKING:
+    from tidysdmx import DatasetValidator
 
 SCHEMA_VERSION: int = 2
 SOURCE_STRUCTURE_ID: str = "WB.DEC.DG:DS_IDS_BRONZE(1.0.0)"
@@ -64,17 +70,6 @@ UNUSED_COLUMN: str = "Series_Name"
 # Loaded as category by --categories; the text columns get an explicit str so
 # a chunk in which they are empty is not inferred as float.
 CATEGORY_COLUMNS: tuple[str, ...] = (*CODE_COLUMNS, "Year")
-# The order the steps are reported in, whichever mode interleaves them.
-STEP_ORDER: tuple[str, ...] = (
-    "read_template",
-    "load",
-    "filter",
-    "structure_map",
-    "map",
-    "standardize",
-    "validate",
-    "write",
-)
 _MB: float = 1e6
 
 T = TypeVar("T")
@@ -107,7 +102,7 @@ class Result(TypedDict):
     schema_version: int
     generated_at: str
     machine: Machine
-    versions: dict[str, str]
+    versions: dict[str, str | None]
     input: dict[str, Any]
     steps: list[Step]
     total_seconds: float
@@ -123,8 +118,10 @@ class _Steps:
 
     @property
     def steps(self) -> list[Step]:
-        """The steps measured so far, in ``STEP_ORDER``."""
-        return sorted(self._by_name.values(), key=lambda s: STEP_ORDER.index(s["step"]))
+        """The steps measured so far, in ``PIPELINE_STEPS`` order."""
+        return sorted(
+            self._by_name.values(), key=lambda s: PIPELINE_STEPS.index(s["step"])
+        )
 
     def measure(self, name: str, work: Callable[[], T]) -> T:
         """Run one step, record its time and memory, and return its output.
@@ -218,6 +215,7 @@ def run_pipeline(
     skip_unused: bool = False,
     categories: bool = False,
     out_csv: Path | None = None,
+    on_output: Callable[[pd.DataFrame], None] | None = None,
 ) -> Result:
     """Run the notebook pipeline on ``csv`` and measure every step.
 
@@ -230,6 +228,9 @@ def run_pipeline(
         categories: Load the code columns and ``Year`` as ``category``.
         out_csv: Write the standardised output here (overwritten; appended to
             chunk by chunk in chunked mode).
+        on_output: Called with the standardised output once it is validated:
+            once with the whole frame, or once per chunk. It runs outside the
+            measured steps, so what it does costs the steps nothing.
 
     Returns:
         Per-step time and memory, and what the final validation reported.
@@ -251,11 +252,19 @@ def run_pipeline(
     if chunk_rows is None:
         chunks = 1
         errors = _run_whole(
-            csv, mappings, requested, schema, steps, kwargs, out_csv=out_csv
+            csv, mappings, requested, schema, steps, kwargs, out_csv, on_output
         )
     else:
         chunks, errors = _run_chunked(
-            csv, mappings, requested, schema, steps, kwargs, chunk_rows, out_csv
+            csv,
+            mappings,
+            requested,
+            schema,
+            steps,
+            kwargs,
+            chunk_rows,
+            out_csv,
+            on_output,
         )
     total = time.perf_counter() - started
     return {
@@ -266,7 +275,7 @@ def run_pipeline(
             "python": platform.python_version(),
             "tidysdmx": tidysdmx.__version__,
             "pandas": pd.__version__,
-            "pyarrow": pa.__version__,
+            "pyarrow": _installed_version("pyarrow"),
             "numpy": np.__version__,
             "pysdmx": pysdmx.__version__,
         },
@@ -286,6 +295,14 @@ def run_pipeline(
     }
 
 
+def _installed_version(package: str) -> str | None:
+    """Return a package's installed version, or None when it is not installed."""
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def _structure_map(mappings: dict[str, pd.DataFrame]) -> Any:
     return build_structure_map_from_template_wb(
         mappings,
@@ -302,6 +319,7 @@ def _run_whole(
     steps: _Steps,
     kwargs: dict[str, Any],
     out_csv: Path | None,
+    on_output: Callable[[pd.DataFrame], None] | None,
 ) -> pd.DataFrame:
     """The notebook's chain on one frame; returns the validation errors."""
     df = steps.measure("load", lambda: pd.read_csv(csv, **kwargs))
@@ -318,6 +336,8 @@ def _run_whole(
     errors = steps.measure(
         "validate", lambda: validate_dataset_local(df, schema=schema)
     )
+    if on_output is not None:
+        on_output(df)
     if out_csv is not None:
         steps.measure("write", lambda: df.to_csv(out_csv, index=False))
     return errors
@@ -332,8 +352,11 @@ def _run_chunked(
     kwargs: dict[str, Any],
     chunk_rows: int,
     out_csv: Path | None,
+    on_output: Callable[[pd.DataFrame], None] | None,
 ) -> tuple[int, pd.DataFrame]:
     """The same chain chunk by chunk; returns the chunk count and the errors."""
+    from tidysdmx import DatasetValidator
+
     structure_map = steps.measure("structure_map", lambda: _structure_map(mappings))
     validator = DatasetValidator(schema)
     chunks = 0
@@ -353,6 +376,7 @@ def _run_chunked(
                 steps,
                 out_csv,
                 written,
+                on_output,
             )
             # Drop the last reference before the next chunk is read.
             del chunk
@@ -371,10 +395,11 @@ def _process_chunk(
     requested: list[str],
     structure_map: Any,
     schema: Any,
-    validator: DatasetValidator,
+    validator: "DatasetValidator",
     steps: _Steps,
     out_csv: Path | None,
     written: bool,
+    on_output: Callable[[pd.DataFrame], None] | None,
 ) -> bool:
     """Filter, map, standardise, validate and write one chunk.
 
@@ -391,6 +416,8 @@ def _process_chunk(
         lambda: standardize_output(mapped, artefact_id=ARTEFACT_ID, schema=schema),
     )
     steps.measure("validate", lambda: validator.update(out))
+    if on_output is not None:
+        on_output(out)
     if out_csv is None:
         return written
     steps.measure(

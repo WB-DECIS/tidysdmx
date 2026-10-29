@@ -112,3 +112,142 @@ def make_results():
 def benchmark_results():
     """Return a fresh results dict. Function-scoped: tests modify it."""
     return make_results()
+
+
+# Every version standardises the mock to the same output and finds the same
+# validation errors, until a test says not.
+PIPELINE_FINGERPRINT = "e64105b5214c7223"
+VALIDATION_FINGERPRINT = "0f1e2d3c4b5a6978"
+VALIDATION = {"codelist_ids": 49}
+CHUNKED_REASON = (
+    "this version has no DatasetValidator, which the chunked configuration needs"
+)
+# Each step's seconds at 1M rows on the head; base takes twice as long and
+# v0.10.0 five percent longer. The 1k-row runs are a hundredth of that.
+_HEAD_STEPS = {
+    "read_template": 0.15,
+    "load": 0.8,
+    "filter": 0.1,
+    "structure_map": 0.4,
+    "map": 0.9,
+    "standardize": 0.12,
+    "validate": 0.7,
+}
+_FACTORS = {"head": 1.0, "base": 2.0, "v0.10.0": 1.05}
+
+
+def _pipeline_record(version, config, rows, status="ok", reason=None):
+    measured = status == "ok"
+    factor = _FACTORS[version] * (1 if rows == 1_000_000 else 0.01)
+    gib = 2**30
+    record = {
+        "version": version,
+        "scenario": config,
+        "rows": rows,
+        "status": status,
+        "reason": reason,
+        "input_bytes": rows * 100 if measured else None,
+        "samples_s": [],
+        "median_s": None,
+        "min_s": None,
+        "peak_alloc_bytes": None,
+        "output_shape": [rows // 2, 12] if measured else None,
+        "chunk_rows": None,
+        "steps": [],
+        "peak_rss_bytes": None,
+        "validation": None,
+    }
+    if not measured:
+        return record
+    total = round(sum(_HEAD_STEPS.values()) * factor, 6)
+    peak = int(gib * _FACTORS[version] * (1 if rows == 1_000_000 else 0.15))
+    record.update(
+        samples_s=[total, total * 1.01, total * 0.99],
+        median_s=total,
+        min_s=total * 0.99,
+        output_fingerprint=PIPELINE_FINGERPRINT,
+        chunk_rows=rows // 5 if config == "chunked" else None,
+        steps=[
+            {
+                "step": step,
+                "samples_s": [round(seconds * factor, 6)],
+                "median_s": round(seconds * factor, 6),
+                "peak_rss_bytes": peak,
+                "rows": rows // 2,
+            }
+            for step, seconds in _HEAD_STEPS.items()
+        ],
+        peak_rss_bytes=peak,
+        validation=dict(VALIDATION),
+        validation_fingerprint=VALIDATION_FINGERPRINT,
+    )
+    return record
+
+
+def make_pipeline_results():
+    """Return a fresh pipeline results dict: a PR head, its base, and one release.
+
+    At 1M rows the head's whole-frame run takes 3.17 s against the base's
+    6.34 s and v0.10.0's 3.33 s, peaking at 1, 2 and 1.05 GiB of RSS. The
+    release has no DatasetValidator, so its chunked cases are skipped.
+    """
+    cases = [
+        (config, rows) for rows in (1_000, 1_000_000) for config in ("whole", "chunked")
+    ]
+    records = []
+    for config, rows in cases:
+        for version in ("head", "base", "v0.10.0"):
+            if version == "v0.10.0" and config == "chunked":
+                records.append(
+                    _pipeline_record(version, config, rows, "skipped", CHUNKED_REASON)
+                )
+            else:
+                records.append(_pipeline_record(version, config, rows))
+    deps = {**_deps("3.0.6"), "pyarrow": "26.0.0", "psutil": "7.2.2"}
+    return {
+        "schema_version": 1,
+        "generated_at": "2026-10-29T12:00:00+00:00",
+        "machine": {
+            "platform": "Linux-6.8.0-x86_64-with-glibc2.39",
+            "cpu": "AMD EPYC 7763 64-Core Processor",
+            "cpu_count": 4,
+            "memory_bytes": 16 * 2**30,
+            "runner_image": "ubuntu24 20261020.1",
+        },
+        "sizes": [1_000, 1_000_000],
+        "scenarios": ["whole", "chunked"],
+        "versions": [
+            {
+                "label": "head",
+                "ref": "abc1234def",
+                "commit": "abc1234def5678",
+                "role": "target",
+                "aliases": [],
+                "deps": deps,
+            },
+            {
+                "label": "base",
+                "ref": "origin/dev",
+                "commit": "def5678abc1234",
+                "role": "compare",
+                "aliases": [],
+                "deps": deps,
+            },
+            {
+                "label": "v0.10.0",
+                "ref": "v0.10.0",
+                "commit": "0123456789abcdef",
+                "role": "baseline",
+                "aliases": [],
+                "deps": {**_deps("2.3.3"), "pyarrow": None, "psutil": "7.2.2"},
+            },
+        ],
+        "results": records,
+        "suite": "pipeline",
+    }
+
+
+@pytest.fixture
+def pipeline_results():
+    """Return a fresh pipeline results dict. Function-scoped: tests modify it."""
+    return make_pipeline_results()

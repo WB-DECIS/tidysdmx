@@ -7,6 +7,7 @@ same reason as ``test_benchmarks.py``.
 """
 
 import csv
+import importlib.metadata
 import json
 import re
 import zipfile
@@ -25,6 +26,7 @@ from benchmarks.wb_ids import (
     SCHEMA_JSON,
     TEMPLATE_XLSX,
 )
+from benchmarks.wb_ids import pipeline as pipeline_module
 from benchmarks.wb_ids.generate import _codes, _universe, generate, load_profile
 from benchmarks.wb_ids.memory import PeakRss
 from benchmarks.wb_ids.pipeline import (
@@ -378,6 +380,18 @@ class TestPipeline:
         with pytest.raises(ValueError, match="no REQUESTED_IND_RAW sheet"):
             requested_series({})
 
+    def test_pipeline_records_pyarrow_from_its_metadata(self, pipeline_result):
+        assert pipeline_result["versions"]["pyarrow"] == importlib.metadata.version(
+            "pyarrow"
+        )
+
+    def test_installed_version_is_none_for_an_absent_package(self):
+        assert pipeline_module._installed_version("no-such-package-xyz") is None
+
+    def test_pipeline_module_imports_dataset_validator_lazily(self):
+        # The benchmark suite runs this module inside releases that lack it.
+        assert "DatasetValidator" not in vars(pipeline_module)
+
     def test_pipeline_records_the_whole_frame_mode(self, pipeline_result):
         assert pipeline_result["input"]["chunk_rows"] is None
         assert pipeline_result["input"]["chunks"] == 1
@@ -445,6 +459,36 @@ class TestChunkedPipeline:
     def test_run_pipeline_rejects_a_non_positive_chunk_size(self):
         with pytest.raises(ValueError, match="chunk_rows must be positive"):
             run_pipeline(SAMPLE_CSV, chunk_rows=0)
+
+
+class TestOnOutput:
+    """The hook the benchmark suite fingerprints the standardised output with."""
+
+    def test_on_output_sees_the_whole_frame_once(self, pipeline_result):
+        seen = []
+        run_pipeline(SAMPLE_CSV, on_output=seen.append)
+        standardized = next(
+            step for step in pipeline_result["steps"] if step["step"] == "standardize"
+        )
+        assert [len(frame) for frame in seen] == [standardized["rows"]]
+
+    def test_on_output_sees_every_chunk(self, pipeline_result):
+        seen = []
+        run_pipeline(SAMPLE_CSV, chunk_rows=1000, on_output=seen.append)
+        standardized = next(
+            step for step in pipeline_result["steps"] if step["step"] == "standardize"
+        )
+        assert len(seen) == SAMPLE_ROWS // 1000
+        assert sum(len(frame) for frame in seen) == standardized["rows"]
+
+    def test_on_output_sees_the_standardised_output(self):
+        seen = []
+        run_pipeline(SAMPLE_CSV, chunk_rows=2000, on_output=seen.append)
+        components = {component.id for component in load_schema(SCHEMA_JSON).components}
+        for frame in seen:
+            assert list(frame.columns[:3]) == ["STRUCTURE", "STRUCTURE_ID", "ACTION"]
+            assert set(frame.columns[3:]) <= components
+            assert {"OBS_VALUE", "TIME_PERIOD"} <= set(frame.columns)
 
     def test_chunked_pipeline_refuses_an_input_with_no_requested_series(self, tmp_path):
         """Fail, as whole-frame mode does, rather than report a clean run.
