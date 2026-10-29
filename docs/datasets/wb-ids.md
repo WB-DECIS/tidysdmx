@@ -222,6 +222,24 @@ pipeline together.
   saves a third of the load time (one column fewer and category inference) and
   most of the filter time.
 
+Larger runs in the same container, `--chunk-rows 5000000` with the lean load
+unless marked otherwise; the whole-frame runs could not be repeated here
+(16.4 GB at 40M rows on the 63 GiB machine):
+
+| Rows | Chunks | Load s | Filter s | Map s | Standardize s | Validate s | Total s | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 40M, default load | 8 | 52.5 | 9.2 | 14.5 | 12.3 | 39.7 | 131 | 3.50 GB |
+| 40M | 8 | 30.9 | 4.8 | 6.1 | 9.6 | 35.5 | 90 | 1.98 GB |
+| 147,000,092 (`--scale 1`, 15.0 GB of CSV) | 30 | 135.5 | 25.1 | 66.6 | 45.0 | 100.6 | 383 | 1.99 GB |
+
+- **The whole file runs in 2.0 GB and 6.4 minutes**, against the 60 GB and
+  6 to 7.5 minutes extrapolated for the whole-frame pipeline, and the peak is
+  the same at 10M, 40M and 147M rows: only the chunk's size sets it. The
+  run found the same 113 codelist errors as the smaller mocks.
+- **Writing is the long pole.** The full run also wrote its output with
+  `DataFrame.to_csv`, to `/dev/null` for want of 17 GB of disk, and that took
+  another 623 s, 4.2 µs a row, for a total of 1,006 s.
+
 ## The mock (`benchmarks/wb_ids/`)
 
 | File | What it is |
