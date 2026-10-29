@@ -157,9 +157,10 @@ At 10M rows the frame peaks at 3.4 GB after mapping, when it has 28 columns.
 Memory then peaks at 4.2 GB during validation.
 
 - **Memory grows linearly with rows: about 410 bytes per input row.**
-  Extrapolated to the whole file, 147M rows, the pipeline as it stands needs
+  Extrapolated to the whole file, 147M rows, the pipeline as it stood needed
   about **60 GB** and **6 to 7.5 minutes**. That is beyond this 63 GiB machine
-  once the OS is counted, and far beyond a 16 GB one.
+  once the OS is counted, and far beyond a 16 GB one. The next section is
+  what the October 2026 changes did about it; this table is their baseline.
 - **The mock is calibrated.** At equal row counts it matches the real data
   step by step:
   - time within 5% at every size
@@ -174,6 +175,52 @@ Memory then peaks at 4.2 GB during validation.
 - **What the comparison cannot show.** Real slices from `head` are partition 1's
   early years, while the mock samples whole series across the file. So it
   cannot show effects of row order or of the real data's joint structure.
+
+### After the October 2026 changes
+
+Every step is now chunk-safe and cheaper per row, so the pipeline can run as
+a `pd.read_csv(chunksize=...)` loop whose memory is bounded by the chunk (the
+user guide's "Large files" page has the loop). What changed in the library:
+`map_structures` groups each source column into its distinct values once per
+call instead of once per map, and keeps a categorical source column
+categorical (the eight `Series` targets cost 1 byte a row instead of 11–16);
+`standardize_output` no longer deep-copies the frame; the validation checks
+judge each distinct value once rather than converting every row to text; and
+`DatasetValidator` accumulates the checks across chunks. The runner grew
+`--chunk-rows`, `--skip-unused` (do not read `Series_Name`) and
+`--categories` (code columns and `Year` as `category`).
+
+Measured on the 10M-row mock in a 4-core, 15 GB Linux container (uv-managed
+Python 3.11, pandas 3.0.6, pyarrow 26.0.0), the same machine back to back:
+
+| Run | Load s | Filter s | Map s | Standardize s | Validate s | Total s | Peak RSS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Before, whole frame | 25.3 | 7.9 | 7.2 | 4.0 | 10.7 | 56.2 | 4.31 GB |
+| After, whole frame | 23.7 | 6.9 | 2.8 | 2.7 | 7.0 | 43.9 | 4.31 GB |
+| After, whole frame, lean load | 7.9 | 0.6 | 1.3 | 2.5 | 7.9 | 21.3 | 3.31 GB |
+| After, chunks of 2M rows | 12.9 | 2.2 | 4.2 | 1.5 | 5.5 | 28.4 | 1.50 GB |
+| After, chunks of 2M rows, lean load | 8.2 | 0.9 | 2.4 | 2.1 | 7.5 | 23.1 | 0.90 GB |
+| After, chunks of 5M rows, lean load | 8.1 | 2.1 | 3.9 | 2.7 | 8.4 | 26.6 | 1.98 GB |
+
+"Lean load" is `--skip-unused --categories`. Every run reports the same 113
+codelist errors, and the chunked lean run's output file is byte for byte the
+whole-frame run's (`tests/test_wb_ids.py` checks this on the sample; a
+10M-row `cmp` confirmed it). Writing the 5M-chunk run's output with
+`DataFrame.to_csv` took another 49 s, 5 µs a row, more than the rest of the
+pipeline together.
+
+- **Run whole, the peak did not move.** It is set by two frame-sized
+  transients the changes do not touch: the copy boolean filtering makes
+  (3.5 GB at the `filter` step) and `DataFrame.duplicated` over the 11
+  dimensions inside validation (4.3 GB). Mapping itself fell from 7.2 to
+  2.8 s and the mapped frame from 345 to 131 bytes a row with the lean load.
+- **Run in chunks, the peak is the chunk's working set: about 0.37 KB per
+  chunk row with the lean load, 0.7 KB with the default one.** 2M-row chunks
+  peak at 0.9 GB, 5M-row chunks at 2.0 GB, whatever the file's size. The peak
+  falls inside validation, in `duplicated` over the chunk's dimensions.
+- **Time barely changes.** Chunking costs nothing measurable; the lean load
+  saves a third of the load time (one column fewer and category inference) and
+  most of the filter time.
 
 ## The mock (`benchmarks/wb_ids/`)
 
@@ -281,25 +328,31 @@ errors.
 
 ## Optimisation leads
 
-The measurements above point at:
+Done in October 2026 (see "After the October 2026 changes" above): the file
+is read in chunks; `Series_Name` is not loaded and the code columns are
+categories, which `map_structures` keeps; the eight maps on `Series` share one
+grouping; `standardize_output` no longer copies its input; validation judges
+distinct values rather than rows and accumulates across chunks.
 
-- **Loading.**
-  - Do not load `Series_Name`: that saves 40% of memory.
-  - Load code columns as dictionaries or categories: 4.8 GB instead of 19.6 GB
-    for the whole file.
-  - The whole file need not be in memory at once. The partitions are
-    independent and each holds whole series, so they could be processed one
-    after another.
-- **`map_structures`.**
-  - Eight component maps read the same `Series` column, which is factorised
-    once per map (`mapping.py`, `_distinct_rows`).
-  - Six fixed-value maps each materialise a constant full-length column.
-  - Between them, mapping triples the frame: 8 columns become 28, 1.3 GB
-    becomes 3.4 GB at 10M rows.
-- **`standardize_output`** copies its whole input (`tidysdmx.py`,
-  `_add_sdmx_reference_cols`).
-- **`validate_dataset_local`** takes about 30% of the total. It converts every
-  coded column to text, then checks duplicates over 11 dimensions.
+What the measurements still point at:
+
+- **Writing.** `DataFrame.to_csv` costs 5 µs a row, about 12 minutes for the
+  whole file, more than reading, mapping and validating together. pyarrow's
+  `csv.write_csv` on `pa.Table.from_pandas(chunk)` is the candidate; pyarrow
+  is a development dependency only, so this belongs in the runner or the
+  caller, not the library.
+- **The duplicates check sets each chunk's peak.** `DataFrame.duplicated` over
+  the 11 dimensions holds about 150 bytes a row in int64 labels and a group
+  index. A 64-bit hash of the key columns would halve that, and would also
+  let keys shared by two chunks be found, which the chunked run does not do
+  today by choice (the registry's key check covers it).
+- **Constants.** The six fixed values and the three reference columns are
+  `str` columns of 9–14 bytes a row each, 60–100 bytes a row in all. As
+  single-category categoricals they would be 1 byte a row, but that changes
+  the output's dtypes for every caller, so it was not done.
+- **Loading.** pandas' C parser reads about 1.2M rows a second here on one
+  core. pyarrow's streaming CSV reader is multithreaded and can return
+  dictionary-encoded (categorical) columns directly.
 
 ## Reproducing and regenerating
 
@@ -309,11 +362,15 @@ Anywhere, with no real data:
 uv run python -m benchmarks.wb_ids.generate --rows 10000000 --out mock.csv   # ~1 GB
 uv run python -m benchmarks.wb_ids.pipeline --csv mock.csv --out run.json
 make bench-pipeline WB_IDS_ROWS=10000000                                     # both steps
+# The same, in chunks and with the lean load; --out-csv writes the output too.
+make bench-pipeline WB_IDS_ROWS=10000000 \
+  PIPELINE_ARGS="--chunk-rows 5000000 --skip-unused --categories"
 ```
 
 - **In CI:** run the `Pipeline benchmark` workflow (`pipeline-bench.yml`) by
-  hand, with the sizes to run. A standard GitHub runner has about 16 GB of RAM
-  and 14 GB of free disk, so 10M rows is the practical ceiling there today.
+  hand, with the sizes to run and, in `args`, the runner flags. A standard
+  GitHub runner has about 16 GB of RAM and 14 GB of free disk: run whole, 10M
+  rows is the practical ceiling; run in chunks, only the disk limits the size.
 - **Generating** streams to disk year block by year block, so memory stays
   bounded whatever the size:
 
