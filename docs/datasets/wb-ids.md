@@ -130,7 +130,8 @@ The profile loads the first 2M rows each way and extrapolates linearly:
 ## What the pipeline costs
 
 `python -m benchmarks.wb_ids.pipeline` runs the WB template notebook's steps
-with the mock template and schema:
+with the mock template and schema (`benchmarks.pipeline_case` wraps it to
+compare versions; see "Reproducing and regenerating"):
 
 1. read the template
 2. `read_csv`
@@ -379,16 +380,26 @@ Anywhere, with no real data:
 ```bash
 uv run python -m benchmarks.wb_ids.generate --rows 10000000 --out mock.csv   # ~1 GB
 uv run python -m benchmarks.wb_ids.pipeline --csv mock.csv --out run.json
-make bench-pipeline WB_IDS_ROWS=10000000                                     # both steps
+make pipeline-profile WB_IDS_ROWS=10000000                                   # both steps
 # The same, in chunks and with the lean load; --out-csv writes the output too.
-make bench-pipeline WB_IDS_ROWS=10000000 \
+make pipeline-profile WB_IDS_ROWS=10000000 \
   PIPELINE_ARGS="--chunk-rows 5000000 --skip-unused --categories"
 ```
 
-- **In CI:** run the `Pipeline benchmark` workflow (`pipeline-bench.yml`) by
-  hand, with the sizes to run and, in `args`, the runner flags. A standard
-  GitHub runner has about 16 GB of RAM and 14 GB of free disk: run whole, 10M
-  rows is the practical ceiling; run in chunks, only the disk limits the size.
+- **Against earlier versions:** `make bench-pipeline` runs the same pipeline,
+  whole and in five chunks with the lean load, on the working tree and the
+  last three releases, each in its own environment, and writes one JSON for
+  the Performance page (`benchmarks/results/pipeline.json`). It generates the
+  mock itself, 1M rows by default; `BENCH_ARGS="--sizes 200000 --baselines 1"`
+  for a quick run. A shallow clone needs `git fetch --tags` first. Design:
+  `docs/superpowers/specs/2026-10-29-pipeline-benchmark-design.md`.
+- **In CI:** every pull request that touches `src/tidysdmx/` gets that
+  comparison at 1M rows in its benchmark comment, and every release at 1M and
+  10M rows, attached to the GitHub Release as `pipeline-vX.Y.Z.json` and
+  rendered on the Performance page. A standard GitHub runner has about 16 GB
+  of RAM and 14 GB of free disk: run whole, 10M rows is the practical ceiling;
+  run in chunks, only the disk limits the size. The orchestrator skips a size
+  whose projected peak RSS would exceed 60% of the machine's memory.
 - **Generating** streams to disk year block by year block, so memory stays
   bounded whatever the size:
 

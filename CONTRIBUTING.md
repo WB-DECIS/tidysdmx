@@ -54,6 +54,8 @@ Run `make help` for the full list. The ones you will use:
 | `make build` | build the sdist and wheel, check their metadata, import the wheel |
 | `make docs` / `make docs-preview` | build / live-preview the documentation site |
 | `make bench` | benchmark `map_structures`: the working tree vs the last 3 releases |
+| `make bench-pipeline` | benchmark the whole WB template pipeline, step by step: the working tree vs the last 3 releases |
+| `make pipeline-profile` | time and memory-profile that pipeline on the working tree alone, at any size |
 | `make audit` | check locked dependencies for known vulnerabilities |
 | `make release-dry` | show the version the next release would produce |
 | `make check` | lint + typecheck + cov — CI runs these plus `make build` |
@@ -68,7 +70,8 @@ Performance page, or great-docs skips that section:
 
 ```bash
 uv run python -m benchmarks.report --format page \
-  --input benchmarks/results/latest.json --output performance/index.qmd
+  --input benchmarks/results/latest.json \
+  --pipeline-input benchmarks/results/pipeline.json --output performance/index.qmd
 ```
 
 To run a single test:
@@ -247,19 +250,29 @@ is the bar for merging.
 
 ### Benchmarks on pull requests
 
-A PR that touches `src/tidysdmx/mapping.py`, `benchmarks/` or `pyproject.toml`
-(which declares the dependencies the benchmark installs) gets a benchmark
-comment comparing its head with the base branch and the latest release on the
-same runner. Each push updates it. To benchmark a PR outside those paths, add
-the `benchmark` label. Draft and fork PRs are skipped, and so are Dependabot's:
-the benchmark installs each version with the dependencies that version
-declares and never reads `uv.lock`, so a lockfile-only bump cannot change what
-it measures. The full grid takes a while, and the check is not required for
-merging.
+A PR gets one benchmark comment comparing its head with the base branch and
+the latest release on the same runner, with a section for each suite that ran.
+Each push updates it.
 
-To measure locally, `make bench` compares your working tree with the last
-three releases and `make docs-preview` shows the result on the Performance
-page. Laptop numbers describe the laptop; compare them only with each other.
+- The **`map_structures` suite** runs when the PR touches
+  `src/tidysdmx/mapping.py`, `benchmarks/` or `pyproject.toml` (which declares
+  the dependencies the benchmark installs).
+- The **pipeline suite** runs when the PR touches anything under
+  `src/tidysdmx/`, `benchmarks/` or `pyproject.toml`: it times every step of
+  the WB template pipeline on a 1M-row mock of the WB_IDS bronze file, whole
+  and in chunks, and reports each step's time and the run's peak memory.
+
+To benchmark a PR outside those paths, add the `benchmark` label, which runs
+both. Draft and fork PRs are skipped, and so are Dependabot's: the benchmark
+installs each version with the dependencies that version declares and never
+reads `uv.lock`, so a lockfile-only bump cannot change what it measures. The
+grids take a while, and neither check is required for merging.
+
+To measure locally, `make bench` and `make bench-pipeline` compare your
+working tree with the last three releases and `make docs-preview` shows both
+results on the Performance page. A fresh or shallow clone may have no tags:
+`git fetch --tags` first, or the harness finds no releases to compare with.
+Laptop numbers describe the laptop; compare them only with each other.
 
 ## Code of Conduct
 
