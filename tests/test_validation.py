@@ -251,6 +251,45 @@ class TestValidateDatasetLocal:
         assert isinstance(result, pd.DataFrame)
         assert result.empty
 
+    @pytest.mark.parametrize(
+        ("key", "value", "error", "match"),
+        [
+            pytest.param(
+                "valid_comp",
+                {"TIME_PERIOD"},
+                TypeError,
+                r"valid\['valid_comp'\] must be a list of str, got set",
+                id="set-of-components",
+            ),
+            pytest.param(
+                "mandatory_comp",
+                [1],
+                TypeError,
+                r"valid\['mandatory_comp'\] must be a list of str",
+                id="non-str-component",
+            ),
+            pytest.param(
+                "codelist_ids",
+                [["AREA", "COL"]],
+                TypeError,
+                r"valid\['codelist_ids'\] must be a dict of column to code IDs",
+                id="codelists-not-a-dict",
+            ),
+            pytest.param("dim_comp", None, KeyError, "dim_comp", id="missing-entry"),
+        ],
+    )
+    def test_validate_dataset_local_rejects_a_malformed_valid_entry(
+        self, valid_info, key, value, error, match
+    ):
+        """A cached ``valid`` dict is a boundary: its entries are checked."""
+        if value is None:
+            del valid_info[key]
+        else:
+            valid_info[key] = value
+        df = pd.DataFrame({"TIME_PERIOD": ["2020"], "AREA": ["COL"]})
+        with pytest.raises(error, match=match):
+            validate_dataset_local(df, valid=valid_info)
+
     def test_unexpected_column_error(self, valid_info):
         """Tests that unexpected columns produce one error row per column."""
         df = pd.DataFrame(
