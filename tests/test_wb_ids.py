@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from openpyxl import Workbook, load_workbook
+from openpyxl.packaging.custom import StringProperty
 from pysdmx.model import Role
 
 from benchmarks.wb_ids import (
@@ -304,6 +305,9 @@ class TestScrubTemplate:
         requested.append(["Series"])
         requested.append(["DT_X_CD\xa0"])
         workbook.properties.creator = "Jane Doe"
+        workbook.custom_doc_props.append(
+            StringProperty(name="MSIP_Label_x_Name", value="Official Use Only")
+        )
         path = tmp_path / "real.xlsx"
         workbook.save(path)
         out = tmp_path / "mock.xlsx"
@@ -321,6 +325,10 @@ class TestScrubTemplate:
         with zipfile.ZipFile(real_like) as archive:
             text = b"".join(archive.read(name) for name in archive.namelist())
         assert not re.search(rb"Jane|jdoe", text)
+
+    def test_scrub_removes_custom_document_properties(self, real_like):
+        with zipfile.ZipFile(real_like) as archive:
+            assert "docProps/custom.xml" not in archive.namelist()
 
     def test_scrub_respells_sources_as_the_csv_columns(self, real_like):
         assert load_workbook(real_like)["COMP_MAPPING"]["A2"].value == "Country_Code"
@@ -344,6 +352,13 @@ class TestScrubTemplate:
         with zipfile.ZipFile(TEMPLATE_XLSX) as archive:
             text = b"".join(archive.read(name) for name in archive.namelist())
         assert b"mailto:" not in text
+
+    def test_committed_template_has_no_sensitivity_label(self):
+        # The real workbook is labelled in the World Bank's tenant; the label
+        # and the tenant's id must not ship in a public repository.
+        with zipfile.ZipFile(TEMPLATE_XLSX) as archive:
+            text = b"".join(archive.read(name) for name in archive.namelist())
+        assert b"MSIP_Label" not in text
 
 
 class TestPipeline:

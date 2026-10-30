@@ -24,6 +24,10 @@ pandas 3.0.6 (Arrow-backed `str`), pyarrow 26.0.0 and numpy 2.4.6.
   (`https://fmr.worldbank.org/FMR/sdmx/v2`). It is not on fmrqa.
 - **Personal data:** the template's INFO sheet names its task team leader, with
   an email address. The committed copy is scrubbed.
+- **Document properties:** the real workbook carries a Microsoft sensitivity
+  label and SharePoint metadata, including the tenant's id, in its custom
+  document properties. The INFO sheet classifies the content as public, and
+  the committed copy has no custom properties.
 
 ## Size and shape
 

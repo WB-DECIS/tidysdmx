@@ -5,7 +5,9 @@ public IDS metadata and is kept as is, so the mock pipeline maps exactly as the
 real one does. Two kinds of change are made:
 
 - Personal data is replaced: the INFO sheet's TTL name and email, any
-  ``mailto:`` hyperlink, and the workbook's author properties.
+  ``mailto:`` hyperlink, and the workbook's author properties. The custom
+  document properties are dropped: the real workbook carries the World Bank
+  tenant's sensitivity label and SharePoint metadata there.
 - Typos that silently lose data in the real workbook are fixed, so the mock
   pipeline maps everything it is meant to (docs/datasets/wb-ids.md lists both):
   - A COMP_MAPPING ``SOURCE`` that matches a bronze CSV column only when case
@@ -24,6 +26,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.packaging.custom import CustomPropertyList
 from openpyxl.worksheet.worksheet import Worksheet
 
 from benchmarks.wb_ids import TEMPLATE_XLSX
@@ -68,8 +71,19 @@ def scrub(real: Path, out: Path) -> list[str]:
     workbook.properties.creator = AUTHOR
     workbook.properties.lastModifiedBy = AUTHOR
     changes.append(f"properties: creator and lastModifiedBy -> {AUTHOR!r}")
+    changes += _drop_custom_properties(workbook)
     workbook.save(out)
     return changes
+
+
+def _drop_custom_properties(workbook: Workbook) -> list[str]:
+    """Remove every custom document property, sensitivity labels included."""
+    names = workbook.custom_doc_props.names
+    if not names:
+        return []
+    # An empty list is not written, so the copy has no docProps/custom.xml.
+    workbook.custom_doc_props = CustomPropertyList()
+    return [f"custom properties: {len(names)} removed ({', '.join(names)})"]
 
 
 def _replace_info(sheet: Worksheet) -> list[str]:
