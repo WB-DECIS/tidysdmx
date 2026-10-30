@@ -55,6 +55,10 @@ def _prints_equal_values_alike(column: pd.Series) -> bool:
     ``True`` compare equal but print differently, nor for a float column,
     where ``0.0`` and ``-0.0`` do; those must be converted row by row.
 
+    The dtype decides, except for an ``object`` column (or a dtype this does
+    not place), whose values must be inspected: a column declared ``str`` or
+    ``category`` costs no inference.
+
     Args:
         column: The column a text comparison will read.
 
@@ -63,7 +67,7 @@ def _prints_equal_values_alike(column: pd.Series) -> bool:
         converted.
     """
     dtype = column.dtype
-    if isinstance(dtype, pd.CategoricalDtype):
+    if isinstance(dtype, pd.CategoricalDtype | pd.StringDtype):
         return True
     kind = getattr(dtype, "kind", "O")
     if kind in "iubMm":

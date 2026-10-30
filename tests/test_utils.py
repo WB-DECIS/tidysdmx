@@ -20,6 +20,7 @@ from pysdmx.model import (
 from typeguard import TypeCheckError
 
 from tidysdmx.utils import (
+    _prints_equal_values_alike,
     build_excel_workbook,
     create_mapping_rules,
     extract_component_ids,
@@ -266,6 +267,40 @@ class TestExtractValidationInfo:
         """Dimensions come from pysdmx's Components.dimensions view."""
         result = extract_validation_info(enumerated_schema)
         assert result["dim_comp"] == ["LOCAL", "AREA"]
+
+
+class TestPrintsEqualValuesAlike:
+    """Whether a text comparison may judge a column's distinct values once."""
+
+    @pytest.mark.parametrize(
+        ("values", "dtype", "expected"),
+        [
+            pytest.param(["a", None, "a"], "str", True, id="str"),
+            pytest.param(["a", None, "a"], "string", True, id="string"),
+            pytest.param(["a", None, "a"], "category", True, id="category"),
+            pytest.param([1, 2, 1], "int64", True, id="int"),
+            pytest.param([1, None, 1], "Int64", True, id="nullable-int"),
+            pytest.param([True, False], "bool", True, id="bool"),
+            pytest.param(["2020-01-01"], "datetime64[ns]", True, id="datetime"),
+            pytest.param([0.0, -0.0], "float64", False, id="float"),
+            pytest.param([1 + 0j], "complex128", False, id="complex"),
+            pytest.param(["a", None, "b"], object, True, id="object-of-str"),
+            pytest.param([1, 1.0, "a"], object, False, id="mixed-object"),
+        ],
+    )
+    def test_prints_equal_values_alike_by_dtype(self, values, dtype, expected):
+        column = pd.Series(values, dtype=dtype)
+        assert _prints_equal_values_alike(column) is expected
+
+    @pytest.mark.parametrize("dtype", ["str", "string", "category"])
+    def test_prints_equal_values_alike_does_not_infer_a_declared_column(
+        self, dtype, monkeypatch
+    ):
+        def fail(*args, **kwargs):
+            raise AssertionError("a declared dtype needs no inference")
+
+        monkeypatch.setattr(pd.api.types, "infer_dtype", fail)
+        assert _prints_equal_values_alike(pd.Series(["a", "b"], dtype=dtype))
 
 
 class TestSdmxReferenceColsFor:

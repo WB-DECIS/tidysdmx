@@ -52,7 +52,7 @@ Memory is now bounded by the chunk, whatever the file's size. The template, the 
 Three `read_csv` arguments do most of the work before tidysdmx runs at all:
 
 - **`usecols`**: load only the columns the structure map reads. In the IDS extract, `Series_Name` is a label of `Series` that nothing maps, and it is 60% of the file's text.
-- **`dtype` for every column you load**: then `read_csv` infers no type, and no column can change type between chunks (a footnote column that is empty in a whole chunk is otherwise inferred as float in that chunk and text in the next). Use `category` for code columns: a code column of 147 million rows holds a few hundred distinct values, and as `category` it costs one or two bytes a row instead of ten to twenty, and `map_structures` keeps it categorical through to the output (see below). `Year`, the time dimension, can be one too.
+- **`dtype` for every column you load**: then `read_csv` infers no type, and no column can change type between chunks (a footnote column that is empty in a whole chunk is otherwise inferred as float in that chunk and text in the next). Use `category` for code columns: a code column of 147 million rows holds a few hundred distinct values, and as `category` it costs one or two bytes a row instead of ten to twenty, and `map_structures` keeps it categorical through to the output (see below). `Year`, the time dimension, can be one too. Declared `str` and `category` columns also spare the validation checks any inference of what a column holds.
 - **`chunksize`**: the chunk is the only thing that scales with memory.
 
 Keep the index pandas gives each chunk rather than calling `reset_index`: the labels are file positions, and `DatasetValidator` reports them when a row has a missing value.
