@@ -43,9 +43,15 @@ import pysdmx
 
 import tidysdmx
 from benchmarks.records import PIPELINE_STEPS, Machine
-from benchmarks.wb_ids import SAMPLE_CSV, SCHEMA_JSON, TEMPLATE_XLSX
+from benchmarks.wb_ids import (
+    CODE_COLUMNS,
+    COLUMNS,
+    SAMPLE_CSV,
+    SCHEMA_JSON,
+    TEMPLATE_XLSX,
+    TEXT_COLUMNS,
+)
 from benchmarks.wb_ids.memory import PeakRss, machine
-from benchmarks.wb_ids.profile import CODE_COLUMNS, COLUMNS, TEXT_COLUMNS
 from benchmarks.wb_ids.schema import ARTEFACT_ID, load_schema
 
 # Only the functions every release has: the benchmark suite runs this module

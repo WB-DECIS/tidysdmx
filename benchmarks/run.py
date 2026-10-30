@@ -25,7 +25,6 @@ import io
 import json
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -42,7 +41,6 @@ from benchmarks.records import (
     SCENARIOS,
     SCHEMA_VERSION,
     WORKTREE,
-    Machine,
     PipelineRecord,
     Record,
     Results,
@@ -52,6 +50,7 @@ from benchmarks.records import (
     VersionInfo,
     empty_pipeline_record,
     empty_record,
+    machine_info,
     release_key,
 )
 
@@ -639,44 +638,6 @@ def target_measured(records: Sequence[Record], target: str) -> bool:
         record["status"] == "ok" and record.get("version") == target
         for record in records
     )
-
-
-def machine_info() -> Machine:
-    """Describe the machine this runs on."""
-    return {
-        "platform": platform.platform(),
-        "cpu": _cpu_model(),
-        "cpu_count": os.cpu_count(),
-        "memory_bytes": _memory_bytes(),
-        "runner_image": _runner_image(),
-    }
-
-
-def _cpu_model() -> str:
-    cpuinfo = Path("/proc/cpuinfo")
-    if cpuinfo.exists():
-        for line in cpuinfo.read_text(encoding="utf-8").splitlines():
-            if line.startswith("model name"):
-                return line.partition(":")[2].strip()
-    return platform.processor() or "unknown CPU"
-
-
-def _memory_bytes() -> int | None:
-    meminfo = Path("/proc/meminfo")
-    if meminfo.exists():
-        for line in meminfo.read_text(encoding="utf-8").splitlines():
-            if line.startswith("MemTotal:"):
-                return int(line.split()[1]) * 1024
-    return None
-
-
-def _runner_image() -> str | None:
-    # GitHub-hosted runners really do export these mixed-case names, and
-    # environment names are case-sensitive on Linux: capitalising them (SIM112)
-    # would read nothing there.
-    image = os.environ.get("ImageOS")  # noqa: SIM112
-    version = os.environ.get("ImageVersion")  # noqa: SIM112
-    return f"{image} {version}" if image and version else None
 
 
 def _parser() -> argparse.ArgumentParser:

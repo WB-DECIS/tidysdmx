@@ -10,6 +10,8 @@ import csv
 import importlib.metadata
 import json
 import re
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -481,6 +483,26 @@ class TestChunkedPipeline:
     def test_run_pipeline_rejects_a_non_positive_chunk_size(self):
         with pytest.raises(ValueError, match="chunk_rows must be positive"):
             run_pipeline(SAMPLE_CSV, chunk_rows=0)
+
+
+class TestImports:
+    def test_pipeline_module_imports_without_pyarrow(self):
+        # The runner reports pyarrow as optional, so importing it must not pull
+        # pyarrow in through another module (profile.py needs it). A fresh
+        # interpreter, since this one has already imported pyarrow.
+        script = (
+            "import sys; sys.modules['pyarrow'] = None; "
+            "import benchmarks.wb_ids.pipeline"
+        )
+        # Fixed arguments: this interpreter and a literal script.
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
 
 
 class TestOnOutput:

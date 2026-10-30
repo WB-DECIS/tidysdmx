@@ -29,8 +29,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.packaging.custom import CustomPropertyList
 from openpyxl.worksheet.worksheet import Worksheet
 
-from benchmarks.wb_ids import TEMPLATE_XLSX
-from benchmarks.wb_ids.profile import COLUMNS
+from benchmarks.wb_ids import COLUMNS, TEMPLATE_XLSX
 
 PLACEHOLDERS: dict[str, str] = {
     "TTL NAME": "Mock Task Team Leader",

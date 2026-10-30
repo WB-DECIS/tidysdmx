@@ -12,8 +12,7 @@ from typing import Self
 
 import psutil
 
-from benchmarks.records import Machine
-from benchmarks.run import machine_info
+from benchmarks.records import Machine, machine_info
 
 SAMPLE_INTERVAL_S: float = 0.01
 
@@ -27,7 +26,7 @@ def machine() -> Machine:
     """Describe this machine, total memory included on every platform.
 
     Returns:
-        ``benchmarks.run.machine_info()``, with ``memory_bytes`` from psutil
+        ``benchmarks.records.machine_info()``, with ``memory_bytes`` from psutil
         where ``/proc/meminfo`` is not available (Windows, macOS).
     """
     info = machine_info()

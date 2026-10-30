@@ -25,3 +25,18 @@ SCHEMA_JSON: Path = DATA_DIR / "ds_ids_schema.json"
 SAMPLE_CSV: Path = DATA_DIR / "WB_IDS_BRONZE_mock.csv"
 # About 400 KB, under the check-added-large-files hook's 500 KB limit.
 SAMPLE_ROWS: int = 4_000
+
+# The bronze CSV's header, in file order. Here rather than in ``profile``, so a
+# module that only needs the names does not import pyarrow with them.
+COLUMNS: tuple[str, ...] = (
+    "Country_Code",
+    "Counterpart_Area_Code",
+    "Series",
+    "Series_Name",
+    "Year",
+    "Value",
+    "country_series_metadata",
+    "footnote",
+)
+CODE_COLUMNS: tuple[str, ...] = ("Country_Code", "Counterpart_Area_Code", "Series")
+TEXT_COLUMNS: tuple[str, ...] = ("country_series_metadata", "footnote")

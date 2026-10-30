@@ -29,22 +29,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pcsv
 
-from benchmarks.wb_ids import PROFILE_JSON
+from benchmarks.wb_ids import CODE_COLUMNS, COLUMNS, PROFILE_JSON, TEXT_COLUMNS
 from benchmarks.wb_ids.memory import PeakRss, machine
 
 SCHEMA_VERSION: int = 1
-COLUMNS: tuple[str, ...] = (
-    "Country_Code",
-    "Counterpart_Area_Code",
-    "Series",
-    "Series_Name",
-    "Year",
-    "Value",
-    "country_series_metadata",
-    "footnote",
-)
-CODE_COLUMNS: tuple[str, ...] = ("Country_Code", "Counterpart_Area_Code", "Series")
-TEXT_COLUMNS: tuple[str, ...] = ("country_series_metadata", "footnote")
 BLOCK_SIZE: int = 64 << 20
 LOAD_ROWS: int = 2_000_000
 QUANTILES: tuple[float, ...] = (

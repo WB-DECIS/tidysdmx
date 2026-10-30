@@ -35,8 +35,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pcsv
 
-from benchmarks.wb_ids import PROFILE_JSON
-from benchmarks.wb_ids.profile import COLUMNS
+from benchmarks.wb_ids import COLUMNS, PROFILE_JSON
 
 Json = dict[str, Any]
 _CHUNK: int = 200_000
