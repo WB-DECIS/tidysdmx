@@ -19,8 +19,9 @@ Two ways of running the same steps:
 
 ``--skip-unused`` and ``--categories`` make the load lean in either mode: the
 first does not read ``Series_Name``, which the pipeline never maps, and the
-second loads the code columns and ``Year`` as ``category``, which
-``map_structures`` keeps categorical through to the output.
+second declares every column's dtype, so ``read_csv`` infers none: the code
+columns and ``Year`` as ``category``, which ``map_structures`` keeps
+categorical through to the output.
 """
 
 import argparse
@@ -67,9 +68,11 @@ REQUESTED_SHEET: str = "REQUESTED_IND_RAW"
 SAMPLE_ERRORS: int = 10
 # The column the pipeline never reads: 60% of the file's text.
 UNUSED_COLUMN: str = "Series_Name"
-# Loaded as category by --categories; the text columns get an explicit str so
-# a chunk in which they are empty is not inferred as float.
+# --categories declares every loaded column's dtype, so read_csv infers none:
+# these as category, the text columns as str (a chunk in which one is empty is
+# otherwise inferred as float), and Value as float64.
 CATEGORY_COLUMNS: tuple[str, ...] = (*CODE_COLUMNS, "Year")
+VALUE_COLUMN: str = "Value"
 _MB: float = 1e6
 
 T = TypeVar("T")
@@ -189,8 +192,9 @@ def read_csv_kwargs(skip_unused: bool, categories: bool) -> dict[str, Any]:
 
     Args:
         skip_unused: Do not read ``Series_Name``.
-        categories: Read the code columns and ``Year`` as ``category``, and
-            the two text columns as ``str``.
+        categories: Declare every loaded column's dtype: the code columns
+            and ``Year`` as ``category``, ``Value`` as ``float64``, and the
+            text columns (``Series_Name`` too, when it is read) as ``str``.
 
     Returns:
         Keyword arguments for ``pd.read_csv``; empty for the default load.
@@ -199,9 +203,11 @@ def read_csv_kwargs(skip_unused: bool, categories: bool) -> dict[str, Any]:
     if skip_unused:
         kwargs["usecols"] = [column for column in COLUMNS if column != UNUSED_COLUMN]
     if categories:
+        text = TEXT_COLUMNS if skip_unused else (UNUSED_COLUMN, *TEXT_COLUMNS)
         kwargs["dtype"] = {
             **dict.fromkeys(CATEGORY_COLUMNS, "category"),
-            **dict.fromkeys(TEXT_COLUMNS, "str"),
+            **dict.fromkeys(text, "str"),
+            VALUE_COLUMN: "float64",
         }
     return kwargs
 
@@ -225,7 +231,8 @@ def run_pipeline(
         schema_json: The target schema, as ``benchmarks.wb_ids.schema`` writes it.
         chunk_rows: Rows per chunk. None runs the whole frame at once.
         skip_unused: Do not load ``Series_Name``.
-        categories: Load the code columns and ``Year`` as ``category``.
+        categories: Declare every column's dtype, with the code columns and
+            ``Year`` as ``category``.
         out_csv: Write the standardised output here (overwritten; appended to
             chunk by chunk in chunked mode).
         on_output: Called with the standardised output once it is validated:
@@ -541,7 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--categories",
         action="store_true",
-        help="load the code columns and Year as category",
+        help="declare every column's dtype: code columns and Year as category",
     )
     parser.add_argument(
         "--out-csv", type=Path, help="write the standardised output here"

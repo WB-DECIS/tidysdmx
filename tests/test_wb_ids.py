@@ -471,6 +471,13 @@ class TestChunkedPipeline:
         assert kwargs["dtype"]["footnote"] == "str"
         assert read_csv_kwargs(skip_unused=False, categories=False) == {}
 
+    @pytest.mark.parametrize("skip_unused", [True, False])
+    def test_read_csv_kwargs_declare_every_loaded_column(self, skip_unused):
+        kwargs = read_csv_kwargs(skip_unused=skip_unused, categories=True)
+        loaded = kwargs.get("usecols", list(COLUMNS))
+        assert set(kwargs["dtype"]) == set(loaded)
+        assert kwargs["dtype"]["Value"] == "float64"
+
     def test_run_pipeline_rejects_a_non_positive_chunk_size(self):
         with pytest.raises(ValueError, match="chunk_rows must be positive"):
             run_pipeline(SAMPLE_CSV, chunk_rows=0)
