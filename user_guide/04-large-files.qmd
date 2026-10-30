@@ -6,7 +6,7 @@ tags: [Workflow, Mapping, Validation]
 
 # Large files
 
-The quick start holds one DataFrame from `read_csv` to `validate_dataset_local`. That is fine until the file is bigger than the machine: the World Bank's International Debt Statistics extract is a 15 GB CSV of 147 million rows, and run whole it needs about 50 GB because mapping adds twenty columns to the eight it reads. Nothing in the chain needs the whole dataset at once, though. Every map in `map_structures` and every column `standardize_output` adds works row by row, and the validation checks only need to remember what they have found. So read the file in chunks, run the chain on each, write each chunk's output out, and let `DatasetValidator` accumulate the report.
+The quick start holds one DataFrame from `read_csv` to `validate_dataset_local`. That is fine until the file is bigger than the machine: the World Bank's International Debt Statistics extract is a 15 GB CSV of 147 million rows, and run whole it needs about 60 GB because mapping adds twenty columns to the eight it reads. Nothing in the chain needs the whole dataset at once, though. Every map in `map_structures` and every column `standardize_output` adds works row by row, and the validation checks only need to remember what they have found. So read the file in chunks, run the chain on each, write each chunk's output out, and let `DatasetValidator` accumulate the report.
 
 ## The loop
 
@@ -20,6 +20,7 @@ DTYPES = {
     "Counterpart_Area_Code": "category",
     "Series": "category",
     "Year": "category",
+    "Value": "float64",
 }
 
 validator = DatasetValidator(schema)
@@ -37,10 +38,12 @@ with pd.read_csv(
         out.to_csv("WB_IDS.csv", mode="a" if written else "w", header=not written, index=False)
         written = True
 
+if validator.rows == 0:
+    raise ValueError("No row matched the requested series; nothing was written.")
 errors = validator.errors()
 ```
 
-The first chunk written out creates the file and its header, whichever chunk that is: a chunk can lose every row to the filter, so the input chunk's number is not what decides.
+The first chunk written out creates the file and its header, whichever chunk that is: a chunk can lose every row to the filter, so the input chunk's number is not what decides. If every chunk loses every row, nothing is written and `errors()` comes back empty, which reads like a clean run; `validator.rows`, the number of rows validated, tells the two apart.
 
 Memory is now bounded by the chunk, whatever the file's size. The template, the structure map and the schema are built once; the loop only moves data.
 
@@ -49,8 +52,8 @@ Memory is now bounded by the chunk, whatever the file's size. The template, the 
 Three `read_csv` arguments do most of the work before tidysdmx runs at all:
 
 - **`usecols`**: load only the columns the structure map reads. In the IDS extract, `Series_Name` is a label of `Series` that nothing maps, and it is 60% of the file's text.
-- **`dtype="category"` for code columns**: a code column of 147 million rows holds a few hundred distinct values. As `category` it costs one or two bytes a row instead of ten to twenty, and `map_structures` keeps it categorical through to the output (see below). `Year`, the time dimension, can be one too.
-- **`chunksize`**: the chunk is the only thing that scales with memory. Pass an explicit `dtype` for sparse text columns (a footnote column that is empty in a whole chunk is otherwise inferred as float in that chunk and text in the next).
+- **`dtype` for every column you load**: then `read_csv` infers no type, and no column can change type between chunks (a footnote column that is empty in a whole chunk is otherwise inferred as float in that chunk and text in the next). Use `category` for code columns: a code column of 147 million rows holds a few hundred distinct values, and as `category` it costs one or two bytes a row instead of ten to twenty, and `map_structures` keeps it categorical through to the output (see below). `Year`, the time dimension, can be one too.
+- **`chunksize`**: the chunk is the only thing that scales with memory.
 
 Keep the index pandas gives each chunk rather than calling `reset_index`: the labels are file positions, and `DatasetValidator` reports them when a row has a missing value.
 
@@ -64,7 +67,7 @@ Source columns loaded as `str` or `object` behave exactly as before.
 
 `DatasetValidator(schema)` takes the same `sdmx_cols` and `max_errors` as `validate_dataset_local`, and `errors()` returns the same DataFrame of errors. What it keeps between chunks is bounded by `max_errors`, never by rows: the unexpected and the missing mandatory columns, each coded column's invalid values, and the counts of rows with missing values or duplicate keys with a sample of each.
 
-One check is weaker than on a single frame. Duplicate keys are found within each chunk, so a key that two chunks share is not reported. Chunk on a dimension if that matters (a file written country by country cannot split a key), or rely on the registry's own key check at upload.
+One check is weaker than on a single frame. Duplicate keys are found within each chunk, so two rows that share a key but fall in different chunks are not reported. `chunksize` cuts the file at a row count, not at key boundaries, so this holds however the file is sorted. If it matters, check the keys across chunks yourself, or rely on the registry's own key check at upload. For the same reason the duplicates message counts key combinations chunk by chunk: a key duplicated within two chunks counts twice.
 
 `validate_dataset_local(df, schema)` is itself one `update` on a fresh validator, so the two cannot drift.
 

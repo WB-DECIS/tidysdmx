@@ -232,9 +232,13 @@ class DatasetValidator:
     Feed the chunks of one dataset to :meth:`update`, then call :meth:`errors`
     for the error DataFrame :func:`validate_dataset_local` would return for
     the whole dataset, with one difference: duplicate keys are found within
-    each chunk, so a key that two chunks share is not reported. Chunk on a
-    dimension to rule that out, or rely on the registry's own key check at
-    upload.
+    each chunk, so two rows that share a key but fall in different chunks
+    are not reported. ``pd.read_csv(..., chunksize=...)`` cuts at a row
+    count, not at key boundaries, so this holds however the file is sorted;
+    rely on the registry's own key check at upload, or check keys across
+    chunks yourself. For the same reason the duplicates message counts key
+    combinations chunk by chunk, so a key duplicated within two chunks
+    counts twice.
 
     What is kept between chunks is bounded by ``max_errors``, not by rows:
     the unexpected and the missing mandatory columns seen, each coded

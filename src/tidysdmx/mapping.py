@@ -733,7 +733,8 @@ def apply_multi_component_map(
 
     When every source column is categorical the target is categorical, with
     the map's target values in stored order as categories (see
-    ``map_structures``); otherwise it is an object column.
+    ``map_structures``); otherwise it is a ``str`` column, missing where no
+    rule matches.
 
     Args:
         df: Source data.
