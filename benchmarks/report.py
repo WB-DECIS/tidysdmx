@@ -1,8 +1,11 @@
 """Render benchmark results as Markdown: ``python -m benchmarks.report``.
 
-One results file (``benchmarks.records.Results``) feeds three formats:
+A results file (``benchmarks.records.Results``) of either suite feeds three
+formats:
 
-- ``page``: the docs site's Performance page, with charts;
+- ``page``: the docs site's Performance page, with charts; the mapping
+  suite's results fill its first marker and the pipeline suite's
+  (``--pipeline-input``) its second;
 - ``summary``: a GitHub Actions job summary;
 - ``pr-comment``: the sticky pull-request comment, ``summary`` behind a marker.
 
@@ -23,12 +26,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 from benchmarks.records import (
+    PIPELINE_STEPS,
     SCHEMA_VERSION,
     WORKTREE,
+    PipelineRecord,
     Record,
     Results,
     VersionInfo,
+    asset_name,
     release_key,
+    suite_of,
 )
 
 if TYPE_CHECKING:
@@ -37,7 +44,10 @@ if TYPE_CHECKING:
 TEMPLATE: Path = Path(__file__).with_name("page.qmd")
 COMMENT_MARKER: str = "<!-- tidysdmx-benchmark -->"
 RESULTS_MARKER: str = "<!-- RESULTS -->"
+PIPELINE_MARKER: str = "<!-- PIPELINE-RESULTS -->"
 HEADLINE_SCENARIO: str = "typical"
+TOTAL_ROW: str = "total"
+RSS_ROW: str = "peak RSS"
 SAME_BAND: float = 0.10
 REPO_URL: str = "https://github.com/WB-DECIS/tidysdmx"
 
@@ -56,6 +66,17 @@ _METRIC_TITLES: dict[str, str] = {
     "memory": "Peak extra memory",
 }
 _BYTE_UNITS: tuple[str, ...] = ("B", "KiB", "MiB", "GiB")
+_CONFIG_TITLES: dict[str, str] = {
+    "whole": "whole frame",
+    "chunked": "chunked, lean load",
+}
+_DEP_TITLES: dict[str, str] = {
+    "python": "Python",
+    "pandas": "pandas",
+    "numpy": "numpy",
+    "pysdmx": "pysdmx",
+    "pyarrow": "pyarrow",
+}
 
 
 def load_results(path: Path) -> Results | None:
@@ -77,6 +98,8 @@ def load_results(path: Path) -> Results | None:
         raise ValueError(
             f"{path} is not a schema {SCHEMA_VERSION} benchmark results file"
         )
+    # Files written before the pipeline suite existed name no suite.
+    data.setdefault("suite", "mapping")
     return cast(Results, data)
 
 
@@ -296,17 +319,21 @@ def _short_commit(commit: str) -> str:
 
 
 def environment_table(results: Results) -> str:
-    """List what every version ran with."""
-    header = ["Version", "Role", "Commit", "Python", "pandas", "numpy", "pysdmx"]
+    """List what every version ran with.
+
+    The pipeline suite's table adds pyarrow: its environments carry it, which
+    decides how pandas 3 stores strings.
+    """
+    packages = ["python", "pandas", "numpy", "pysdmx"]
+    if suite_of(results) == "pipeline":
+        packages.append("pyarrow")
+    header = ["Version", "Role", "Commit", *(_DEP_TITLES[name] for name in packages)]
     body = [
         [
             display_label(info),
             info["role"],
             _short_commit(info["commit"]),
-            *(
-                info["deps"].get(name) or MISSING
-                for name in ("python", "pandas", "numpy", "pysdmx")
-            ),
+            *(info["deps"].get(name) or MISSING for name in packages),
         ]
         for info in results["versions"]
     ]
@@ -316,15 +343,19 @@ def environment_table(results: Results) -> str:
 def render_comparison(results: Results, run_url: str | None = None) -> str:
     """Return the job summary: every version compared at the largest size.
 
-    Every other size follows inside a collapsed ``<details>`` block.
+    Every other size follows inside a collapsed ``<details>`` block. The
+    mapping suite compares scenarios by time and memory; the pipeline suite
+    compares each step's time and the run's peak RSS, per configuration.
 
     Args:
-        results: The benchmark results.
+        results: The benchmark results, of either suite.
         run_url: The workflow run to link, if any.
 
     Returns:
         GitHub-flavoured Markdown.
     """
+    if suite_of(results) == "pipeline":
+        return render_pipeline_comparison(results, run_url)
     target = results["versions"][0]
     largest = max(results["sizes"])
     source = f" in [this run]({run_url})" if run_url else ""
@@ -359,10 +390,282 @@ def render_pr_comment(results: Results, run_url: str | None = None) -> str:
     return f"{COMMENT_MARKER}\n{render_comparison(results, run_url)}"
 
 
+def step_value(record: Record | None, row: str) -> float | None:
+    """Return a pipeline record's value for one table row, if it was measured.
+
+    Args:
+        record: The version's pipeline record on the case.
+        row: A step name, ``TOTAL_ROW`` (the whole run's median seconds) or
+            ``RSS_ROW`` (the run's peak RSS in bytes).
+
+    Returns:
+        The value, or ``None`` when the case was not measured or the record
+        has no such step.
+    """
+    if record is None or record["status"] != "ok":
+        return None
+    pipeline = cast(PipelineRecord, record)
+    if row == TOTAL_ROW:
+        return None if pipeline["median_s"] is None else float(pipeline["median_s"])
+    if row == RSS_ROW:
+        peak = pipeline.get("peak_rss_bytes")
+        return None if peak is None else float(peak)
+    return next(
+        (float(s["median_s"]) for s in pipeline.get("steps", []) if s["step"] == row),
+        None,
+    )
+
+
+def is_validation_comparable(record: Record | None, target: Record | None) -> bool:
+    """Return whether a version found the same validation errors as the target.
+
+    The same rule as ``is_comparable``, on the validation fingerprint: a
+    differing one marks the ``validate`` row alone, since a validation fix
+    changes what that step finds without touching what the other steps do.
+    """
+    if record is None or target is None:
+        return True
+    theirs = record.get("validation_fingerprint")
+    ours = target.get("validation_fingerprint")
+    return theirs is None or ours is None or theirs == ours
+
+
+def pipeline_rows(results: Results, config: str, rows: int) -> list[str]:
+    """Return the table rows for a case: every step measured, then total and RSS."""
+    index = index_records(results)
+    measured = {
+        step["step"]
+        for v in results["versions"]
+        if (record := index.get((v["label"], config, rows))) is not None
+        and record["status"] == "ok"
+        for step in cast(PipelineRecord, record).get("steps", [])
+    }
+    return [*(step for step in PIPELINE_STEPS if step in measured), TOTAL_ROW, RSS_ROW]
+
+
+def pipeline_table(results: Results, config: str, rows: int) -> str:
+    """Compare every version on one configuration at one size, step by step.
+
+    Args:
+        results: The pipeline benchmark results.
+        config: The configuration (see ``benchmarks.records.PIPELINE_CONFIGS``).
+        rows: The size to compare at.
+
+    Returns:
+        A table with one row per step, then the whole run's median time and
+        its peak RSS; one column per version, then one change column per
+        reference version (see ``reference_versions``), taken from the
+        target. A version whose output differs from the target's reads
+        ``NOT_COMPARABLE`` throughout; one that found different validation
+        errors reads it on the ``validate`` row only.
+    """
+    index = index_records(results)
+    versions = results["versions"]
+    target = versions[0]["label"]
+    references = reference_versions(results)
+    target_record = index.get((target, config, rows))
+    header = [
+        f"{_CONFIG_TITLES.get(config, config)}, {rows:,} rows",
+        *(display_label(v) for v in versions),
+        *(f"{DELTA} vs {r['label']}" for r in references),
+    ]
+    body = []
+    for row in pipeline_rows(results, config, rows):
+        values: dict[str, float | None] = {}
+        cells: dict[str, str] = {}
+        for v in versions:
+            record = index.get((v["label"], config, rows))
+            comparable = is_comparable(record, target_record) and (
+                row != "validate" or is_validation_comparable(record, target_record)
+            )
+            if comparable:
+                values[v["label"]] = step_value(record, row)
+                metric: Metric = "memory" if row == RSS_ROW else "time"
+                cells[v["label"]] = format_metric(values[v["label"]], metric)
+            else:
+                values[v["label"]] = None
+                cells[v["label"]] = NOT_COMPARABLE
+        body.append(
+            [
+                row,
+                *(cells[v["label"]] for v in versions),
+                *(
+                    format_change(relative_change(values[target], values[r["label"]]))
+                    for r in references
+                ),
+            ]
+        )
+    return markdown_table(header, body)
+
+
+def unmeasured_notes(results: Results, rows: int) -> list[str]:
+    """Explain every case that was not measured at one size, grouped by reason."""
+    index = index_records(results)
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for config in results["scenarios"]:
+        for v in results["versions"]:
+            record = index.get((v["label"], config, rows))
+            if record is None or record["status"] == "ok":
+                continue
+            reason = (record["reason"] or "no reason recorded").splitlines()[0]
+            grouped.setdefault((config, reason), []).append(v["label"])
+    return [
+        f"{MISSING} {_CONFIG_TITLES.get(config, config)}, {', '.join(labels)}: "
+        f"{reason[:200]}."
+        for (config, reason), labels in grouped.items()
+    ]
+
+
+def validation_note(results: Results, rows: int) -> str | None:
+    """Say what the validation step found, if any case at this size was measured.
+
+    One line when every measured case found the same errors, else one clause
+    per case.
+    """
+    index = index_records(results)
+    found: dict[str, dict[str, int]] = {}
+    for config in results["scenarios"]:
+        for v in results["versions"]:
+            record = index.get((v["label"], config, rows))
+            if record is None or record["status"] != "ok":
+                continue
+            errors = cast(PipelineRecord, record).get("validation")
+            if errors is not None:
+                found[f"{v['label']} ({_CONFIG_TITLES.get(config, config)})"] = errors
+    if not found:
+        return None
+    distinct = {json.dumps(errors, sort_keys=True) for errors in found.values()}
+    if len(distinct) == 1:
+        same = _errors(next(iter(found.values())))
+        return f"Every measured case found the same errors: {same}."
+    clauses = "; ".join(f"{label} {_errors(errors)}" for label, errors in found.items())
+    return f"The validation step found different errors: {clauses}."
+
+
+def _errors(errors: dict[str, int]) -> str:
+    if not errors:
+        return "none"
+    return ", ".join(f"{count:,} {kind}" for kind, count in sorted(errors.items()))
+
+
+def pipeline_block(results: Results, rows: int) -> str:
+    """Return one table per configuration at one size, with its footnotes."""
+    parts = [pipeline_table(results, config, rows) for config in results["scenarios"]]
+    if has_different_output(results, [rows]):
+        target = results["versions"][0]["label"]
+        parts.append(
+            f"{NOT_COMPARABLE}: that version produced different results from "
+            f"{target} on this case (for example a feature it lacks), so its "
+            "measurements are not comparable."
+        )
+    parts += unmeasured_notes(results, rows)
+    note = validation_note(results, rows)
+    if note is not None:
+        parts.append(note)
+    return "\n\n".join(parts)
+
+
+def pipeline_headline(results: Results) -> str:
+    """Return the opening line: the target on each configuration, largest size."""
+    target = results["versions"][0]
+    rows = max(results["sizes"])
+    index = index_records(results)
+    measured = (
+        f"Measured {results['generated_at'][:10]} on {machine_description(results)}."
+    )
+    clauses = []
+    for config in results["scenarios"]:
+        record = index.get((target["label"], config, rows))
+        seconds, peak = step_value(record, TOTAL_ROW), step_value(record, RSS_ROW)
+        if record is None or seconds is None or peak is None:
+            continue
+        chunk_rows = cast(PipelineRecord, record).get("chunk_rows")
+        how = (
+            "whole"
+            if chunk_rows is None
+            else f"in {chunk_rows:,}-row chunks with the lean load"
+        )
+        clauses.append(
+            f"{how} in **{format_seconds(seconds)}**, peaking at "
+            f"**{format_bytes(peak)}** of RSS"
+        )
+    if not clauses:
+        return f"**{display_label(target)}**. {measured}"
+    return (
+        f"**{display_label(target)}** runs the WB template pipeline on {rows:,} "
+        f"rows {' and '.join(clauses)}. {measured}"
+    )
+
+
+def pipeline_sizing_table(results: Results) -> str:
+    """Show the target's time and peak RSS for every configuration and size."""
+    index = index_records(results)
+    target = results["versions"][0]["label"]
+    header = ["Configuration", *(f"{rows:,} rows" for rows in results["sizes"])]
+    body = []
+    for config in results["scenarios"]:
+        cells = [_CONFIG_TITLES.get(config, config)]
+        for rows in results["sizes"]:
+            record = index.get((target, config, rows))
+            seconds, peak = step_value(record, TOTAL_ROW), step_value(record, RSS_ROW)
+            if seconds is None or peak is None:
+                cells.append(MISSING)
+            else:
+                cells.append(f"{format_seconds(seconds)}, {format_bytes(peak)}")
+        body.append(cells)
+    return markdown_table(header, body)
+
+
+def render_pipeline_comparison(results: Results, run_url: str | None = None) -> str:
+    """Return the pipeline suite's job summary: every version at the largest size.
+
+    Every other size follows inside a collapsed ``<details>`` block.
+
+    Args:
+        results: The pipeline benchmark results.
+        run_url: The workflow run to link, if any.
+
+    Returns:
+        GitHub-flavoured Markdown.
+    """
+    target = results["versions"][0]
+    largest = max(results["sizes"])
+    source = f" in [this run]({run_url})" if run_url else ""
+    by_size = [
+        f"**{rows:,} rows**\n\n{pipeline_block(results, rows)}"
+        for rows in results["sizes"]
+    ]
+    return "\n\n".join(
+        [
+            "### WB template pipeline benchmark",
+            f"{display_label(target)} at {_short_commit(target['commit'])}, measured "
+            f"{results['generated_at']}{source} on {machine_description(results)}, "
+            "on a mock of the WB_IDS bronze dataset. Each step's row is its median "
+            "time over the runs; peak RSS is the whole run's, sampled every 10 ms. "
+            f"{DELTA} columns give the change from the named version: negative is "
+            f"faster or smaller, and changes within {PLUS_MINUS}10% read "
+            f'"{SAME}". {MISSING} marks a case that was not measured; the notes '
+            "under each table say why.",
+            f"**{largest:,} rows**",
+            pipeline_block(results, largest),
+            "<details><summary>All sizes</summary>",
+            *by_size,
+            "</details>",
+            environment_table(results),
+        ]
+    )
+
+
 _PLACEHOLDER: str = (
     "::: {.callout-note}\n"
     "No performance profile has been published yet. The first one arrives with\n"
     "the next release; `make bench` produces one locally.\n"
+    ":::"
+)
+_PIPELINE_PLACEHOLDER: str = (
+    "::: {.callout-note}\n"
+    "No pipeline profile has been published yet. The first one arrives with\n"
+    "the next release; `make bench-pipeline` produces one locally.\n"
     ":::"
 )
 
@@ -417,33 +720,36 @@ def raw_data_link(results: Results, repo_url: str = REPO_URL) -> str | None:
     tag = results["versions"][0]["label"]
     if release_key(tag) is None:
         return None
-    url = f"{repo_url}/releases/download/{tag}/benchmarks-{tag}.json"
-    return (
-        "The raw measurements are attached to the release: "
-        f"[benchmarks-{tag}.json]({url})."
-    )
+    name = asset_name(suite_of(results), tag)
+    url = f"{repo_url}/releases/download/{tag}/{name}"
+    return f"The raw measurements are attached to the release: [{name}]({url})."
 
 
 def render_page(
     results: Results | None,
     template: str,
     charts: Callable[[Results], str] | None = None,
+    pipeline: Results | None = None,
 ) -> str:
-    """Return the Performance page: ``template`` with its results marker filled in.
+    """Return the Performance page: ``template`` with both markers filled in.
 
     Args:
-        results: The results to show, or ``None`` for the placeholder.
-        template: The page template's text; must contain ``RESULTS_MARKER``.
+        results: The mapping suite's results, or ``None`` for the placeholder.
+        template: The page template's text; must contain ``RESULTS_MARKER``
+            and ``PIPELINE_MARKER``.
         charts: Draws the charts; ``render_charts`` by default.
+        pipeline: The pipeline suite's results, or ``None`` for its placeholder.
 
     Returns:
         The page as Quarto Markdown.
 
     Raises:
-        ValueError: If ``template`` has no ``RESULTS_MARKER``.
+        ValueError: If ``template`` lacks either marker.
     """
-    if RESULTS_MARKER not in template:
-        raise ValueError(f"The page template has no {RESULTS_MARKER} marker")
+    for marker in (RESULTS_MARKER, PIPELINE_MARKER):
+        if marker not in template:
+            raise ValueError(f"The page template has no {marker} marker")
+    template = template.replace(PIPELINE_MARKER, _pipeline_sections(pipeline))
     if results is None:
         return template.replace(RESULTS_MARKER, _PLACEHOLDER)
     draw = render_charts if charts is None else charts
@@ -482,6 +788,32 @@ def render_page(
     if link is not None:
         sections.append(link)
     return template.replace(RESULTS_MARKER, "\n\n".join(sections))
+
+
+def _pipeline_sections(pipeline: Results | None) -> str:
+    """Return the page's pipeline section: headline, sizing, comparison, environment."""
+    if pipeline is None:
+        return _PIPELINE_PLACEHOLDER
+    largest = max(pipeline["sizes"])
+    sections = [
+        pipeline_headline(pipeline),
+        "### Sizing",
+        "The whole run's time and peak RSS, by configuration and size:",
+        pipeline_sizing_table(pipeline),
+        "### Step by step",
+        f"At {largest:,} rows. Each step's median time over the runs, the whole "
+        f"run's median and its peak RSS. {DELTA} columns give the change from the "
+        "named version: negative is faster or smaller, and changes within "
+        f'{PLUS_MINUS}10% read "{SAME}".',
+        pipeline_block(pipeline, largest),
+        "### Environment",
+        f"Measured on {machine_description(pipeline)}.",
+        environment_table(pipeline),
+    ]
+    link = raw_data_link(pipeline)
+    if link is not None:
+        sections.append(link)
+    return "\n\n".join(sections)
 
 
 @dataclass(frozen=True)
@@ -685,13 +1017,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--format", required=True, choices=("page", "summary", "pr-comment")
     )
     parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument(
+        "--pipeline-input",
+        type=Path,
+        help="the pipeline suite's results, for the page's second section",
+    )
     parser.add_argument("--output", type=Path, help="file to write (default: stdout)")
     parser.add_argument("--template", type=Path, default=TEMPLATE)
     parser.add_argument("--run-url", help="the workflow run to link")
     args = parser.parse_args(argv)
     results = load_results(args.input)
     if args.format == "page":
-        text = render_page(results, args.template.read_text(encoding="utf-8"))
+        pipeline = (
+            None if args.pipeline_input is None else load_results(args.pipeline_input)
+        )
+        text = render_page(
+            results, args.template.read_text(encoding="utf-8"), pipeline=pipeline
+        )
     elif results is None:
         parser.error(f"no results at {args.input}")
     elif args.format == "summary":

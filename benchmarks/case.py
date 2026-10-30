@@ -8,19 +8,19 @@ never to stdout, because tidysdmx 0.8.0 reports progress with ``print()``.
 
 import argparse
 import gc
-import hashlib
 import json
 import statistics
 import sys
 import time
 import tracemalloc
-from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pandas as pd
 from pysdmx.model.map import StructureMap
 
+from benchmarks.fingerprint import Fingerprint
+from benchmarks.probe import assert_installed
 from benchmarks.records import SCENARIOS, Record, empty_record
 from benchmarks.scenarios import build, targets
 
@@ -53,9 +53,10 @@ def output_fingerprint(df: pd.DataFrame, columns: Sequence[str]) -> str:
     Versions that map a case the same way get the same fingerprint, and one
     that leaves values unmapped, or maps them differently, gets another. It
     hashes each column's name, its null count and how many times each distinct
-    non-null value occurs, as ``str``. So it ignores row order, the column's
-    dtype (``object``, ``string`` or ``str``, which differ between pandas 2 and
-    3) and how a null is spelled (``None``, ``NaN`` or ``pd.NA``).
+    non-null value occurs, as ``str`` (``benchmarks.fingerprint.Fingerprint``
+    with every column as text). So it ignores row order, the column's dtype
+    (``object``, ``string`` or ``str``, which differ between pandas 2 and 3)
+    and how a null is spelled (``None``, ``NaN`` or ``pd.NA``).
 
     Args:
         df: The output of ``map_structures``.
@@ -66,18 +67,9 @@ def output_fingerprint(df: pd.DataFrame, columns: Sequence[str]) -> str:
     Returns:
         The first 16 hex digits of a SHA-256 digest.
     """
-    digest = hashlib.sha256()
-    for name in columns:
-        if name not in df.columns:
-            entry: list[object] = [name, None]
-        else:
-            column = df[name]
-            counts: Counter[str] = Counter()
-            for value, count in column.value_counts(dropna=True).items():
-                counts[str(value)] += int(count)
-            entry = [name, int(column.isna().sum()), sorted(counts.items())]
-        digest.update(json.dumps(entry).encode("ascii"))
-    return digest.hexdigest()[:16]
+    fingerprint = Fingerprint([(name, False) for name in columns])
+    fingerprint.update(df)
+    return fingerprint.digest()
 
 
 def run_case(scenario: str, rows: int, seed: int = 0) -> Record:
@@ -154,25 +146,6 @@ def _peak_allocation(
     return peak
 
 
-def _assert_installed() -> None:
-    """Refuse to measure a tidysdmx that is not installed in this environment.
-
-    Raises:
-        ImportError: If tidysdmx was imported from outside ``sys.prefix``, such
-            as a source tree on ``sys.path``: the benchmark would measure the
-            wrong code.
-    """
-    import tidysdmx
-
-    location = Path(tidysdmx.__file__).resolve()
-    prefix = Path(sys.prefix).resolve()
-    if not location.is_relative_to(prefix):
-        raise ImportError(
-            f"tidysdmx was imported from {location}, outside this environment "
-            f"({prefix}); the benchmark would measure the wrong code"
-        )
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Measure one case and write its record to ``--result``.
 
@@ -193,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--result", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        _assert_installed()
+        assert_installed()
         record = run_case(args.scenario, args.rows, args.seed)
     except Exception as exc:
         # Not swallowed: the error becomes this case's record, which the run

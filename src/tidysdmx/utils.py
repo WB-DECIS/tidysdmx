@@ -45,6 +45,38 @@ def sdmx_reference_cols_for(
     return list(_SDMX_REFERENCE_COLS_BY_CONTEXT[context])
 
 
+def _prints_equal_values_alike(column: pd.Series) -> bool:
+    """Tell whether equal values of ``column`` always print as the same text.
+
+    A check that compares values as ``str`` can then judge each distinct
+    value once. That holds for strings, integers, booleans, datetimes and
+    categoricals (whose categories are distinct by equality). It does not
+    hold for an object column holding non-strings, where ``1``, ``1.0`` and
+    ``True`` compare equal but print differently, nor for a float column,
+    where ``0.0`` and ``-0.0`` do; those must be converted row by row.
+
+    The dtype decides, except for an ``object`` column (or a dtype this does
+    not place), whose values must be inspected: a column declared ``str`` or
+    ``category`` costs no inference.
+
+    Args:
+        column: The column a text comparison will read.
+
+    Returns:
+        True when distinct values are enough, False when every row must be
+        converted.
+    """
+    dtype = column.dtype
+    if isinstance(dtype, pd.CategoricalDtype | pd.StringDtype):
+        return True
+    kind = getattr(dtype, "kind", "O")
+    if kind in "iubMm":
+        return True
+    if kind in "fc":
+        return False
+    return pd.api.types.infer_dtype(column.unique(), skipna=True) == "string"
+
+
 @typechecked
 def extract_validation_info(schema: Schema) -> dict[str, object]:
     """Extract validation information from a given schema.

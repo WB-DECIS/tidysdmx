@@ -81,6 +81,7 @@ benchmarks/results/
 /performance/
 notebooks/TMP/
 TMP/
+_TMP/
 notebooks/tidysdmx/config.json
 .ipynb_checkpoints
 profile_default/

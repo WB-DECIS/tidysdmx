@@ -1,0 +1,76 @@
+---
+title: "Large files"
+description: "Map and validate a dataset that does not fit in memory, chunk by chunk."
+tags: [Workflow, Mapping, Validation]
+---
+
+# Large files
+
+The quick start holds one DataFrame from `read_csv` to `validate_dataset_local`. That is fine until the file is bigger than the machine: the World Bank's International Debt Statistics extract is a 15 GB CSV of 147 million rows, and run whole it needs about 60 GB because mapping adds twenty columns to the eight it reads. Nothing in the chain needs the whole dataset at once, though. Every map in `map_structures` and every column `standardize_output` adds works row by row, and the validation checks only need to remember what they have found. So read the file in chunks, run the chain on each, write each chunk's output out, and let `DatasetValidator` accumulate the report.
+
+## The loop
+
+```python
+import pandas as pd
+from tidysdmx import DatasetValidator, map_structures, standardize_output
+
+KEEP = ["Country_Code", "Counterpart_Area_Code", "Series", "Year", "Value"]
+DTYPES = {
+    "Country_Code": "category",
+    "Counterpart_Area_Code": "category",
+    "Series": "category",
+    "Year": "category",
+    "Value": "float64",
+}
+
+validator = DatasetValidator(schema)
+written = False
+with pd.read_csv(
+    "WB_IDS_BRONZE.csv", chunksize=5_000_000, usecols=KEEP, dtype=DTYPES
+) as reader:
+    for chunk in reader:
+        chunk = chunk[chunk["Series"].isin(requested)]
+        if chunk.empty:
+            continue
+        mapped = map_structures(chunk, structure_map)
+        out = standardize_output(mapped, artefact_id=artefact_id, schema=schema)
+        validator.update(out)
+        out.to_csv("WB_IDS.csv", mode="a" if written else "w", header=not written, index=False)
+        written = True
+
+if validator.rows == 0:
+    raise ValueError("No row matched the requested series; nothing was written.")
+errors = validator.errors()
+```
+
+The first chunk written out creates the file and its header, whichever chunk that is: a chunk can lose every row to the filter, so the input chunk's number is not what decides. If every chunk loses every row, nothing is written and `errors()` comes back empty, which reads like a clean run; `validator.rows`, the number of rows validated, tells the two apart.
+
+Memory is now bounded by the chunk, whatever the file's size. The template, the structure map and the schema are built once; the loop only moves data.
+
+## Loading lean
+
+Three `read_csv` arguments do most of the work before tidysdmx runs at all:
+
+- **`usecols`**: load only the columns the structure map reads. In the IDS extract, `Series_Name` is a label of `Series` that nothing maps, and it is 60% of the file's text.
+- **`dtype` for every column you load**: then `read_csv` infers no type, and no column can change type between chunks (a footnote column that is empty in a whole chunk is otherwise inferred as float in that chunk and text in the next). Use `category` for code columns: a code column of 147 million rows holds a few hundred distinct values, and as `category` it costs one or two bytes a row instead of ten to twenty, and `map_structures` keeps it categorical through to the output (see below). `Year`, the time dimension, can be one too. Declared `str` and `category` columns also spare the validation checks any inference of what a column holds.
+- **`chunksize`**: the chunk is the only thing that scales with memory.
+
+Keep the index pandas gives each chunk rather than calling `reset_index`: the labels are file positions, and `DatasetValidator` reports them when a row has a missing value.
+
+## Categorical in, categorical out
+
+`map_structures` returns a categorical target column for a categorical source column. The categories are the map's target values, in the order the map stores them, not the values a particular chunk happens to hold, so every chunk gets the same dtype and `pd.concat` keeps it categorical. A fixed value and the three reference columns are plain `str` columns; a column an implicit map copies keeps whatever dtype it was loaded with, and for a categorical its own categories, so chunks concatenated in memory need `pd.api.types.union_categoricals` for those. Writing each chunk out, as above, sidesteps the question.
+
+Source columns loaded as `str` or `object` behave exactly as before.
+
+## Validating across chunks
+
+`DatasetValidator(schema)` takes the same `sdmx_cols` and `max_errors` as `validate_dataset_local`, and `errors()` returns the same DataFrame of errors. What it keeps between chunks is bounded by `max_errors`, never by rows: the unexpected and the missing mandatory columns, each coded column's invalid values, and the counts of rows with missing values or duplicate keys with a sample of each.
+
+One check is weaker than on a single frame. Duplicate keys are found within each chunk, so two rows that share a key but fall in different chunks are not reported. `chunksize` cuts the file at a row count, not at key boundaries, so this holds however the file is sorted. If it matters, check the keys across chunks yourself, or rely on the registry's own key check at upload. For the same reason the duplicates message counts key combinations chunk by chunk: a key duplicated within two chunks counts twice.
+
+`validate_dataset_local(df, schema)` is itself one `update` on a fresh validator, so the two cannot drift.
+
+## Sizing the chunk
+
+`python -m benchmarks.wb_ids.pipeline --chunk-rows N` in the repository measures each step's time and peak memory on a mock of the IDS extract at any size, with `--skip-unused` and `--categories` for the lean load. The peak is the chunk's working set: the chunk as loaded, its mapped copy and its standardised copy, which share columns, plus pandas' transient copies while filtering and checking duplicates. On that mock it came to about 0.4 KB per chunk row with the lean load and 0.7 KB with the default one, whatever the file's size (`docs/datasets/wb-ids.md` has the runs). So 5M-row chunks peak around 2 GB, and 2M-row chunks under 1 GB. The rule of thumb: divide the memory you can spend by the bytes per row for your load, and halve it for headroom.

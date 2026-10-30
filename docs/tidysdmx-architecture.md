@@ -350,6 +350,8 @@ errors = validate_dataset_local(df, schema=schema)
 
 The `Validation` column takes one of `columns`, `mandatory_columns`, `codelist_ids`, `duplicates` or `missing_values`. The value-level checks (codelist, duplicates, missing values) run only when no mandatory column is missing. The deprecated `valid=` argument still works but emits a `FutureWarning`; with neither `schema` nor `valid`, the call raises `ValueError`.
 
+For a dataset too large to hold in memory, `DatasetValidator` runs the same checks chunk by chunk: `update(chunk)` for each chunk, then `errors()` for the same error DataFrame. What it keeps between chunks is bounded by `max_errors`, never by rows. Duplicate keys are checked within each chunk only; a key that two chunks share is not reported, and is left to the registry's own key check at upload. `validate_dataset_local` itself is one `update` on a fresh validator, so the two cannot drift. Every value check judges each distinct value of a column once (codelists, `filter_rows`) or reduces column by column (missing values), so a column costs its cardinality, not its rows.
+
 The five validation checks and their pysdmx source. Each is also public on its own; unlike `validate_dataset_local`, the individual `validate_*` functions return `None` and raise `ValueError` when their check fails:
 
 | tidysdmx check | pysdmx attribute used | Task-level meaning |
@@ -442,9 +444,9 @@ The JSON mapping dict (`read_mapping` → `map_to_sdmx`) and the Excel mapping t
 
 `extract_validation_info(schema)` was designed to be called once per run, with the `valid` dict passed to every validation call so that hundreds of partitions could be validated without re-parsing the schema. That pattern is now deprecated: `validate_dataset_local(valid=...)` emits a `FutureWarning`, and the parameter will be removed. Pass `schema`; `validate_dataset_local`, `filter_tidy_raw` and `kd_validate_datasets_local` all take it and derive the dict themselves. `kd_validate_datasets_local()` still pre-computes the dict and passes `valid=` internally — a known bug (§9), not a pattern to copy.
 
-### A stateful client object
+### Stateful objects
 
-Apart from its own token types (`TokenProvider`, `BearerToken` and the two providers) and the artefact-validation types (`ValidationIssue`, `ValidationError`), every other public name in the package is a function. `FmrClient` is a class because a token cache has a lifetime: it must outlive a single call and be shared by every request against the same registry. Hold one instance per registry. Everything it returns is still a pysdmx object.
+Apart from its own token types (`TokenProvider`, `BearerToken` and the two providers) and the artefact-validation types (`ValidationIssue`, `ValidationError`), every other public name in the package is a function, with two exceptions that each hold state with a lifetime. `FmrClient` is a class because a token cache must outlive a single call and be shared by every request against the same registry. Hold one instance per registry. Everything it returns is still a pysdmx object. `DatasetValidator` is a class because what it accumulates over the chunks of one dataset must outlive each `update` call; it is the chunked form of `validate_dataset_local`, and the only state the chunked pipeline needs, since `map_structures` and `standardize_output` are row-independent.
 
 ### Guarded pysdmx seams
 

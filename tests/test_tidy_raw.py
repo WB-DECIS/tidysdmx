@@ -115,6 +115,17 @@ class TestFilterRows:
         result = filter_rows(df, {"code": ["1"]})
         assert result.empty
 
+    @pytest.mark.parametrize(
+        ("allowed", "kept"),
+        [(["1"], [0, 2]), (["1.0"], [1])],
+        ids=["int-allowed", "float-allowed"],
+    )
+    def test_filter_rows_keeps_equal_values_that_print_apart(self, allowed, kept):
+        """1 and 1.0 compare equal but are compared as text, like before."""
+        df = pd.DataFrame({"A": pd.Series([1, 1.0, 1, 2], dtype=object)})
+        result = filter_rows(df, {"A": allowed})
+        assert result.index.tolist() == kept
+
     @pytest.mark.skip(reason="Numeric values currently not well supported. To review")
     def test_filter_rows_allowed_values_as_strings(self, sample_df):
         # Allowed values provided as strings should match numeric column

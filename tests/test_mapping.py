@@ -1571,6 +1571,264 @@ class TestMappingOnDistinctValues:
         assert seen == [3]
 
 
+class TestMapStructuresSharedGrouping:
+    """map_structures groups each source column tuple into distinct values once."""
+
+    @staticmethod
+    def _area_map(target, value_maps=None):
+        return TestMappingOnDistinctValues._component_map(
+            "AREA",
+            target,
+            value_maps
+            or [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="regex:B.*", target="B_"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ],
+        )
+
+    @staticmethod
+    def _structure_map(maps):
+        return StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=maps
+        )
+
+    @pytest.fixture
+    def counted_distinct_rows(self, monkeypatch):
+        """Record the source names of every _distinct_rows call."""
+        calls = []
+        original = mapping_module._distinct_rows
+
+        def counting(sources, split_print_forms=None):
+            calls.append([s.name for s in sources])
+            return original(sources, split_print_forms)
+
+        monkeypatch.setattr(mapping_module, "_distinct_rows", counting)
+        return calls
+
+    def test_map_structures_factorises_each_source_once(self, counted_distinct_rows):
+        df = pd.DataFrame({"AREA": ["COL", "BEL", "COL"]})
+        sm = self._structure_map(
+            [
+                self._area_map("REF_AREA"),
+                self._area_map("AREA_2"),
+                self._area_map("AREA_3"),
+            ]
+        )
+        result = map_structures(df, sm)
+        assert counted_distinct_rows == [["AREA"]]
+        assert result["AREA_3"].tolist() == ["CO", "B_", "CO"]
+
+    def test_source_groups_drop_a_grouping_after_its_last_reader(self):
+        """A grouping lives only while a map still needs it (memory, not speed)."""
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]})
+        groups = mapping_module._SourceGroups(
+            df, [self._area_map("A"), self._area_map("B")]
+        )
+        first = groups.get(("AREA",))
+        assert groups.get(("AREA",)) is first
+        assert groups._groups == {}
+        # Unregistered sources are grouped for one reader and dropped at once.
+        groups.get(("NOTE",))
+        assert groups._groups == {}
+
+    def test_map_structures_groups_each_source_tuple_separately(
+        self, counted_distinct_rows, urbanisation_map
+    ):
+        df = pd.DataFrame({"AREA": ["COL", "BEL"], "NOTE": ["one", "two"]})
+        sm = self._structure_map([self._area_map("REF_AREA"), urbanisation_map])
+        map_structures(df, sm)
+        assert counted_distinct_rows == [["AREA"], ["AREA", "NOTE"]]
+
+    @pytest.fixture
+    def urbanisation_map(self):
+        return TestMappingOnDistinctValues._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+            ]
+        )
+
+    def test_map_structures_shared_grouping_matches_separate_maps(self):
+        """A literal map shares the finer, print-form grouping a regex map needs."""
+        df = pd.DataFrame(
+            {"AREA": pd.Series([1, 1.0, True, "1", 2, None, "COL"], dtype=object)}
+        )
+        literal = self._area_map(
+            "LIT",
+            [ValueMap(source="1", target="L1"), ValueMap(source="COL", target="CO")],
+        )
+        regex = self._area_map(
+            "RX",
+            [
+                ValueMap(source="regex:1", target="R1"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ],
+        )
+        result = map_structures(df, self._structure_map([literal, regex]))
+        for cmap in (literal, regex):
+            pd.testing.assert_series_equal(
+                result[cmap.target], apply_component_map(df, cmap)[cmap.target]
+            )
+
+    def test_map_structures_unresolved_map_still_raises(self):
+        df = pd.DataFrame({"AREA": ["COL"]})
+        unresolved = ComponentMap(source="AREA", target="X", values="urn:rep-map")
+        with pytest.raises(TypeError, match="references its representation map by URN"):
+            map_structures(
+                df, self._structure_map([self._area_map("REF_AREA"), unresolved])
+            )
+
+
+class TestCategoricalTargets:
+    """A categorical source column gives a categorical target column."""
+
+    @pytest.fixture
+    def area_map(self):
+        return TestMappingOnDistinctValues._component_map(
+            "AREA",
+            "REF_AREA",
+            [
+                ValueMap(source="COL", target="CO"),
+                ValueMap(source="BEL", target="CO"),
+                ValueMap(source="regex:K.*", target="K_"),
+                ValueMap(source="regex:.*", target="_Z"),
+            ],
+        )
+
+    @pytest.fixture
+    def literal_map(self):
+        return TestMappingOnDistinctValues._component_map(
+            "AREA",
+            "REF_AREA",
+            [ValueMap(source="COL", target="CO"), ValueMap(source="BEL", target="BE")],
+        )
+
+    @pytest.fixture
+    def urbanisation_map(self):
+        return TestMappingOnDistinctValues._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["regex:B.*", "regex:.*"], target=["B_"]),
+                MultiValueMap(source=["regex:.*", "regex:.*"], target=["_T"]),
+            ]
+        )
+
+    @staticmethod
+    def _frame(values, dtype="category"):
+        return pd.DataFrame({"AREA": pd.Series(values, dtype=dtype)})
+
+    def test_apply_component_map_categorical_source_gives_categorical_target(
+        self, area_map
+    ):
+        result = apply_component_map(self._frame(["COL", "KEN", None]), area_map)
+        assert isinstance(result["REF_AREA"].dtype, pd.CategoricalDtype)
+        assert result["REF_AREA"].tolist() == ["CO", "K_", "_Z"]
+
+    def test_apply_component_map_categories_are_map_targets_in_stored_order(
+        self, area_map
+    ):
+        result = apply_component_map(self._frame(["COL", "COL"]), area_map)
+        assert result["REF_AREA"].cat.categories.tolist() == ["CO", "K_", "_Z"]
+
+    def test_apply_component_map_two_sources_one_target_share_a_code(self, area_map):
+        result = apply_component_map(self._frame(["COL", "BEL"]), area_map)
+        assert result["REF_AREA"].cat.codes.tolist() == [0, 0]
+
+    def test_apply_component_map_unmapped_categorical_value_is_missing(
+        self, literal_map
+    ):
+        result = apply_component_map(self._frame(["COL", "KEN", None]), literal_map)
+        assert isinstance(result["REF_AREA"].dtype, pd.CategoricalDtype)
+        assert result["REF_AREA"].isna().tolist() == [False, True, True]
+        assert result["REF_AREA"].cat.categories.tolist() == ["CO", "BE"]
+
+    @pytest.mark.parametrize("dtype", ["str", "object"])
+    def test_apply_component_map_other_sources_are_not_categorical(
+        self, area_map, dtype
+    ):
+        result = apply_component_map(self._frame(["COL", "KEN"], dtype), area_map)
+        assert not isinstance(result["REF_AREA"].dtype, pd.CategoricalDtype)
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            ["COL", "BEL", None, "KEN", "XXX", "COL"],
+            ["KEN", "KEN"],
+            [None, None],
+            [],
+        ],
+    )
+    def test_apply_component_map_categorical_matches_str_values(self, area_map, values):
+        as_str = apply_component_map(self._frame(values, "str"), area_map)["REF_AREA"]
+        as_category = apply_component_map(self._frame(values), area_map)["REF_AREA"]
+        pd.testing.assert_series_equal(
+            as_category.astype(object), as_str.astype(object), check_dtype=False
+        )
+
+    def test_apply_multi_component_map_categorical_sources_give_categorical_target(
+        self, urbanisation_map
+    ):
+        df = pd.DataFrame(
+            {
+                "AREA": pd.Categorical(["COL", None, "BEL", "COL"]),
+                "NOTE": pd.Categorical(["one", "one", None, "one"]),
+            }
+        )
+        result = apply_multi_component_map(df, urbanisation_map)["URBANISATION"]
+        assert isinstance(result.dtype, pd.CategoricalDtype)
+        assert result.tolist() == ["CO1", "_T", "_T", "CO1"]
+        assert result.cat.categories.tolist() == ["CO1", "B_", "_T"]
+
+    def test_apply_multi_component_map_mixed_sources_are_not_categorical(
+        self, urbanisation_map
+    ):
+        df = pd.DataFrame(
+            {"AREA": pd.Categorical(["COL", "BEL"]), "NOTE": ["one", "two"]}
+        )
+        result = apply_multi_component_map(df, urbanisation_map)["URBANISATION"]
+        assert not isinstance(result.dtype, pd.CategoricalDtype)
+        assert result.tolist() == ["CO1", "B_"]
+
+    @pytest.mark.parametrize(
+        ("area", "expected"),
+        [
+            pytest.param(["COL", "BEL"], ["CO1", "B_"], id="mapped"),
+            pytest.param(["XXX", "YYY"], [None, None], id="nothing-mapped"),
+        ],
+    )
+    def test_apply_multi_component_map_other_sources_give_a_str_target(
+        self, area, expected
+    ):
+        """A non-categorical target is "str", even when no combination maps."""
+        literal_only = TestMappingOnDistinctValues._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["BEL", "two"], target=["B_"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": area, "NOTE": ["one", "two"]})
+        result = apply_multi_component_map(df, literal_only)["URBANISATION"]
+        assert result.dtype == pd.StringDtype(na_value=np.nan)
+        assert _as_list(result) == expected
+
+    def test_map_structures_chunk_results_concat_as_categorical(self, area_map):
+        """Chunks with different source categories share one target dtype."""
+        sm = StructureMap(
+            id="SM", name="SM", agency="WB", source="", target="", maps=[area_map]
+        )
+        chunks = [self._frame(["COL", "KEN"]), self._frame(["BEL", "ZZZ"])]
+        out = pd.concat([map_structures(c, sm) for c in chunks], ignore_index=True)
+        assert isinstance(out["REF_AREA"].dtype, pd.CategoricalDtype)
+        assert out["REF_AREA"].tolist() == ["CO", "K_", "CO", "_Z"]
+
+    def test_categorical_target_rejects_a_value_outside_the_targets(self):
+        with pytest.raises(ValueError, match="not one of the map's target values"):
+            mapping_module._categorical_target(
+                pd.Series(["XX"]), np.array([0]), ["CO"], pd.RangeIndex(1)
+            )
+
+
 class TestDistinctRows:
     """_distinct_rows numbers each row's distinct combination of source values."""
 

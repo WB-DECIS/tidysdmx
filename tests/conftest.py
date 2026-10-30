@@ -16,7 +16,7 @@ The re-exports below are deliberate: ruff would otherwise flag them as unused,
 hence ``__all__``.
 """
 
-from tests.fixtures.fxtr_benchmarks import benchmark_results
+from tests.fixtures.fxtr_benchmarks import benchmark_results, pipeline_results
 from tests.fixtures.fxtr_dummy_data import ifpri_asti_df, sample_df, sdmx_df
 from tests.fixtures.fxtr_fmr import (
     agency,
@@ -81,6 +81,7 @@ __all__ = [
     "metadataflow",
     "multi_representation_map",
     "multi_value_map_df",
+    "pipeline_results",
     "provision_agreement",
     "representation_map",
     "rotating_provider",

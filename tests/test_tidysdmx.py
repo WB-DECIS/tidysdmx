@@ -771,6 +771,21 @@ class TestAddSdmxReferenceCols:
         with pytest.raises(TypeCheckError):
             _add_sdmx_reference_cols(["not", "a", "df"], "ID123", "dataflow")
 
+    def test_add_sdmx_reference_cols_shares_passthrough_columns(self):
+        """The input's columns are not copied: only the three new ones cost memory."""
+        df = pd.DataFrame({"OBS_VALUE": [1.0, 2.0]})
+        result = _add_sdmx_reference_cols(df, "ID123", "dataflow")
+        assert np.shares_memory(
+            result["OBS_VALUE"].to_numpy(), df["OBS_VALUE"].to_numpy()
+        )
+
+    def test_add_sdmx_reference_cols_result_is_isolated_from_input(self):
+        df = pd.DataFrame({"OBS_VALUE": [1.0, 2.0]})
+        result = _add_sdmx_reference_cols(df, "ID123", "dataflow")
+        result.loc[0, "OBS_VALUE"] = 99.0
+        assert df["OBS_VALUE"].tolist() == [1.0, 2.0]
+        assert list(df.columns) == ["OBS_VALUE"]
+
     def test_invalid_artefact_type_raises_error(self):
         """Tests that invalid artefact_type raises TypeCheckError."""
         df = pd.DataFrame({"OBS_VALUE": [1]})

@@ -1,0 +1,6 @@
+# The committed WB_IDS mock CSV must stay byte-identical to what
+# `python -m benchmarks.wb_ids.generate` writes, with LF line endings, as
+# tests/test_wb_ids.py checks. Without this rule, core.autocrlf=true (the Git for
+# Windows default) would check it out with CRLF and the comparison would fail.
+benchmarks/wb_ids/data/*.csv -text
+benchmarks/wb_ids/data/*.json text eol=lf
