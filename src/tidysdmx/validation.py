@@ -159,6 +159,15 @@ def _missing_rows_mask(df: pd.DataFrame, columns: list[str]) -> np.ndarray:
     return mask
 
 
+def _first_rows(df: pd.DataFrame, mask: np.ndarray, count: int) -> pd.DataFrame:
+    """Return the first ``count`` rows of ``df`` where ``mask`` holds.
+
+    Taken by position, so only those rows are copied: ``df.loc[mask]`` would
+    copy every masked row of every column before ``head`` kept a few.
+    """
+    return df.iloc[np.flatnonzero(mask)[:count]]
+
+
 def _missing_values_message(
     total: int,
     sample: pd.DataFrame,
@@ -364,7 +373,7 @@ class DatasetValidator:
         self._missing_rows += n_rows
         kept = sum(len(sample) for sample in self._missing_samples)
         if kept < self._max_errors or not self._missing_samples:
-            sample = df.loc[missing_mask].head(max(self._max_errors - kept, 0))
+            sample = _first_rows(df, missing_mask, max(self._max_errors - kept, 0))
             self._missing_samples.append(sample[self._rules.mandatory_comp])
 
     def errors(self) -> pd.DataFrame:
@@ -645,7 +654,7 @@ def validate_no_missing_values(
     """
     missing_mask = _missing_rows_mask(df, mandatory_columns)
     if missing_mask.any():
-        sample = df.loc[missing_mask].head(max_errors)
+        sample = _first_rows(df, missing_mask, max_errors)
         raise ValueError(
             _missing_values_message(
                 int(missing_mask.sum()), sample, mandatory_columns, max_errors

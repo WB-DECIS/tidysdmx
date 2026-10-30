@@ -632,6 +632,15 @@ class TestValidationOnDistinctValues:
         with pytest.raises(ValueError, match=r"Found 1 row\(s\)[^\n]*\n[^\n]*\n11 "):
             validate_no_missing_values(df, mandatory_columns=["col1"])
 
+    def test_validate_no_missing_values_samples_the_first_rows_in_order(self):
+        # A repeated, unsorted index: the sample is taken by position, and must
+        # list the same rows, labels and order as boolean selection did.
+        df = pd.DataFrame({"col1": [None, 1, None, None]}, index=[5, 5, 7, 5])
+        expected = df.loc[df["col1"].isna()].head(2)[["col1"]].to_string(index=True)
+        with pytest.raises(ValueError, match="Found 3 row") as raised:
+            validate_no_missing_values(df, mandatory_columns=["col1"], max_errors=2)
+        assert str(raised.value).endswith(expected)
+
     def test_validate_duplicates_lists_each_key_once(self):
         df = pd.DataFrame({"K": ["a", "a", "a", "b"], "V": [1, 2, 3, 4]})
         with pytest.raises(
@@ -752,6 +761,15 @@ class TestDatasetValidator:
         message = errors["Error"].iloc[0]
         assert message.startswith("Found 3 row(s) with missing values")
         assert message.count("\n") == 4  # a header line plus three rows
+
+    def test_dataset_validator_samples_at_most_max_errors_missing_rows(
+        self, sdmx_schema
+    ):
+        mostly_missing = self._frame(SEX=[None, None, None, "F"])
+        errors = self._chunked(sdmx_schema, [mostly_missing], max_errors=2)
+        message = errors["Error"].iloc[0]
+        assert message.startswith("Found 3 row(s) with missing values")
+        assert message.count("\n") == 3  # a header line plus two rows
 
     def test_dataset_validator_reports_duplicates_within_a_chunk(self, sdmx_schema):
         duplicated = self._frame(TIME_PERIOD=["2020", "2020", "2020", "2021"])
