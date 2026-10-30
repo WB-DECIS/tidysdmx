@@ -832,7 +832,13 @@ def _map_multi_component(
             df.index,
         )
     else:
-        target = pd.Series(resolved[codes], index=df.index)
+        # Typed once per combination, then broadcast with take() as in
+        # _map_component: a row-length object array would have its dtype
+        # inferred and every row's string encoded again. The explicit "str"
+        # dtype also holds when no combination maps, where inference gave
+        # object.
+        distinct = pd.array(resolved, dtype=pd.StringDtype(na_value=np.nan))
+        target = pd.Series(distinct.take(codes), index=df.index)
 
     logger.log(
         _progress_level(verbose),

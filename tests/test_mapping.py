@@ -1790,6 +1790,28 @@ class TestCategoricalTargets:
         assert not isinstance(result.dtype, pd.CategoricalDtype)
         assert result.tolist() == ["CO1", "B_"]
 
+    @pytest.mark.parametrize(
+        ("area", "expected"),
+        [
+            pytest.param(["COL", "BEL"], ["CO1", "B_"], id="mapped"),
+            pytest.param(["XXX", "YYY"], [None, None], id="nothing-mapped"),
+        ],
+    )
+    def test_apply_multi_component_map_other_sources_give_a_str_target(
+        self, area, expected
+    ):
+        """A non-categorical target is "str", even when no combination maps."""
+        literal_only = TestMappingOnDistinctValues._multi_map(
+            [
+                MultiValueMap(source=["COL", "one"], target=["CO1"]),
+                MultiValueMap(source=["BEL", "two"], target=["B_"]),
+            ]
+        )
+        df = pd.DataFrame({"AREA": area, "NOTE": ["one", "two"]})
+        result = apply_multi_component_map(df, literal_only)["URBANISATION"]
+        assert result.dtype == pd.StringDtype(na_value=np.nan)
+        assert _as_list(result) == expected
+
     def test_map_structures_chunk_results_concat_as_categorical(self, area_map):
         """Chunks with different source categories share one target dtype."""
         sm = StructureMap(
