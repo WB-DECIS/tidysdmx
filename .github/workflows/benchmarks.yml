@@ -1,11 +1,13 @@
 name: Benchmarks
 
-# Measures map_structures for one ref against named refs and earlier releases,
-# and stores the results as the `benchmark-results` artifact. It only reads:
-# release.yml attaches the JSON to a Release and benchmarks-pr.yml posts the PR
-# comment, each with the one write permission it needs. They live in the
-# callers because a called workflow's jobs cannot ask for more than the caller
-# grants, even when they would be skipped.
+# Measures one ref against named refs and earlier releases, and stores the
+# results as the `benchmark-results-<suite>` artifact. Two suites: `mapping`
+# measures map_structures on generated dataset shapes; `pipeline` measures the
+# whole WB template pipeline, step by step, on a mock WB_IDS CSV generated on
+# the runner. It only reads: release.yml attaches the JSON to a Release and
+# benchmarks-pr.yml posts the PR comment, each with the one write permission
+# it needs. They live in the callers because a called workflow's jobs cannot
+# ask for more than the caller grants, even when they would be skipped.
 on:
   workflow_call:
     inputs:
@@ -13,6 +15,10 @@ on:
         description: Git ref (or commit) to profile
         type: string
         required: true
+      suite:
+        description: What to measure, mapping or pipeline
+        type: string
+        default: mapping
       target-label:
         description: Label for the ref in the results (default the ref)
         type: string
@@ -26,15 +32,20 @@ on:
         type: number
         default: 3
       sizes:
-        description: Row counts, space-separated
+        description: Row counts, space-separated (default the suite's)
         type: string
-        default: "1000 10000 100000 1000000"
+        default: ""
   workflow_dispatch:
     inputs:
       ref:
         description: Git ref (or commit) to profile
         type: string
         required: true
+      suite:
+        description: What to measure
+        type: choice
+        options: [mapping, pipeline]
+        default: mapping
       target-label:
         description: Label for the ref in the results (default the ref)
         type: string
@@ -48,9 +59,9 @@ on:
         type: number
         default: 3
       sizes:
-        description: Row counts, space-separated
+        description: Row counts, space-separated (default the suite's)
         type: string
-        default: "1000 10000 100000 1000000"
+        default: ""
 
 permissions:
   contents: read
@@ -59,8 +70,9 @@ jobs:
   run:
     name: Run benchmarks
     runs-on: ubuntu-latest
-    # A full grid over four versions; v0.8.0's row-wise multi-map path alone
-    # can take minutes at 1M rows.
+    # A full mapping grid over four versions; v0.8.0's row-wise multi-map path
+    # alone can take minutes at 1M rows. The pipeline suite at 1M and 10M rows
+    # over four versions takes 12 to 20 minutes.
     timeout-minutes: 75
     steps:
       # The harness comes from this workflow's own commit; the versions under
@@ -78,31 +90,36 @@ jobs:
       - name: Benchmark
         env:
           REF: ${{ inputs.ref }}
+          SUITE: ${{ inputs.suite }}
           TARGET_LABEL: ${{ inputs.target-label }}
           COMPARE: ${{ inputs.compare }}
           BASELINES: ${{ inputs.baselines }}
           SIZES: ${{ inputs.sizes }}
         run: |
-          args=(--target "$REF" --baselines "$BASELINES" --out benchmarks-results.json)
+          args=(--suite "$SUITE" --target "$REF" --baselines "$BASELINES" \
+            --out "$SUITE-results.json")
           if [ -n "$TARGET_LABEL" ]; then args+=(--target-label "$TARGET_LABEL"); fi
           if [ -n "$COMPARE" ]; then args+=(--compare "$COMPARE"); fi
-          read -r -a sizes <<< "$SIZES"
-          uv run --no-project python -m benchmarks.run "${args[@]}" --sizes "${sizes[@]}"
+          if [ -n "$SIZES" ]; then
+            read -r -a sizes <<< "$SIZES"
+            args+=(--sizes "${sizes[@]}")
+          fi
+          uv run --no-project python -m benchmarks.run "${args[@]}"
       - name: Report
-        if: ${{ !cancelled() && hashFiles('benchmarks-results.json') != '' }}
+        if: ${{ !cancelled() && hashFiles(format('{0}-results.json', inputs.suite)) != '' }}
         env:
+          SUITE: ${{ inputs.suite }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           uv run --no-project python -m benchmarks.report --format summary \
-            --input benchmarks-results.json --run-url "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"
-          uv run --no-project python -m benchmarks.report --format pr-comment \
-            --input benchmarks-results.json --run-url "$RUN_URL" --output pr-comment.md
+            --input "$SUITE-results.json" --run-url "$RUN_URL" --output "$SUITE-summary.md"
+          cat "$SUITE-summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Store results
-        if: ${{ !cancelled() && hashFiles('benchmarks-results.json') != '' }}
+        if: ${{ !cancelled() && hashFiles(format('{0}-results.json', inputs.suite)) != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: benchmark-results
+          name: benchmark-results-${{ inputs.suite }}
           path: |
-            benchmarks-results.json
-            pr-comment.md
+            ${{ inputs.suite }}-results.json
+            ${{ inputs.suite }}-summary.md
           if-no-files-found: error

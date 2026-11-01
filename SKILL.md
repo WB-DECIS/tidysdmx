@@ -72,6 +72,14 @@ Validate *after* `standardize_output`, never straight after `map_structures`:
 given a `schema` and no `sdmx_cols`, `validate_dataset_local` requires the three
 reference columns and rejects every column that is not a schema component.
 
+For a file that does not fit in memory, run steps 3 to 5 on each chunk of
+`pd.read_csv(..., chunksize=N)`, write each chunk's output out, and let
+`DatasetValidator(schema)` accumulate the checks (`validator.update(final)` per
+chunk, `validator.errors()` at the end). Load code columns with
+`dtype="category"`: `map_structures` keeps a categorical source categorical,
+with the map's targets as categories, so chunks share one dtype. Duplicate
+keys are then checked within each chunk only.
+
 ## Key APIs by task
 
 | Task | Functions |
@@ -84,7 +92,7 @@ reference columns and rejects every column that is not a schema component.
 | Read Excel mapping templates | `parse_mapping_template_wb`, `build_structure_map_from_template_wb` |
 | Build map rules by hand | `build_fixed_map`, `build_implicit_component_map`, `build_date_pattern_map`, `build_value_map`, `build_value_map_list`, `build_multi_value_map_list`, `build_representation_map`, `build_multi_representation_map`, `build_single_component_map`, `build_multi_component_map` |
 | Apply maps to DataFrames | `map_structures`, `apply_fixed_value_maps`, `apply_implicit_component_maps`, `apply_multi_component_map` |
-| Validate datasets | `validate_dataset_local` (returns errors), `validate_columns`, `validate_codelist_ids`, `validate_duplicates`, `validate_mandatory_columns`, `validate_no_missing_values` (these raise) |
+| Validate datasets | `validate_dataset_local` (returns errors), `DatasetValidator` (the same checks chunk by chunk: `update(chunk)`, then `errors()`), `validate_columns`, `validate_codelist_ids`, `validate_duplicates`, `validate_mandatory_columns`, `validate_no_missing_values` (these raise) |
 | Build artefacts for publication | `build_codelist`, `build_concept_scheme`, `build_dataflow`, `build_data_structure_definition`, `build_agency_scheme`, `build_category_scheme`, `build_hierarchy` |
 | Check publish-readiness | `validate`, `validate_many`, `raise_if_invalid`, `ValidationIssue`, `ValidationError` |
 | Prepare a map for FMR upload | `collect_structure_map_artifacts`, `validate_structure_map_references`, `prepare_structure_map_for_upload` — return pysdmx artefacts for `FmrClient.put_structures` or `pysdmx.io.write_sdmx` |

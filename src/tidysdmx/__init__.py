@@ -91,6 +91,7 @@ from .utils import (
     write_excel_mapping_template,
 )
 from .validation import (
+    DatasetValidator,
     validate_codelist_ids,
     validate_columns,
     validate_dataset_local,
@@ -103,6 +104,7 @@ __all__ = [
     "ArtefactType",
     "AzureTokenProvider",
     "BearerToken",
+    "DatasetValidator",
     "FmrClient",
     "RegistryArtefact",
     "StaticTokenProvider",

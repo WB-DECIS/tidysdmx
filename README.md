@@ -71,6 +71,10 @@ if not errors.empty:
     raise ValueError(errors["Error"].tolist())
 ```
 
+For a file too large to hold in memory, run steps 3 to 5 on each chunk of
+`pd.read_csv(..., chunksize=N)` and let `DatasetValidator` accumulate the
+checks; the "Large files" page of the user guide has the loop.
+
 Behind single sign-on, `FmrClient` handles the bearer token — acquisition,
 refresh, and the header on every read and upload — on top of pysdmx's clients:
 

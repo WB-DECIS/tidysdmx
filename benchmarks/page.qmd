@@ -1,6 +1,6 @@
 ---
 title: "Performance"
-description: "How long map_structures() takes and how much memory it needs, by dataset shape and size, compared with earlier releases."
+description: "How long map_structures() and the whole WB template pipeline take and how much memory they need, by dataset shape and size, compared with earlier releases."
 ---
 
 ```{=html}
@@ -14,14 +14,31 @@ html[data-bs-theme="dark"] .perf-chart-dark { display: block; }
 ```
 
 How long does `map_structures()` take, and how much memory does it need, for a
-dataset of a given shape and size? This page answers that for the latest
-release. The benchmark ran on a GitHub-hosted runner when the release was cut,
+dataset of a given shape and size? And the whole WB template pipeline, from
+reading the CSV to validating the output? This page answers both for the latest
+release. Each benchmark ran on a GitHub-hosted runner when the release was cut,
 and re-measured earlier releases in the same run on the same machine, so the
 comparison is like for like.
 
 <!-- RESULTS -->
 
+## WB template pipeline
+
+The pipeline the notebook runs: read the CSV, keep the requested series, build
+the structure map from the mapping workbook, `map_structures`,
+`standardize_output`, `validate_dataset_local`. It is measured on a mock of the
+World Bank's International Debt Statistics bronze extract, generated at the
+sizes below from a profile of the real 147M-row file, in two configurations:
+*whole frame*, the notebook's run with every column loaded, and *chunked, lean
+load*, the production loop of the "Large files" guide, which reads the file in
+five chunks without `Series_Name`, with the code columns as `category`, and
+validates with `DatasetValidator`.
+
+<!-- PIPELINE-RESULTS -->
+
 ## How it is measured
+
+### `map_structures`
 
 - **Four dataset shapes**, each generated with a fixed seed at 1,000 to
   1,000,000 rows (`benchmarks/scenarios.py` in the repository):
@@ -39,21 +56,46 @@ comparison is like for like.
 - **Peak extra memory** is the most memory one call allocated beyond its
   inputs, output included, measured with `tracemalloc` in a separate call.
   - It counts NumPy buffers, pandas hash tables and Python objects.
-  - It misses memory allocated outside Python's allocator hooks.
+  - It misses memory allocated outside Python's allocator hooks, so these
+    environments deliberately lack pyarrow: with it, pandas 3 keeps strings in
+    Arrow buffers that `tracemalloc` cannot see.
   - A job's peak is roughly the input plus this figure.
+
+### The pipeline
+
+- **One mock dataset** (`benchmarks/wb_ids/` in the repository), rebuilt from
+  the real file's profile with a fixed seed at each size, so every version
+  reads the same bytes. Its shape, and how closely it tracks the real data, are
+  described in `docs/datasets/wb-ids.md`.
+- **Two configurations**: whole frame, and chunks of a fifth of the rows with
+  the lean load. The chunked configuration needs `DatasetValidator`, so
+  releases without it show "—" there.
+- **Time** per step is the median over 3 runs (1 at more than 1,000,000 rows,
+  and just one when a run takes over 30 seconds), as `benchmarks/wb_ids/pipeline.py`
+  measures it: each step's own time, with the previous step's output already in
+  memory.
+- **Peak RSS** is the process's resident set size, sampled every 10 ms during
+  the first run. It is what the operating system charges the job for: NumPy
+  and Arrow buffers, Python objects and the allocator's caches alike, which is
+  why these environments do carry pyarrow, as a Databricks cluster does. A
+  spike shorter than 10 ms can be missed, and the figure includes the mock
+  frame itself.
+- **Like for like, twice.** The standardised output is fingerprinted chunk by
+  chunk (its values, not their dtypes or order), and the validation errors are
+  fingerprinted separately. A version whose output differs reads "≠ output"
+  throughout; one whose validation found different errors reads it on the
+  `validate` row alone.
+
+### Both
+
 - **Each version is installed as users install it**, with the dependencies it
   declares, resolved when the benchmark ran.
   - Versions that require different pandas releases are measured with different
     pandas releases, so part of a difference between them can come from pandas.
-  - The Environment table lists what each version ran with.
-- **Like for like.** Every case records a fingerprint of the mapped output. A
-  version whose output differs from the profiled version's, for example because
-  an older release lacks a feature the case uses, is marked "≠ output" and left
-  out of the comparison, because its time would say nothing about speed.
+  - The Environment tables list what each version ran with.
 - **Noise.** Runs on shared hardware vary by a few percent, so changes within
-  ±10% read "≈ same". Versions whose mapping code is unchanged differ by noise
-  alone.
-- **Cells marked "—" were not measured**, for one of three reasons:
-  - a smaller size of the same shape took over a minute;
-  - the call failed;
-  - the call was too slow to trace its memory.
+  ±10% read "≈ same". Versions whose code is unchanged differ by noise alone.
+- **Cells marked "—" were not measured**, because a smaller size took over a
+  minute, the run would not have fit in the machine's memory, the call failed,
+  or (for `map_structures`) the call was too slow to trace its memory. The
+  notes under each pipeline table, and the run's JSON, say which.

@@ -1,9 +1,11 @@
 name: Benchmarks (PR)
 
 # Benchmarks a pull request's head against its base branch and the latest
-# release, and keeps one comment on the PR up to date with the result. Runs
-# when the PR touches what map_structures' speed depends on, or carries the
-# `benchmark` label.
+# release, and keeps one comment on the PR up to date with the result. Two
+# suites, each with its own trigger paths: the `map_structures` suite runs when
+# the PR touches what that function's speed depends on, and the pipeline suite
+# when it touches any of the package, since the pipeline runs most of it. The
+# `benchmark` label runs both.
 on:
   pull_request:
     branches: [main, dev]
@@ -37,7 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      run: ${{ steps.decide.outputs.run }}
+      mapping: ${{ steps.decide.outputs.mapping }}
+      pipeline: ${{ steps.decide.outputs.pipeline }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,8 +48,8 @@ jobs:
           persist-credentials: false
       # A job, not an `on.pull_request.paths` filter: that filter would also
       # drop the `labeled` event, so the label could never force a run. The
-      # paths are what the benchmark measures: the mapping code, the harness,
-      # and the dependencies pyproject.toml declares.
+      # paths are what each suite measures: the mapping code, or the whole
+      # package; plus the harness, and the dependencies pyproject.toml declares.
       - name: Check the label and the changed paths
         id: decide
         env:
@@ -55,46 +58,72 @@ jobs:
           HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'benchmark') }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          mapping=false
+          pipeline=false
           if [ "$ACTION" = "labeled" ]; then
-            if [ "$ADDED_LABEL" = "benchmark" ]; then run=true; else run=false; fi
+            if [ "$ADDED_LABEL" = "benchmark" ]; then mapping=true; pipeline=true; fi
           elif [ "$HAS_LABEL" = "true" ]; then
-            run=true
-          elif git diff --quiet "origin/$BASE_REF...HEAD" -- \
-              src/tidysdmx/mapping.py benchmarks/ pyproject.toml; then
-            run=false
+            mapping=true
+            pipeline=true
           else
-            run=true
+            git diff --quiet "origin/$BASE_REF...HEAD" -- \
+              src/tidysdmx/mapping.py benchmarks/ pyproject.toml || mapping=true
+            git diff --quiet "origin/$BASE_REF...HEAD" -- \
+              src/tidysdmx/ benchmarks/ pyproject.toml || pipeline=true
           fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-          echo "Benchmark this PR: $run"
+          echo "mapping=$mapping" >> "$GITHUB_OUTPUT"
+          echo "pipeline=$pipeline" >> "$GITHUB_OUTPUT"
+          echo "Benchmark this PR: map_structures $mapping, pipeline $pipeline"
 
-  benchmark:
-    name: Benchmark
+  benchmark-mapping:
+    name: Benchmark map_structures
     needs: decide
-    if: needs.decide.outputs.run == 'true'
+    if: needs.decide.outputs.mapping == 'true'
     uses: $/.github/workflows/benchmarks.yml
     with:
       ref: ${{ github.event.pull_request.head.sha }}
+      suite: mapping
       target-label: head
       compare: base=origin/${{ github.event.pull_request.base.ref }}
       baselines: 1
     permissions:
       contents: read
 
+  benchmark-pipeline:
+    name: Benchmark the pipeline
+    needs: decide
+    if: needs.decide.outputs.pipeline == 'true'
+    uses: $/.github/workflows/benchmarks.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      suite: pipeline
+      target-label: head
+      compare: base=origin/${{ github.event.pull_request.base.ref }}
+      baselines: 1
+      sizes: "1000000"
+    permissions:
+      contents: read
+
   comment:
     name: Post the benchmark comment
-    needs: benchmark
+    needs: [benchmark-mapping, benchmark-pipeline]
+    # Either suite may have been skipped; post whatever ran and succeeded.
+    if: >-
+      !cancelled()
+      && (needs.benchmark-mapping.result == 'success'
+          || needs.benchmark-pipeline.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       pull-requests: write # create or edit the PR comment
     # No checkout: this job holds a write token, so it never runs PR code. It
-    # only posts the Markdown the read-only benchmark job rendered.
+    # only posts the Markdown the read-only benchmark jobs rendered.
     steps:
       - name: Download results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: benchmark-results
+          pattern: benchmark-results-*
+          merge-multiple: true
           path: results
       - name: Create or update the comment
         env:
@@ -103,13 +132,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           marker='<!-- tidysdmx-benchmark -->'
+          {
+            echo "$marker"
+            for summary in results/mapping-summary.md results/pipeline-summary.md; do
+              if [ -f "$summary" ]; then cat "$summary"; echo; fi
+            done
+          } > comment.md
           id=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" \
             | head -n 1)
           if [ -n "$id" ]; then
             gh api --method PATCH "repos/$GH_REPO/issues/comments/$id" \
-              -F body=@results/pr-comment.md > /dev/null
+              -F body=@comment.md > /dev/null
           else
             gh api --method POST "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
-              -F body=@results/pr-comment.md > /dev/null
+              -F body=@comment.md > /dev/null
           fi

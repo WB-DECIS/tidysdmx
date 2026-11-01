@@ -387,6 +387,19 @@ was not counted.
   for callers passing the host alone. `fetch_schema` is deprecated instead
   (see A4); the pysdmx-floor part of D10 is still open.*
 
+**E. Memory on large inputs (October 2026, `bench/wb-ids-mock-data`)**
+- **E1** The WB template pipeline could not run on the 15 GB WB_IDS bronze
+  extract (about 410 bytes of peak memory per input row, 60 GB in all).
+  *Done (2026-10-28):* every step is chunk-safe and `DatasetValidator`
+  accumulates the checks across chunks; `map_structures` groups each source
+  column once per call and keeps a categorical source categorical;
+  `standardize_output` no longer deep-copies; the value checks judge distinct
+  values rather than rows. `benchmarks/wb_ids/pipeline.py --chunk-rows`
+  measures the chunked run and `docs/datasets/wb-ids.md` records the numbers.
+  Not done, by choice: duplicate keys shared by two chunks are not detected
+  (the registry's key check covers them), and fixed values and the three
+  reference columns stay `str` columns. *M*
+
 ## 8. Out of scope / deferred
 
 - Performing the module splits (B1–B3) — backlogged with PR slicing above.

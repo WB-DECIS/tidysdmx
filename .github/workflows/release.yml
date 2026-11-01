@@ -230,9 +230,11 @@ jobs:
           packages-dir: dist
           print-hash: true
 
-  # Benchmark the release against the previous three on one runner, and attach
-  # the results to the GitHub Release; the docs redeploy below renders them.
-  # Not on the critical path: deploy-docs runs whether or not these succeed.
+  # Benchmark the release against the previous three on one runner, both
+  # suites in parallel, and attach the results to the GitHub Release as
+  # benchmarks-vX.Y.Z.json (map_structures) and pipeline-vX.Y.Z.json (the WB
+  # template pipeline); the docs redeploy below renders them. Not on the
+  # critical path: deploy-docs runs whether or not these succeed.
   benchmark:
     name: Benchmark the release
     needs: [release, build]
@@ -240,13 +242,34 @@ jobs:
     uses: $/.github/workflows/benchmarks.yml
     with:
       ref: ${{ needs.release.outputs.tag }}
+      suite: mapping
       baselines: 3
+    permissions:
+      contents: read
+
+  benchmark-pipeline:
+    name: Benchmark the pipeline for the release
+    needs: [release, build]
+    if: needs.release.outputs.released == 'true' && inputs.noop != true
+    uses: $/.github/workflows/benchmarks.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+      suite: pipeline
+      baselines: 3
+      sizes: "1000000 10000000"
     permissions:
       contents: read
 
   attach-benchmark:
     name: Attach benchmark results to the release
-    needs: [release, benchmark]
+    needs: [release, benchmark, benchmark-pipeline]
+    # Either suite may have failed; attach whatever was measured.
+    if: >-
+      !cancelled()
+      && needs.release.outputs.released == 'true'
+      && inputs.noop != true
+      && (needs.benchmark.result == 'success'
+          || needs.benchmark-pipeline.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -255,7 +278,8 @@ jobs:
       - name: Download results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: benchmark-results
+          pattern: benchmark-results-*
+          merge-multiple: true
           path: results
       - name: Upload to the release
         env:
@@ -263,8 +287,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
-          cp results/benchmarks-results.json "benchmarks-$TAG.json"
-          gh release upload "$TAG" "benchmarks-$TAG.json" --clobber
+          if [ -f results/mapping-results.json ]; then
+            cp results/mapping-results.json "benchmarks-$TAG.json"
+            gh release upload "$TAG" "benchmarks-$TAG.json" --clobber
+          fi
+          if [ -f results/pipeline-results.json ]; then
+            cp results/pipeline-results.json "pipeline-$TAG.json"
+            gh release upload "$TAG" "pipeline-$TAG.json" --clobber
+          fi
 
   # Rebuild and redeploy the site from the release tag, so the published version
   # and changelog match the release that just happened rather than lagging by one.

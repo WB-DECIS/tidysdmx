@@ -188,6 +188,7 @@ reference:
     - title: Validation
       desc: Validate datasets against schemas and codelists.
       contents:
+        - DatasetValidator
         - validate_dataset_local
         - validate_columns
         - validate_mandatory_columns

@@ -78,9 +78,15 @@ build-backend = "flit_core.buildapi"
 # flit ships src/tidysdmx, pyproject.toml, README.md and LICENSE by itself; this
 # adds what the sdist carried before the backend switch.
 include = ["tests/", "CHANGELOG.md"]
-# tests/test_benchmarks.py tests the top-level benchmarks/ package, which the
-# sdist does not carry, so pytest would fail to collect it from an unpacked sdist.
-exclude = ["tests/**/__pycache__", "tests/**/*.pyc", "tests/test_benchmarks.py"]
+# tests/test_benchmarks.py and tests/test_wb_ids.py test the top-level
+# benchmarks/ package, which the sdist does not carry, so pytest would fail to
+# collect them from an unpacked sdist.
+exclude = [
+    "tests/**/__pycache__",
+    "tests/**/*.pyc",
+    "tests/test_benchmarks.py",
+    "tests/test_wb_ids.py",
+]
 
 # ----------------------------------------------------------------------
 # Dependency groups (PEP 735). `uv sync` installs `dev` by default;
@@ -112,6 +118,10 @@ dev = [
     # sees what users see. Test-only: tidysdmx never imports pyarrow. 22 is the
     # first release with Python 3.14 wheels.
     "pyarrow>=22",
+    # Process memory for the WB_IDS pipeline benchmark (benchmarks/wb_ids/):
+    # tracemalloc cannot see Arrow's allocator, so peak memory there is sampled
+    # RSS. Its wheels are abi3, so they cover every Python CI tests on.
+    "psutil>=7.0",
 ]
 # great-docs is pinned exactly rather than floated: it is a young, pre-1.0
 # project whose config schema can still change, and an unpinned docs tool
@@ -308,6 +318,13 @@ warn_unused_configs = true
 # is left out for now because turning on real pandas types surfaces a further
 # batch of errors that belongs in its own change.
 module = ["pysdmx.*", "openpyxl.*", "typeguard.*", "pandas.*", "numpy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Dev-only libraries of the WB_IDS benchmark (benchmarks/wb_ids/). Neither ships
+# py.typed; pyarrow-stubs and types-psutil exist, but nothing outside that
+# harness imports either library, so the stubs would buy little.
+module = ["pyarrow.*", "psutil.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

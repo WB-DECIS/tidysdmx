@@ -741,7 +741,10 @@ def _add_sdmx_reference_cols(
         >>> print(result.columns)
         Index(['OBS_VALUE', 'STRUCTURE', 'STRUCTURE_ID', 'ACTION'], dtype='object')
     """
-    df = df.copy()
+    # Shallow: the reference columns are new, and under pandas' Copy-on-Write
+    # writing them never touches the caller's frame. A deep copy doubled the
+    # whole dataset for the duration of the call.
+    df = df.copy(deep=False)
 
     structure_col, structure_id_col, _ = sdmx_reference_cols_for(artefact_type)
 

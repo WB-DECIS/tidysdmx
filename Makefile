@@ -14,7 +14,7 @@
 # module entry point, so those two keep their console scripts.
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench performance-page
+.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench bench-pipeline performance-page wb-ids-mock pipeline-profile
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -53,13 +53,15 @@ build: ## Build the sdist and wheel, check their metadata, and import the wheel
 	uv run --isolated --no-project --with dist/*.whl \
 		python -c "import tidysdmx; print(tidysdmx.__version__)"
 
-# The results the Performance page renders from: what `make bench` writes
-# locally, and what docs.yml downloads from the newest release that has one.
+# The results the Performance page renders from: what `make bench` and
+# `make bench-pipeline` write locally, and what docs.yml downloads from the
+# newest release that has each.
 PERF_RESULTS ?= benchmarks/results/latest.json
+PIPELINE_RESULTS ?= benchmarks/results/pipeline.json
 
-performance-page: ## Render the Performance page from PERF_RESULTS (a placeholder if absent)
+performance-page: ## Render the Performance page from PERF_RESULTS and PIPELINE_RESULTS (placeholders if absent)
 	uv run python -m benchmarks.report --format page --input $(PERF_RESULTS) \
-		--output performance/index.qmd
+		--pipeline-input $(PIPELINE_RESULTS) --output performance/index.qmd
 
 # great-docs has no `python -m` entry point (its CLI is a bare click group with
 # no __main__), and neither has quarto, which great-docs shells out to. Both
@@ -95,7 +97,8 @@ audit: ## Audit locked dependencies for known vulnerabilities
 release-dry: ## Show the version the next release would produce, changing nothing
 	uv run --group release python -m semantic_release -v --noop version
 
-# Extra arguments for `make bench`, e.g. BENCH_ARGS="--sizes 1000 10000 --baselines 1".
+# Extra arguments for `make bench` and `make bench-pipeline`, e.g.
+# BENCH_ARGS="--sizes 1000 10000 --baselines 1".
 BENCH_ARGS ?=
 
 # --no-project: the orchestrator is standard library only, and each version
@@ -104,5 +107,29 @@ BENCH_ARGS ?=
 bench: ## Benchmark map_structures: the working tree against the last 3 releases
 	uv run --no-project --python 3.11 python -m benchmarks.run --target WORKTREE --baselines 3 \
 		--out $(PERF_RESULTS) $(BENCH_ARGS)
+
+# Same orchestrator, pipeline suite: the whole WB template pipeline, step by
+# step, on a mock WB_IDS CSV it generates once under .bench/pipeline/ (1M rows
+# by default; BENCH_ARGS="--sizes 200000 --baselines 1" for a quick run).
+bench-pipeline: ## Benchmark the WB template pipeline: the working tree against the last 3 releases
+	uv run --no-project --python 3.11 python -m benchmarks.run --suite pipeline --target WORKTREE \
+		--baselines 3 --out $(PIPELINE_RESULTS) $(BENCH_ARGS)
+
+# Rows of mock WB_IDS bronze data (the real file has 147,000,092, about 15 GB).
+# Generated files go to the gitignored benchmarks/results/; see docs/datasets/wb-ids.md.
+WB_IDS_ROWS ?= 1000000
+WB_IDS_CSV = benchmarks/results/wb_ids/WB_IDS_BRONZE_mock_$(WB_IDS_ROWS).csv
+# Extra arguments for the single-version pipeline runner, e.g.
+# PIPELINE_ARGS="--chunk-rows 5000000 --skip-unused --categories".
+PIPELINE_ARGS ?=
+
+wb-ids-mock: ## Generate a mock WB_IDS bronze CSV of WB_IDS_ROWS rows
+	uv run python -m benchmarks.wb_ids.generate --rows $(WB_IDS_ROWS) --out $(WB_IDS_CSV)
+
+# The working tree alone, at sizes `bench-pipeline` does not run (40M, 147M
+# rows): profiling one configuration rather than comparing versions.
+pipeline-profile: wb-ids-mock ## Time and memory-profile the WB template pipeline on that mock CSV, this tree only
+	uv run python -m benchmarks.wb_ids.pipeline --csv $(WB_IDS_CSV) \
+		--out benchmarks/results/wb_ids/pipeline_$(WB_IDS_ROWS).json $(PIPELINE_ARGS)
 
 check: lint typecheck cov ## Lint, typecheck and gated tests — CI runs these plus `build`
