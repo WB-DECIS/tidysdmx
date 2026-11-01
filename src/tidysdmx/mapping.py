@@ -57,10 +57,22 @@ _SUPPORTED_MAP_TYPES: tuple[type, ...] = (
 # stay bounded however long the column is.
 _PRINT_FORM_CHUNK_ROWS: int = 2**20
 
+# The most distinct unmapped source values (or combinations) the unmapped
+# warning names; the rest are counted.
+_MAX_UNMAPPED_LISTED: int = 10
+
 
 def _progress_level(verbose: bool) -> int:
     """Return the log level for progress messages (INFO when verbose)."""
     return logging.INFO if verbose else logging.DEBUG
+
+
+def _listed(values: Sequence[object]) -> str:
+    """Join the first ``_MAX_UNMAPPED_LISTED`` values' reprs, counting the rest."""
+    listed = ", ".join(repr(value) for value in values[:_MAX_UNMAPPED_LISTED])
+    if len(values) > _MAX_UNMAPPED_LISTED:
+        listed += f", and {len(values) - _MAX_UNMAPPED_LISTED} more"
+    return listed
 
 
 def _value_map_rank(patterns: Sequence[str]) -> int:
@@ -391,7 +403,8 @@ def apply_component_map(
     (``"regex:.*"``, the COMP_MAPPING ``DEFAULT_VALUE``), never by a literal
     or any other regex value map. With a catch-all they take its target, and
     a warning reports how many did; without one they yield NaN in the target
-    column.
+    column. A warning counts the rows left unmapped and names up to ten of the
+    distinct source values behind them.
 
     Each distinct source value is matched once and the result broadcast to
     every row, so value-map matching grows with the number of distinct values
@@ -514,7 +527,18 @@ def _map_component(
         )
     unmapped = target.isna().sum()
     if unmapped > 0:
-        logger.warning("%d values could not be mapped (set to NaN).", unmapped)
+        # resolved holds one entry per distinct value, aligned with distinct,
+        # so naming the unmapped ones costs nothing per row.
+        unmapped_values = distinct[resolved.isna().to_numpy()].tolist()
+        logger.warning(
+            "%d values could not be mapped (set to NaN) from '%s' to '%s'; "
+            "%d distinct unmapped source value(s): %s.",
+            unmapped,
+            source_col,
+            target_col,
+            len(unmapped_values),
+            _listed(unmapped_values),
+        )
 
     return target
 
@@ -720,7 +744,8 @@ def apply_multi_component_map(
     only by the pure catch-all (the COMP_MAPPING ``DEFAULT_VALUE``), never by
     a literal or partially-regex rule. With a catch-all they take its target,
     and a warning reports how many did; without one they yield NaN in the
-    target column.
+    target column. A warning counts the rows left unmapped and names up to ten
+    of the distinct source combinations behind them.
 
     Only the first target column is used; multi-target MultiComponentMaps
     are not supported.
@@ -863,7 +888,20 @@ def _map_multi_component(
             )
     unmapped = target.isna().sum()
     if unmapped > 0:
-        logger.warning("%d rows could not be mapped (set to NaN).", unmapped)
+        # One entry per combination, as in _map_component.
+        unmatched = pd.isna(resolved)
+        unmapped_combinations = list(
+            zip(*(c[unmatched].tolist() for c in combinations), strict=True)
+        )
+        logger.warning(
+            "%d rows could not be mapped (set to NaN) from %s to '%s'; "
+            "%d distinct unmapped source combination(s): %s.",
+            unmapped,
+            source_cols,
+            target_col,
+            len(unmapped_combinations),
+            _listed(unmapped_combinations),
+        )
 
     return target
 
