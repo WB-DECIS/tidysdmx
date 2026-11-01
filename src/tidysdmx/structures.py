@@ -1813,8 +1813,11 @@ def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule 
         A valid pysdmx StructureMap object.
 
     Raises:
-        ValueError: If mandatory sheets/columns are missing or mapping rules
-            are invalid.
+        ValueError: If mandatory sheets/columns are missing, mapping rules
+            are invalid, or a REP_MAPPING value that a representation or
+            multi_representation rule reads has leading or trailing
+            whitespace (a non-breaking space included), which a value map
+            would keep as part of the value.
 
     Examples:
         >>> mappings = {
@@ -2248,6 +2251,50 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
     raise ValueError(f"Unknown mapping rule: '{raw_rule}'")
 
 
+# The most padded REP_MAPPING values one error lists; the rest are counted.
+_MAX_LISTED_CELLS: int = 10
+
+
+def _reject_padded_values(frame: pd.DataFrame, headers: dict[str, str]) -> None:
+    """Refuse REP_MAPPING values with leading or trailing whitespace.
+
+    A value map keeps a value as written: a padded source never equals the
+    data's value, so every row it should map is left unmapped, and a padded
+    target is written into the data. The whitespace is often invisible in
+    Excel (a non-breaking space pasted along with a code), so the error shows
+    each value's repr.
+
+    Args:
+        frame: The mapping rows a rule reads, missing values already dropped,
+            indexed like the REP_MAPPING sheet.
+        headers: Each column of ``frame`` to check, mapped to its REP_MAPPING
+            header (``S:Series``) for the error message.
+
+    Raises:
+        ValueError: If any checked value has leading or trailing whitespace.
+            The message lists up to ``_MAX_LISTED_CELLS`` of them.
+    """
+    cells: list[str] = []
+    for column, header in headers.items():
+        for label, value in frame[column].items():
+            text = str(value)
+            if text != text.strip():
+                # parse_mapping_template_wb reads the header from sheet row 1,
+                # so index 0 is sheet row 2.
+                row = label + 2 if isinstance(label, int) else label
+                cells.append(f"{header} row {row} {text!r}")
+    if not cells:
+        return
+    listed = ", ".join(cells[:_MAX_LISTED_CELLS])
+    if len(cells) > _MAX_LISTED_CELLS:
+        listed += f", and {len(cells) - _MAX_LISTED_CELLS} more"
+    raise ValueError(
+        f"{len(cells)} REP_MAPPING value(s) have leading or trailing whitespace, "
+        f"which a value map would keep: {listed}. Remove the whitespace "
+        "(non-breaking spaces included) from these cells."
+    )
+
+
 @typechecked
 def _extract_representation_map(
     rep_data: dict[str, pd.DataFrame], source_id: str, target_id: str
@@ -2270,7 +2317,8 @@ def _extract_representation_map(
 
     Raises:
         ValueError: If rep_data is missing, either DataFrame is empty,
-            column resolution fails, or no valid mapping pairs remain.
+            column resolution fails, no valid mapping pairs remain, or a
+            remaining value has leading or trailing whitespace.
     """
     # 1) Validate presence and non-empty REP_MAPPING inputs
     if (
@@ -2313,6 +2361,12 @@ def _extract_representation_map(
             f"and target column '{actual_target_col}'."
         )
 
+    # 5) Refuse padded values, which no value map can use as written
+    _reject_padded_values(
+        rep_mapping_df,
+        {"source": f"S:{actual_source_col}", "target": f"T:{actual_target_col}"},
+    )
+
     return rep_mapping_df
 
 
@@ -2345,7 +2399,8 @@ def _extract_multi_representation_map(
 
     Raises:
         ValueError: If rep_data is missing/empty, a column cannot be resolved,
-            or no valid mapping rows remain.
+            no valid mapping rows remain, or a remaining value has leading or
+            trailing whitespace.
     """
     # 1) Validate presence and non-empty REP_MAPPING inputs
     if (
@@ -2368,11 +2423,14 @@ def _extract_multi_representation_map(
     # 2) Resolve actual column names (can raise if not found). Keys are
     # prefixed so a target sharing a source's ID cannot replace that source.
     columns: dict[str, pd.Series] = {}
+    headers: dict[str, str] = {}
     for source_id in source_ids:
         actual_col = _match_column_name(source_id, source_df.columns.tolist())
         columns[f"S:{source_id}"] = source_df[actual_col]
+        headers[f"S:{source_id}"] = f"S:{actual_col}"
     actual_target_col = _match_column_name(target_id, target_df.columns.tolist())
     columns[f"T:{target_id}"] = target_df[actual_target_col]
+    headers[f"T:{target_id}"] = f"T:{actual_target_col}"
 
     # 3) Build, sanitize, and deduplicate tuples
     rep_mapping_df = pd.DataFrame(columns).dropna(how="any").drop_duplicates()
@@ -2383,5 +2441,8 @@ def _extract_multi_representation_map(
             f"No valid mapping rows found for sources {source_ids} "
             f"and target '{target_id}'."
         )
+
+    # 5) Refuse padded values, which no value map can use as written
+    _reject_padded_values(rep_mapping_df, headers)
 
     return rep_mapping_df

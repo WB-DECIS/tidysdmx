@@ -1996,6 +1996,76 @@ class TestPrintFormsOnlyForRegex:
         assert result["OUT"].isna().tolist() == [False, True, False, False]
 
 
+class TestUnmappedWarning:
+    """The unmapped-values warning names the source values no value map matched."""
+
+    @pytest.fixture
+    def area_map(self):
+        return TestMappingOnDistinctValues._component_map(
+            "AREA", "REGION", [ValueMap(source="FR", target="EU")]
+        )
+
+    @pytest.fixture
+    def urbanisation_map(self):
+        return TestMappingOnDistinctValues._multi_map(
+            [MultiValueMap(source=["COL", "one"], target=["RUR"])]
+        )
+
+    @pytest.mark.parametrize("dtype", ["str", "category"])
+    def test_component_map_warning_names_unmapped_values(self, area_map, caplog, dtype):
+        df = pd.DataFrame({"AREA": pd.Series(["FR", "BR", "US", "BR"], dtype=dtype)})
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, area_map)
+        assert (
+            "3 values could not be mapped (set to NaN) from 'AREA' to 'REGION'; "
+            "2 distinct unmapped source value(s): 'BR', 'US'." in caplog.messages
+        )
+
+    def test_component_map_warning_lists_ten_values_then_counts_the_rest(
+        self, area_map, caplog
+    ):
+        df = pd.DataFrame({"AREA": [f"K{i}" for i in range(12)]})
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_component_map(df, area_map)
+        assert any(
+            message.endswith("'K8', 'K9', and 2 more.") for message in caplog.messages
+        )
+
+    def test_multi_component_map_warning_names_unmapped_combinations(
+        self, urbanisation_map, caplog
+    ):
+        df = pd.DataFrame(
+            {"AREA": ["COL", "COL", "XYZ", "COL"], "NOTE": ["one", "two", "one", "two"]}
+        )
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, urbanisation_map)
+        assert (
+            "3 rows could not be mapped (set to NaN) from ['AREA', 'NOTE'] to "
+            "'URBANISATION'; 2 distinct unmapped source combination(s): "
+            "('COL', 'two'), ('XYZ', 'one')." in caplog.messages
+        )
+
+    def test_multi_component_map_warning_lists_ten_combinations_then_counts_the_rest(
+        self, urbanisation_map, caplog
+    ):
+        df = pd.DataFrame({"AREA": [f"K{i}" for i in range(12)], "NOTE": ["one"] * 12})
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, urbanisation_map)
+        assert any(
+            message.endswith(
+                "12 distinct unmapped source combination(s): ('K0', 'one'), "
+                "('K1', 'one'), ('K2', 'one'), ('K3', 'one'), ('K4', 'one'), "
+                "('K5', 'one'), ('K6', 'one'), ('K7', 'one'), ('K8', 'one'), "
+                "('K9', 'one'), and 2 more."
+            )
+            for message in caplog.messages
+        )
+
+
 class TestRequirePandas3:
     """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""
 

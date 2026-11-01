@@ -1836,6 +1836,19 @@ class TestBuildStructureMapFromTemplateWb:
         with pytest.raises(ValueError):
             build_structure_map_from_template_wb(mappings)
 
+    def test_padded_rep_mapping_value_raises_valueerror(self, valid_mappings):
+        """A REP_MAPPING value ending in a non-breaking space names its rule and cell.
+
+        Such a value never matches the data, so every row it should map would
+        be left unmapped.
+        """
+        mappings = valid_mappings.copy()
+        mappings["REP_MAPPING"] = pd.DataFrame(
+            {"S:SRC3": ["A\xa0", "B"], "T:TGT3": ["X", "Y"]}
+        )
+        with pytest.raises(ValueError, match=r"Target 'TGT3'.*S:SRC3 row 2 'A\\xa0'"):
+            build_structure_map_from_template_wb(mappings)
+
     def test_case_insensitive_info_key_match(self, valid_mappings):
         """Tests INFO key matching is case-insensitive and extracts agency/version."""
         mappings = valid_mappings.copy()
@@ -2454,6 +2467,44 @@ class TestExtractRepresentationMap:
         assert len(result_df) == 1
         assert result_df.iloc[0].to_dict() == {"source": "A", "target": "X"}
 
+    @pytest.mark.parametrize("padded", ["A\xa0", " A", "A ", "\tA"])
+    def test_raises_on_padded_source_value(self, padded):
+        """A padded source value would never match the data, so it is refused."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["B", padded]}),
+            "target": pd.DataFrame({"tgt_col": ["Y", "X"]}),
+        }
+        with pytest.raises(ValueError, match=re.escape(f"S:src_col row 3 {padded!r}")):
+            _extract_representation_map(rep_data, "src_col", "tgt_col")
+
+    def test_raises_on_padded_target_value(self):
+        """A padded target value would be written to the data, so it is refused."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A"]}),
+            "target": pd.DataFrame({"tgt_col": ["X\xa0"]}),
+        }
+        with pytest.raises(ValueError, match=re.escape("T:tgt_col row 2 'X\\xa0'")):
+            _extract_representation_map(rep_data, "src_col", "tgt_col")
+
+    def test_padded_value_error_lists_ten_cells_then_counts_the_rest(self):
+        """The error lists the first ten padded cells and counts the others."""
+        padded = [f"A{i} " for i in range(12)]
+        rep_data = {
+            "source": pd.DataFrame({"src_col": padded}),
+            "target": pd.DataFrame({"tgt_col": ["X"] * 12}),
+        }
+        with pytest.raises(ValueError, match=r"'A9 ', and 2 more\."):
+            _extract_representation_map(rep_data, "src_col", "tgt_col")
+
+    def test_ignores_padded_value_in_a_row_without_target(self):
+        """A padded cell in a row dropped for its missing target maps nothing."""
+        rep_data = {
+            "source": pd.DataFrame({"src_col": ["A", "B\xa0"]}),
+            "target": pd.DataFrame({"tgt_col": ["X", None]}),
+        }
+        result_df = _extract_representation_map(rep_data, "src_col", "tgt_col")
+        assert result_df["source"].tolist() == ["A"]
+
 
 class TestExtractMultiRepresentationMap:
     """Tests for `_extract_multi_representation_map` (N source cols -> 1 target)."""
@@ -2524,6 +2575,28 @@ class TestExtractMultiRepresentationMap:
             rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
         )
         assert len(result_df) == 1
+
+    def test_raises_on_padded_source_value(self):
+        """A padded value in any source column is refused."""
+        rep_data = {
+            "source": pd.DataFrame({"FREQ": ["A"], "REF_AREA": ["US\xa0"]}),
+            "target": pd.DataFrame({"INDICATOR": ["GDP"]}),
+        }
+        with pytest.raises(ValueError, match=re.escape("S:REF_AREA row 2 'US\\xa0'")):
+            _extract_multi_representation_map(
+                rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
+            )
+
+    def test_raises_on_padded_target_value(self):
+        """A padded target value is refused."""
+        rep_data = {
+            "source": pd.DataFrame({"FREQ": ["A"], "REF_AREA": ["US"]}),
+            "target": pd.DataFrame({"INDICATOR": [" GDP"]}),
+        }
+        with pytest.raises(ValueError, match=re.escape("T:INDICATOR row 2 ' GDP'")):
+            _extract_multi_representation_map(
+                rep_data, ["FREQ", "REF_AREA"], "INDICATOR"
+            )
 
 
 # region Test _validate_mapping_template_wb
