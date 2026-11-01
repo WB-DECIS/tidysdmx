@@ -2048,6 +2048,23 @@ class TestUnmappedWarning:
             "('COL', 'two'), ('XYZ', 'one')." in caplog.messages
         )
 
+    def test_multi_component_map_warning_lists_ten_combinations_then_counts_the_rest(
+        self, urbanisation_map, caplog
+    ):
+        df = pd.DataFrame({"AREA": [f"K{i}" for i in range(12)], "NOTE": ["one"] * 12})
+
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.mapping"):
+            apply_multi_component_map(df, urbanisation_map)
+        assert any(
+            message.endswith(
+                "12 distinct unmapped source combination(s): ('K0', 'one'), "
+                "('K1', 'one'), ('K2', 'one'), ('K3', 'one'), ('K4', 'one'), "
+                "('K5', 'one'), ('K6', 'one'), ('K7', 'one'), ('K8', 'one'), "
+                "('K9', 'one'), and 2 more."
+            )
+            for message in caplog.messages
+        )
+
 
 class TestRequirePandas3:
     """tidysdmx.mapping refuses pandas older than 3, whose copies are not CoW."""
