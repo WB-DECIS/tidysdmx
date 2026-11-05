@@ -194,14 +194,49 @@ client.put_structures(artefacts, action=StructureAction.Append)
 
 Pass `header=` a `pysdmx.model.message.Header` to name the sender or give the message its own ID. Without one, pysdmx sends a default header whose `id` and `prepared` time are fixed when pysdmx is imported, so every upload from one process carries the same message ID.
 
-## 7. How refresh works
+## 7. Edit an artefact and push it back
+
+To change an artefact already in the registry, fetch it, edit a copy, and upload the copy. pysdmx artefacts are immutable, so the edit is `msgspec.structs.replace`, which returns a copy with the fields you name replaced and everything else as the registry sent it. Adding a code to a test codelist:
+
+```python
+import msgspec
+from pysdmx.io.format import StructureFormat
+from pysdmx.model import Code
+from tidysdmx import AzureTokenProvider, FmrClient
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient(
+    "https://fmrqa.worldbank.org/FMR",
+    token_provider=provider,
+    structure_format=StructureFormat.SDMX_JSON_2_0_0,
+)
+
+# 1. Pull the codelist.
+codelist = client.fetch_codelist("WB.TEST:CL_TEST(1.0)")
+
+# 2. Add a code to a copy of it.
+new_code = Code(id="ITEM2", name="Second code list item")
+updated = msgspec.structs.replace(codelist, items=[*codelist.items, new_code])
+
+# 3. Push the copy back.
+client.put_structures([updated])
+```
+
+`put_structures` replaces by default, so the registry's `WB.TEST:CL_TEST(1.0)` becomes the codelist you sent: same agency, ID and version, now with two codes. `client.fetch_codelist("WB.TEST:CL_TEST(1.0)")` reads it back, and `client.put_structures([codelist])` undoes the edit by sending the original. Give every new code a name: without one, pysdmx raises `pysdmx.errors.Invalid` before anything is sent.
+
+Before you edit a real artefact this way, check two things:
+
+- **It is not final.** SDMX never changes a final artefact: publish the edited copy under a new version instead, replacing `version` as well as `items`. Check the registry, not `codelist.is_final`, which pysdmx guesses from the version string. `CL_TEST(1.0)` is not final, so the registry replaces it in place.
+- **It holds nothing pysdmx drops.** The registry keeps only what you send, and pysdmx reads one language per name and description and no parent codes, so a codelist's translations or code hierarchy would be lost. Annotations survive because the client reads SDMX-JSON 2.0, the format `put_structures` writes; the default Fusion-JSON reader drops them.
+
+## 8. How refresh works
 
 - The token is acquired on the first request, not when the client is built, so constructing a client or reading `client.maintenance` never triggers a sign-in.
 - Both pysdmx clients are built once and reused. They evaluate the token when each request goes out, so a reference you hold for hours keeps working across rotation.
 - Reads carry the token too whenever a provider is set. For a registry whose reads are public, `authenticate_reads=False` keeps a read from prompting an interactive sign-in.
 - The token itself never appears in `repr()` output, logs or tracebacks.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 `pysdmx.errors.Invalid: Client error 401`
 : The registry rejected the token. pysdmx reports every 4xx except 404 as `Invalid`, so this is an authentication failure, not a bad request. Decode the token and compare its `aud` with the scope the FMR expects — a Graph scope is the usual culprit.
@@ -230,7 +265,7 @@ Pass `header=` a `pysdmx.model.message.Header` to name the sender or give the me
 `ValueError: base_url must be an absolute http(s) URL`
 : Pass the scheme and host, e.g. `https://fmrqa.worldbank.org/FMR`. An `http` root that redirects to `https` would make uploads look successful without storing anything, because pysdmx does not follow redirects on POST.
 
-## 9. Smoke test against your registry
+## 10. Smoke test against your registry
 
 The test suite runs entirely offline. To prove the wiring against a real registry, read something small, upload a codelist with `Append`, and read it back:
 

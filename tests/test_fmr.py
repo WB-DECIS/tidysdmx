@@ -1,8 +1,13 @@
-"""Tests for tidysdmx.fmr — all offline; HTTP is intercepted by respx."""
+"""Tests for tidysdmx.fmr.
+
+Offline, with HTTP intercepted by respx, except the ``integration`` classes at
+the end, which talk to the World Bank's QA registry.
+"""
 
 import dataclasses
 import inspect
 import json
+import os
 import sys
 import threading
 import types
@@ -31,6 +36,7 @@ from pysdmx.model import (
     Agency,
     Categorisation,
     CategoryScheme,
+    Code,
     Codelist,
     ConceptScheme,
     Dataflow,
@@ -87,6 +93,8 @@ from tidysdmx.fmr import (
 
 ONE_HOUR = timedelta(hours=1)
 LIVE_FMR_ROOT = "https://fmrqa.worldbank.org/FMR"
+LIVE_TEST_CODELIST = "WB.TEST:CL_TEST(1.0)"
+LIVE_TEST_CODE_ID = "TIDYSDMX_LIVE_TEST"
 
 
 class _FetchCase(NamedTuple):
@@ -1490,3 +1498,75 @@ class TestFmrClientFetchLive:
         )
 
         assert structure_map.id == "SM_IFPRI_ASTI_TO_DATA360"
+
+
+@pytest.mark.integration
+# MSAL advises form_post on every browser sign-in; nothing a caller can act on.
+@pytest.mark.filterwarnings(
+    "ignore:response_mode='form_post' is recommended:UserWarning"
+)
+class TestFmrClientPutStructuresLive:
+    """A live upload to the QA registry's test codelist, restored afterwards.
+
+    Adds a code to ``WB.TEST:CL_TEST(1.0)`` and puts the original back, so it
+    writes to the registry. Needs ``TIDYSDMX_FMR_SCOPE`` set to the FMR app's
+    scope and an Azure sign-in, through a browser window when no other
+    credential is available; skips without the variable. When the FMR app does
+    not authorise the Azure CLI's client app (AADSTS650057), set
+    ``TIDYSDMX_FMR_CLIENT_ID`` and ``TIDYSDMX_FMR_TENANT_ID`` to one it does;
+    the sign-in then goes through the browser with that client app.
+    ``scripts/diagnose_fmr_auth.py`` finds where a failing sign-in breaks. Run
+    with ``-m integration``.
+    """
+
+    @pytest.fixture
+    def live_upload_client(self) -> FmrClient:
+        scope = os.environ.get("TIDYSDMX_FMR_SCOPE", "")
+        if not scope:
+            pytest.skip("set TIDYSDMX_FMR_SCOPE to the FMR app's scope to upload")
+        client = {
+            "client_id": os.environ.get("TIDYSDMX_FMR_CLIENT_ID"),
+            "tenant_id": os.environ.get("TIDYSDMX_FMR_TENANT_ID"),
+        }
+        given = {key: value for key, value in client.items() if value}
+        if given:
+            # DefaultAzureCredential would let the Azure CLI, or any credential
+            # ahead of its browser fallback, sign in through its own client app.
+            identity = pytest.importorskip("azure.identity")
+            provider = AzureTokenProvider(
+                identity.InteractiveBrowserCredential(**given), scope
+            )
+        else:
+            provider = AzureTokenProvider.from_default_credential(
+                scope, exclude_interactive_browser_credential=False
+            )
+        return FmrClient(
+            LIVE_FMR_ROOT,
+            token_provider=provider,
+            structure_format=StructureFormat.SDMX_JSON_2_0_0,
+        )
+
+    def test_put_structures_adds_a_code_to_a_fetched_codelist(self, live_upload_client):
+        client = live_upload_client
+        fetched = client.fetch_codelist(LIVE_TEST_CODELIST)
+        # Drop the test code in case an interrupted run left it behind.
+        original = structs.replace(
+            fetched,
+            items=[code for code in fetched.items if code.id != LIVE_TEST_CODE_ID],
+        )
+        added = Code(id=LIVE_TEST_CODE_ID, name="Added by the tidysdmx live test")
+        updated = structs.replace(original, items=[*original.items, added])
+
+        # The upload sits inside the try: it may take effect on the registry
+        # even when the request then fails. The restore sends back exactly
+        # what was fetched, the test code included if it was already there.
+        try:
+            client.put_structures([updated])
+            round_tripped = client.fetch_codelist(LIVE_TEST_CODELIST)
+        finally:
+            client.put_structures([fetched])
+
+        assert [code.id for code in round_tripped] == [
+            *(code.id for code in original),
+            LIVE_TEST_CODE_ID,
+        ]
