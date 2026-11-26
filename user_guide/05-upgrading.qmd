@@ -1,0 +1,51 @@
+---
+title: "Upgrading to 0.11"
+description: "What changes between tidysdmx 0.10 and 0.11, and what to do about each change."
+tags: [Getting Started, Setup]
+status: new
+---
+
+# Upgrading to 0.11
+
+tidysdmx 0.11 adds an authenticated FMR client and makes `map_structures` many times faster on large data. It also changes behaviour in seven places. Each is listed here with what to do.
+
+## Requirements
+
+**pandas 3 or later.** tidysdmx 0.11 needs `pandas>=3,<4` and refuses to import under pandas 2, with an `ImportError` that names the installed version. `pip` and `uv` upgrade pandas for you. On a platform that ships pandas 2, such as a Databricks runtime, add `pandas>=3` to the libraries you install alongside tidysdmx. pandas 3 also stores text columns with the `str` dtype, so a missing value in such a column reads as `NaN`, not `None`.
+
+**pysdmx 1.21 or later.** `pip` and `uv` upgrade it for you; lift any pin on pysdmx 1.19 or 1.20.
+
+## Mapping
+
+**Every rule reads the input DataFrame.** A rule in a structure map can no longer read a column that another rule produced. In `map_structures`, a `representation` or `multi_representation` rule whose source column is missing now raises `KeyError`, and an `implicit` rule with a missing source is skipped with a warning. Point the rule's `SOURCE` at the column of the input data, or add the column before mapping.
+
+**`DEFAULT_VALUE` now covers blank source values.** A `representation` or `multi_representation` rule with a `DEFAULT_VALUE` used to leave blank source cells empty. They now take the default, like any other unlisted value. If you relied on an empty target to spot missing source data, check the source column with `isna()` before mapping, or remove the default from that row. See [Mapping templates](04-mapping-templates.qmd#default-value).
+
+**Validity dates are timezone-aware.** `valid_from` and `valid_to` on the maps tidysdmx builds are now UTC when no offset was given, as pysdmx reads them from a registry. Compare them with an aware value such as `datetime(2020, 1, 1, tzinfo=UTC)`. Equality with a naive datetime is `False`, and an ordering comparison with one raises `TypeError`.
+
+## Output and validation
+
+**`standardize_output` writes the SDMX-CSV values pysdmx reads.** `action="U"` now raises `TypeCheckError`: pass `"A"` (append) or `"R"` (replace), whichever you meant. For a provision-agreement schema the `STRUCTURE` column now reads `dataprovision`; update anything that matched on `provisionagreement`.
+
+**More components are validated.** A component whose codes come from its concept, rather than from the component itself, is now checked against those codes. `validate_dataset_local` and `filter_tidy_raw` can therefore reject rows they used to accept: fix the data or the schema. `get_codelist_ids` raises `ValueError` for a component that has no codes or is not in the schema.
+
+## Deprecated
+
+These still work and emit a `FutureWarning`:
+
+| Deprecated | Use instead |
+|---|---|
+| `fetch_schema(base_url, artefact_id, context)` | `FmrClient(root).fetch_schema(artefact_id, context)`, where `root` includes the `/FMR` path. See [FMR client](03-fmr-client.qmd). |
+| `fetch_dsd_schema` | `FmrClient(root).fetch_schema(artefact_id, "datastructure")` |
+| `fix_sdmx_xml_datatype_tags` | Nothing: pysdmx writes these tags correctly, so drop the call. |
+
+## Smaller corrections
+
+- `parse_artefact_id` rejects malformed references, such as `"WB:WDI(1.0"` or one with an empty part, with `ValueError`. It used to return them half-parsed.
+- `gen_urn` writes the SDMX class name for two pysdmx-only names: `MultiRepresentationMap` becomes `RepresentationMap`, and `DataStructureDefinition` becomes `DataStructure`.
+- A mapping template logs a warning for a `DEFAULT_VALUE` it cannot apply and for a `COMP_MAPPING` column it does not read.
+
+## New in 0.11
+
+- [`FmrClient`](03-fmr-client.qmd): reads and uploads against a Fusion Metadata Registry, with bearer-token authentication and refresh, and one `fetch_*` method per artefact type.
+- `map_structures` matches each distinct value once. On a million rows it ran roughly 3 to 16 times faster than 0.10 and used 40 to 80% less extra memory, depending on the shape of the data; the [Performance](../performance/index.html) page has the measurements.

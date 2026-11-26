@@ -2,6 +2,7 @@
 title: "FMR client"
 description: "Talk to a Fusion Metadata Registry with authentication and token refresh handled for you."
 tags: [FMR, Setup]
+status: new
 ---
 
 # FMR client

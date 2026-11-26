@@ -1,0 +1,133 @@
+---
+title: "Mapping templates"
+description: "Describe a source-to-target mapping in an Excel workbook and apply it to a DataFrame."
+tags: [Mapping, Workflow]
+status: new
+---
+
+# Mapping templates
+
+A mapping template is an Excel workbook that says how the columns and codes of a source dataset become the components and codes of an SDMX structure. `parse_mapping_template_wb` reads the workbook, `build_structure_map_from_template_wb` turns it into a pysdmx `StructureMap`, and `map_structures` applies that map to a DataFrame.
+
+```python
+import pandas as pd
+from tidysdmx import (
+    build_structure_map_from_template_wb,
+    map_structures,
+    parse_mapping_template_wb,
+)
+
+sheets = parse_mapping_template_wb("mapping_template.xlsx")
+structure_map = build_structure_map_from_template_wb(sheets)
+mapped = map_structures(pd.read_csv("raw_data.csv"), structure_map)
+```
+
+The workbook needs three sheets: `INFO`, `COMP_MAPPING` and `REP_MAPPING`.
+
+## The `INFO` sheet
+
+Two columns, a key and a value. One row names the structure the map is for, with the key `dataflow`, `datastructure` or `provisionagreement` and a value written `AGENCY:ID(VERSION)`:
+
+| Key | Value |
+|---|---|
+| dataflow | `WB:DF_DEMO(1.0)` |
+
+The agency and version of that reference become the agency and version of the structure map. Other rows are ignored.
+
+## The `COMP_MAPPING` sheet
+
+One row per target component. Three columns are required and three are optional. Headers are matched exactly, in upper case.
+
+| Column | Required | What it holds |
+|---|---|---|
+| `SOURCE` | yes | The source column. Empty for a `fixed:` rule; several columns joined by `\|` for `multi_representation`. |
+| `TARGET` | yes | The target component. Every row that has a rule needs one. |
+| `MAPPING_RULES` | yes | One of the four rules below. A row with no rule is skipped. |
+| `DEFAULT_VALUE` | no | The target for source values `REP_MAPPING` does not list, blank cells included. |
+| `SOURCE_CL` | no | URN of the source codelist. |
+| `TARGET_CL` | no | URN of the target codelist. |
+
+The four rules:
+
+| `MAPPING_RULES` | What it does | Needs `REP_MAPPING` |
+|---|---|---|
+| `implicit` | Copies the source column to the target, values unchanged. | no |
+| `fixed:<VALUE>` | Sets the target to `<VALUE>` on every row. | no |
+| `representation` | Translates each source value to a target value. | yes |
+| `multi_representation` | Translates each combination of values, from two or more source columns, to a target value. | yes |
+
+Every rule reads its source from the DataFrame you pass to `map_structures`, never from a column another rule produced. One source column can therefore feed several targets.
+
+## The `REP_MAPPING` sheet
+
+The value translations. Source columns carry the prefix `S:` and target columns the prefix `T:`, followed by the component name used in `COMP_MAPPING`. Each row is one translation, and several rules can sit side by side in the same sheet: rows where a rule's own cells are blank are left out of that rule.
+
+| S:sex | T:SEX |
+|---|---|
+| Male | M |
+| Female | F |
+| regex:^[Tt]ot.* | _T |
+
+A source value that starts with `regex:` is a regular expression, matched against the whole value. Exact values are tried first, then regular expressions, then the default.
+
+## Defaults for unlisted and blank values {#default-value}
+
+`DEFAULT_VALUE` gives a `representation` or `multi_representation` rule a target for everything `REP_MAPPING` does not list. That includes blank source cells, which is what you want when a blank dimension means "not applicable":
+
+```python
+sheets = {
+    "INFO": pd.DataFrame({"Key": ["dataflow"], "Value": ["WB:DF_DEMO(1.0)"]}),
+    "COMP_MAPPING": pd.DataFrame(
+        {
+            "SOURCE": ["country", "sex", None],
+            "TARGET": ["REF_AREA", "SEX", "FREQ"],
+            "MAPPING_RULES": ["implicit", "representation", "fixed:A"],
+            "DEFAULT_VALUE": [None, "_Z", None],
+        }
+    ),
+    "REP_MAPPING": pd.DataFrame(
+        {
+            "S:sex": ["Male", "Female", "regex:^[Tt]ot.*"],
+            "T:SEX": ["M", "F", "_T"],
+        }
+    ),
+}
+structure_map = build_structure_map_from_template_wb(sheets)
+
+raw = pd.DataFrame(
+    {
+        "country": ["FRA", "FRA", "KEN", "KEN"],
+        "sex": ["Male", "Total", None, "Other"],
+        "value": [1, 2, 3, 4],
+    }
+)
+map_structures(raw, structure_map)
+```
+
+```
+  country    sex  value FREQ REF_AREA SEX
+0     FRA   Male      1    A      FRA   M
+1     FRA  Total      2    A      FRA  _T
+2     KEN    NaN      3    A      KEN  _Z
+3     KEN  Other      4    A      KEN  _Z
+```
+
+The blank cell and the unlisted `Other` both become `_Z`. `map_structures` logs a warning with the number of blank values that took the default, so a column that is unexpectedly empty does not pass unnoticed.
+
+Three things to know:
+
+- **Only `representation` and `multi_representation` rules apply a default.** On an `implicit` or `fixed:` row a `DEFAULT_VALUE` is ignored, and building the map logs a warning that says so. To give an `implicit` mapping a default, turn it into a `representation` rule whose `REP_MAPPING` rows map each code to itself.
+- **The header must read `DEFAULT_VALUE`.** `DEFAULT`, a different case or a trailing space is a column tidysdmx does not read. Building the map logs a warning that names every unrecognised column.
+- **Without a default, an unlisted or blank value is left empty** in the target, and `map_structures` logs how many values could not be mapped.
+
+For a `multi_representation` rule the default applies to any combination that is not listed, and to any row with a blank in one of its source columns.
+
+## Reading the warnings
+
+tidysdmx reports through the standard `logging` module, on the loggers `tidysdmx.structures` (building the map) and `tidysdmx.mapping` (applying it). In a script or a notebook, turn them on with:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+```

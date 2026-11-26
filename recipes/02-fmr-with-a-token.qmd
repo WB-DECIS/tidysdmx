@@ -1,0 +1,45 @@
+---
+title: "Reach an FMR that needs a token"
+description: "Pass a bearer token to FmrClient, from Azure or from a secret you already hold."
+tags: [FMR, Setup]
+status: new
+---
+
+# Reach an FMR that needs a token
+
+**With Azure (Entra ID).** Install the extra and let the default credential chain find an identity. The token is acquired on first use and refreshed before it expires:
+
+```bash
+pip install "tidysdmx[azure]"
+```
+
+```python
+from tidysdmx import AzureTokenProvider, FmrClient
+
+provider = AzureTokenProvider.from_default_credential("api://<fmr-app-id>/.default")
+client = FmrClient("https://fmr.example.org/FMR", token_provider=provider)
+
+schema = client.fetch_schema("WB:WDI(1.0.0)", "dataflow")
+```
+
+**With a token you already hold**, from a CI secret, a pipeline parameter or a command:
+
+```python
+import os
+
+from tidysdmx import FmrClient, StaticTokenProvider
+
+token = os.environ["FMR_TOKEN"].strip()
+client = FmrClient(
+    "https://fmr.example.org/FMR", token_provider=StaticTokenProvider(token)
+)
+```
+
+Keep the `.strip()`. A token read from a file or from a command's output ends with a newline, and tidysdmx rejects a token that holds whitespace rather than send it.
+
+**Two things that go wrong:**
+
+- The URL is the registry root, `/FMR` included, and nothing after it. Do not put credentials or a token in the URL; pass a `token_provider`.
+- A static token is not refreshed. When it expires, the registry answers `Client error 401`; build a new provider and a new client.
+
+[FMR client](../user-guide/fmr-client.html) covers other identity providers, uploads and troubleshooting.

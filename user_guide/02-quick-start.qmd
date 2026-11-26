@@ -6,7 +6,7 @@ tags: [Getting Started, Workflow]
 
 # Quick start
 
-This page shows the smallest possible tidysdmx pipeline: tidy DataFrame in, validated SDMX-ready output out. A full iterative-development walkthrough (with FMR fetch, Excel mapping, and upload) is in progress.
+This page shows the smallest possible tidysdmx pipeline: tidy DataFrame in, validated SDMX-ready output out. For the Excel workbook that describes a mapping, see [Mapping templates](04-mapping-templates.qmd); for fetching from and uploading to a registry, see [FMR client](03-fmr-client.qmd).
 
 ## 1. Describe your tidy raw data as a schema
 
@@ -46,7 +46,7 @@ assert errors.empty
 
 ## 3. Apply a structure map (when you have one)
 
-With a `StructureMap` from pysdmx (or one built via `build_structure_map_from_template_wb`):
+With a `StructureMap` from pysdmx, or one built from a [mapping template](04-mapping-templates.qmd) with `build_structure_map_from_template_wb`:
 
 ```python
 from tidysdmx import map_structures, standardize_output, validate_dataset_local
@@ -69,4 +69,6 @@ assert errors.empty
 ## Where to next?
 
 - The [API reference](../reference/index.html) documents every public function.
-- A full end-to-end workflow walkthrough and recipe collection are in progress.
+- [Mapping templates](04-mapping-templates.qmd) explains the Excel workbook behind `build_structure_map_from_template_wb`.
+- The [recipes](../recipes/index.html) are short answers to specific tasks, such as giving blank dimensions a default.
+- [Upgrading to 0.11](05-upgrading.qmd) lists what changed since 0.10.
