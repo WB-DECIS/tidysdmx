@@ -1,7 +1,7 @@
 import logging
 import re
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import ClassVar
 
 import numpy as np
@@ -36,6 +36,7 @@ from tidysdmx.structures import (
     _parse_comp_mapping_sheet,
     _parse_info_sheet,
     _parse_rep_mapping_sheet,
+    _parse_validity_date,
     _resolve_representation_ref,
     _validate_mapping_template_wb,
     build_date_pattern_map,
@@ -87,6 +88,45 @@ def description():
 
 
 # endregion
+
+
+class TestParseValidityDate:
+    """Validity dates are timezone-aware, as pysdmx reads them from a registry."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2020-01-01",
+            "2020-01-01T00:00:00",
+            pd.Timestamp("2020-01-01"),
+            datetime(2020, 1, 1),
+        ],
+        ids=["date-string", "datetime-string", "timestamp", "datetime"],
+    )
+    def test_parse_validity_date_takes_a_naive_value_as_utc(self, value):
+        assert _parse_validity_date(value) == datetime(2020, 1, 1, tzinfo=UTC)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2020-01-01T02:00:00+02:00",
+            pd.Timestamp("2020-01-01T02:00:00+02:00"),
+            datetime(2020, 1, 1, 2, tzinfo=timezone(timedelta(hours=2))),
+        ],
+        ids=["string", "timestamp", "datetime"],
+    )
+    def test_parse_validity_date_keeps_an_explicit_offset(self, value):
+        parsed = _parse_validity_date(value)
+
+        assert parsed.utcoffset() == timedelta(hours=2)
+
+    @pytest.mark.parametrize("value", [None, float("nan"), pd.NA, pd.NaT])
+    def test_parse_validity_date_returns_none_for_missing(self, value):
+        assert _parse_validity_date(value) is None
+
+    def test_parse_validity_date_rejects_other_types(self):
+        with pytest.raises(TypeError, match="Cannot interpret validity date"):
+            _parse_validity_date(20200101)
 
 
 class TestBuildFixedMap:
@@ -278,21 +318,21 @@ class TestBuildValueMap:
         start = datetime(2021, 1, 1)
         end = datetime(2022, 1, 1)
         vm = build_value_map("FR", "FRA", valid_from=start, valid_to=end)
-        assert vm.valid_from == start
-        assert vm.valid_to == end
+        assert vm.valid_from == start.replace(tzinfo=UTC)
+        assert vm.valid_to == end.replace(tzinfo=UTC)
 
     def test_build_value_map_with_only_valid_from(self):
         """Test case with only valid_from date provided."""
         start = datetime(2020, 6, 15)
         vm = build_value_map("DE", "GER", valid_from=start)
-        assert vm.valid_from == start
+        assert vm.valid_from == start.replace(tzinfo=UTC)
         assert vm.valid_to is None
 
     def test_build_value_map_with_only_valid_to(self):
         """Test case with only valid_to date provided."""
         end = datetime(2030, 12, 31)
         vm = build_value_map("IT", "ITA", valid_to=end)
-        assert vm.valid_to == end
+        assert vm.valid_to == end.replace(tzinfo=UTC)
         assert vm.valid_from is None
 
     def test_build_value_map_empty_source(self):
@@ -360,8 +400,8 @@ class TestBuildValueMapList:
         result = build_value_map_list(
             df, "source", "target", valid_from_col="start_date", valid_to_col="end_date"
         )
-        assert result[0].valid_from == datetime(2020, 1, 1)
-        assert result[0].valid_to == datetime(2025, 12, 31)
+        assert result[0].valid_from == datetime(2020, 1, 1, tzinfo=UTC)
+        assert result[0].valid_to == datetime(2025, 12, 31, tzinfo=UTC)
         assert result[1].valid_from is None
         assert result[1].valid_to is None
 
@@ -541,8 +581,8 @@ class TestBuildMultiValueMapList:
 
         assert isinstance(mv_map.valid_from, datetime)
         assert isinstance(mv_map.valid_to, datetime)
-        assert mv_map.valid_from.isoformat() == "2020-01-01T00:00:00"
-        assert mv_map.valid_to.isoformat() == "2025-12-31T00:00:00"
+        assert mv_map.valid_from.isoformat() == "2020-01-01T00:00:00+00:00"
+        assert mv_map.valid_to.isoformat() == "2025-12-31T00:00:00+00:00"
 
     def test_build_multi_value_map_list_invalid_type(
         self, multi_value_map_df: pd.DataFrame
@@ -711,14 +751,14 @@ class TestBuildMultiValueMapList:
         assert isinstance(map_obj.valid_from, datetime)
         # Ensure it's a standard datetime, not a pandas Timestamp (unless they are
         # same class in env, but the code calls to_pydatetime explicitely to convert)
-        assert map_obj.valid_from == datetime(2022, 1, 1)
+        assert map_obj.valid_from == datetime(2022, 1, 1, tzinfo=UTC)
 
         # Check valid_to
         assert isinstance(map_obj.valid_to, datetime)
-        assert map_obj.valid_to == datetime(2022, 12, 31)
+        assert map_obj.valid_to == datetime(2022, 12, 31, tzinfo=UTC)
 
     def test_handles_native_datetime_validity(self):
-        """Tests that native datetime objects in valid_from/valid_to are preserved.
+        """Tests that native datetime objects in valid_from/valid_to are kept, as UTC.
 
         This specifically targets the line:
         elif isinstance(val, datetime): kwargs["valid_from"] = val
@@ -740,8 +780,8 @@ class TestBuildMultiValueMapList:
 
         # Assert
         map_obj = result[0]
-        assert map_obj.valid_from == dt_from
-        assert map_obj.valid_to == dt_to
+        assert map_obj.valid_from == dt_from.replace(tzinfo=UTC)
+        assert map_obj.valid_to == dt_to.replace(tzinfo=UTC)
 
     def test_ignores_nan_validity_values(self):
         """Tests that NaT/NaN/None in validity columns result in None in the object."""
@@ -833,10 +873,10 @@ class TestBuildRepresentationMap:
         for vm in rm.maps:
             if vm.valid_from:
                 assert isinstance(vm.valid_from, datetime)
-                assert vm.valid_from.tzinfo == UTC or vm.valid_from.tzinfo is None
+                assert vm.valid_from.tzinfo == UTC
             if vm.valid_to:
                 assert isinstance(vm.valid_to, datetime)
-                assert vm.valid_to.tzinfo == UTC or vm.valid_to.tzinfo is None
+                assert vm.valid_to.tzinfo == UTC
 
     def test_defaults_to_string_dtype_when_no_codelist(
         self, value_map_df_mandatory_cols
@@ -1062,8 +1102,8 @@ class TestBuildMultiRepresentationMap:
         """Tests that validity dates are correctly passed to MultiValueMap objects."""
         result = build_multi_representation_map(sample_df)
         first_map = result.maps[0]
-        assert first_map.valid_from == datetime.fromisoformat("2020-01-01")
-        assert first_map.valid_to == datetime.fromisoformat("2025-12-31")
+        assert first_map.valid_from == datetime(2020, 1, 1, tzinfo=UTC)
+        assert first_map.valid_to == datetime(2025, 12, 31, tzinfo=UTC)
 
     def test_generate_urn_true_sets_urn(self, sample_df):
         """Tests that a URN is generated when generate_urn is True and id given."""

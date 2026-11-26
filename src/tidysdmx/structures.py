@@ -33,6 +33,7 @@ from pysdmx.model.map import (
     StructureMap,
     ValueMap,
 )
+from pysdmx.util import ensure_tz_aware
 from typeguard import typechecked
 
 from .tidysdmx import parse_artefact_id
@@ -71,17 +72,23 @@ def _resolve_representation_ref(
 
 
 def _parse_validity_date(value: object) -> datetime | None:
-    """Coerce a validity-date cell to a ``datetime``, or None when missing.
+    """Coerce a validity-date cell to an aware ``datetime``, or None when missing.
 
     pysdmx declares ``ValueMap.valid_from``/``valid_to`` as ``Optional[datetime]``,
     so DataFrame cells (ISO strings, pandas Timestamps, datetimes) must be
     converted before constructing the map objects.
 
+    A value with no UTC offset is taken as UTC, which is pysdmx's own
+    convention (``pysdmx.util.ensure_tz_aware``): its readers return
+    timezone-aware validity dates, so a map built here compares equal to the
+    same map fetched from a registry.
+
     Args:
         value: An ISO-8601 string, pandas Timestamp, datetime, or NaN/None.
 
     Returns:
-        The value as a plain ``datetime``, or None when the cell is null.
+        The value as a timezone-aware ``datetime``, or None when the cell is
+        null. An explicit offset is kept; a missing one becomes UTC.
 
     Raises:
         TypeError: If the value cannot be interpreted as a date.
@@ -89,13 +96,16 @@ def _parse_validity_date(value: object) -> datetime | None:
     """
     if value is None or pd.isna(value):
         return None
+    parsed: datetime
     if isinstance(value, str):
-        return datetime.fromisoformat(value)
-    if hasattr(value, "to_pydatetime"):  # pandas Timestamp
-        return value.to_pydatetime()
-    if isinstance(value, datetime):
-        return value
-    raise TypeError(f"Cannot interpret validity date value: {value!r}")
+        parsed = datetime.fromisoformat(value)
+    elif hasattr(value, "to_pydatetime"):  # pandas Timestamp
+        parsed = value.to_pydatetime()
+    elif isinstance(value, datetime):
+        parsed = value
+    else:
+        raise TypeError(f"Cannot interpret validity date value: {value!r}")
+    return ensure_tz_aware(parsed)
 
 
 def _validate_string_columns(
@@ -255,11 +265,15 @@ def build_value_map(
     Args:
         source: The source value to map.
         target: The target value to map to.
-        valid_from: Start of business validity for the mapping.
-        valid_to: End of business validity for the mapping.
+        valid_from: Start of business validity for the mapping. A datetime
+            with no UTC offset is taken as UTC, as pysdmx does when it reads
+            a map from a registry.
+        valid_to: End of business validity for the mapping, with the same
+            rule.
 
     Returns:
-        A pysdmx ValueMap object representing the mapping.
+        A pysdmx ValueMap object representing the mapping. Its validity dates
+        are timezone-aware.
 
     Raises:
         ValueError: If source or target is empty.
@@ -283,7 +297,10 @@ def build_value_map(
         raise ValueError("Source and target cannot be empty.")
 
     return ValueMap(
-        source=source, target=target, valid_from=valid_from, valid_to=valid_to
+        source=source,
+        target=target,
+        valid_from=ensure_tz_aware(valid_from),
+        valid_to=ensure_tz_aware(valid_to),
     )
 
 
