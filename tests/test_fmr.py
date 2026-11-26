@@ -279,10 +279,11 @@ _QUERY_CASE_IDS = [case.method for case in _QUERY_CASES]
 _AGENCY_CASES = [case for case in _QUERY_CASES if case.args == ("WB",)]
 _AGENCY_CASE_IDS = [case.method for case in _AGENCY_CASES]
 
-# pysdmx getters deliberately left unwrapped. Empty: FmrClient wraps them all.
-# A pysdmx release that adds a getter fails the completeness test below until
-# the getter is wrapped or, consciously, listed here.
-_UNWRAPPED: frozenset[str] = frozenset()
+# pysdmx getters deliberately left unwrapped. A pysdmx release that adds a
+# getter fails the completeness test below until the getter is wrapped or,
+# consciously, listed here. get_data_constraint arrived in pysdmx 1.21 and is
+# wrapped in the commit after the one that moved the lock.
+_UNWRAPPED: frozenset[str] = frozenset({"get_data_constraint"})
 
 
 def _classes(hint: Any) -> frozenset[Any]:

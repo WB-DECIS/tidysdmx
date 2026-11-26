@@ -29,10 +29,11 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    # 1.19.0 is the version tidysdmx.fmr's authentication seams were verified
-    # against (docs/pysdmx-shortcomings.md); access_token support itself
-    # arrived in 1.16.0.
-    "pysdmx>=1.19.0,<2",
+    # 1.21.0 is the first release with what tidysdmx relies on: the registry
+    # client's get_data_constraint, which FmrClient wraps, and
+    # pysdmx.util.ensure_tz_aware. tidysdmx.fmr's authentication seams are
+    # verified against the locked release (docs/pysdmx-shortcomings.md).
+    "pysdmx>=1.21.0,<2",
     # pysdmx's own HTTP layer, imported directly by tidysdmx.fmr for the
     # httpx.Auth hook that rotates bearer tokens on uploads.
     "httpx>=0.27",

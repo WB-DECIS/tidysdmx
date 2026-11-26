@@ -204,7 +204,9 @@ def codelist() -> Codelist:
         id="CL_TEST",
         agency="WB",
         name="Test codelist",
-        items=[Code(id="A", name="Code A")],
+        # A tuple, as pysdmx's readers build since 1.21: a codelist read from
+        # the registry compares equal to this one only if the containers match.
+        items=(Code(id="A", name="Code A"),),
     )
 
 
