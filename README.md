@@ -29,6 +29,9 @@ Or with uv:
 uv add tidysdmx
 ```
 
+tidysdmx needs Python 3.11.9 or later and pandas 3 or later; importing it under
+pandas 2 raises an `ImportError`.
+
 ## Usage
 
 The canonical flow is fetch → build a map → apply it → standardise → validate.
@@ -70,6 +73,12 @@ errors = validate_dataset_local(final, schema=schema)
 if not errors.empty:
     raise ValueError(errors["Error"].tolist())
 ```
+
+In the mapping template's `COMP_MAPPING` sheet, the optional `DEFAULT_VALUE`
+column gives a `representation` or `multi_representation` rule a default target
+for source values the `REP_MAPPING` sheet does not list, blank cells included.
+`implicit` and `fixed:` rows cannot apply one; tidysdmx logs a warning if a
+default is set there, and if the sheet has a column it does not read.
 
 Behind single sign-on, `FmrClient` handles the bearer token — acquisition,
 refresh, and the header on every read and upload — on top of pysdmx's clients:

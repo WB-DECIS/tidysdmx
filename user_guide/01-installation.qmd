@@ -6,7 +6,9 @@ tags: [Getting Started, Setup]
 
 # Installation
 
-tidysdmx requires **Python 3.11.9 or later**.
+tidysdmx requires **Python 3.11.9 or later** and **pandas 3 or later**.
+
+The pandas requirement is new in tidysdmx 0.11. `pip` and `uv` upgrade pandas for you. On a platform that ships pandas 2, such as a Databricks runtime, install pandas 3 alongside tidysdmx: importing tidysdmx under pandas 2 raises an `ImportError` that names the installed version.
 
 ## With pip
 
@@ -56,7 +58,7 @@ tidysdmx depends on:
 
 - [`pysdmx`](https://py.sdmx.io) 1.19 or later — the underlying SDMX information-model library.
 - [`httpx`](https://www.python-httpx.org) — pysdmx's HTTP layer, which the FMR client extends so reads and uploads carry a bearer token.
-- [`pandas`](https://pandas.pydata.org) — the tabular workhorse.
+- [`pandas`](https://pandas.pydata.org) 3 or later — the tabular workhorse. The mapping functions rely on pandas 3's Copy-on-Write to return frames that never share writable memory with their input.
 - [`numpy`](https://numpy.org) — vectorised lookups behind the mapping helpers.
 - [`typeguard`](https://typeguard.readthedocs.io) — runtime type checking.
 - [`openpyxl`](https://openpyxl.readthedocs.io) — Excel mapping template support.
