@@ -198,7 +198,8 @@ class BearerToken:
     Raises:
         TypeError: If ``token`` is not a string or ``expires_at`` is not a
             datetime.
-        ValueError: If ``token`` is blank or ``expires_at`` is naive.
+        ValueError: If ``token`` is blank or holds whitespace or a control
+            character, or ``expires_at`` is naive.
     """
 
     token: str = field(repr=False)
@@ -213,6 +214,15 @@ class BearerToken:
             raise TypeError(f"token must be a str; got {type(token).__name__}")
         if not token.strip():
             raise ValueError("token must be a non-empty string")
+        if any(ch.isspace() or not ch.isprintable() for ch in token):
+            # Deliberately does not echo the token. Sent as it is, a token with
+            # a newline makes the HTTP layer refuse the Authorization header,
+            # and that error quotes the header, token included.
+            raise ValueError(
+                "token must not contain whitespace or control characters; a "
+                "trailing newline from a file or command output is the usual "
+                "cause, so strip the token before passing it"
+            )
         if expires_at is not None and not isinstance(expires_at, datetime):
             raise TypeError(
                 "expires_at must be a datetime or None; "
@@ -258,7 +268,9 @@ class StaticTokenProvider:
             is trusted until the registry rejects it.
 
     Raises:
-        ValueError: If ``token`` is blank or ``expires_at`` is naive.
+        ValueError: If ``token`` is blank or holds whitespace or a control
+            character (strip a token read from a file or a command), or
+            ``expires_at`` is naive.
     """
 
     def __init__(self, token: str, expires_at: datetime | None = None) -> None:
@@ -615,13 +627,21 @@ def _normalise_root(base_url: str) -> str:
             "authenticate with token_provider= instead"
         )
     if parts.scheme not in ("http", "https") or not parts.netloc:
+        # Not echoed either: without "scheme://", urlsplit reads
+        # "user:password@host" as a scheme and a path, so the check above
+        # cannot tell whether the value holds a secret.
         raise ValueError(
             "base_url must be an absolute http(s) URL such as "
-            f"'https://fmr.example.org/FMR'; got {base_url!r}"
+            "'https://fmr.example.org/FMR'; the value given is not shown, "
+            "since it may hold credentials"
         )
     if parts.query or parts.fragment:
+        # The query string is where a pasted access token ends up, so only
+        # the part before it is shown.
+        root = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
         raise ValueError(
-            f"base_url must not carry a query string or fragment; got {base_url!r}"
+            "base_url must not carry a query string or fragment; pass the "
+            f"registry root alone, as in {root!r}"
         )
     path = parts.path.rstrip("/")
     for suffix in (*_MAINTENANCE_PATHS, REGISTRY_API_PATH):
