@@ -325,7 +325,6 @@ class TestVectorizedLookupOrderedV1:
             vectorized_lookup_ordered_v1(series, mapping_df), expected_output
         )
 
-    @pytest.mark.skip(reason="Not sure how to compare series containing nan")
     def test_vectorized_lookup_ordered_v1_nan_values(self):
         series = pd.Series(["A", np.nan, "C"])
         mapping_df = pd.DataFrame(
@@ -451,7 +450,6 @@ class TestVectorizedLookupOrderedV2:
             vectorized_lookup_ordered_v2(series, mapping_df), expected_output
         )
 
-    @pytest.mark.skip(reason="Not sure how to compare series containing nan")
     def test_vectorized_lookup_ordered_v2_nan_values(self):
         series = pd.Series(["A", np.nan, "C"])
         mapping_df = pd.DataFrame(
