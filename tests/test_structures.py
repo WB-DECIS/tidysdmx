@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -1466,6 +1467,57 @@ class TestBuildSchemaFromWbTemplate:
         assert "DEFAULT_VALUE" in result.columns
         assert result.iloc[0]["DEFAULT_VALUE"] == "_Z"
 
+    @pytest.mark.parametrize(
+        "column",
+        ["DEFAULT", "DEFAULT_VALUE ", "Default_Value", "NOTES"],
+        ids=["misnamed", "trailing-space", "wrong-case", "unrelated"],
+    )
+    def test_parse_comp_mapping_sheet_warns_on_unrecognised_column(
+        self, caplog, column
+    ):
+        """A column tidysdmx does not read is reported, not dropped silently."""
+        df = pd.DataFrame(
+            {
+                "SOURCE": ["SRC"],
+                "TARGET": ["TGT"],
+                "MAPPING_RULES": ["representation"],
+                column: ["_Z"],
+            }
+        )
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            _parse_comp_mapping_sheet({"COMP_MAPPING": df})
+        assert f"column(s) [{column!r}] that tidysdmx does not read" in caplog.text
+
+    def test_parse_comp_mapping_sheet_known_columns_log_no_warning(self, caplog):
+        """The three required and three optional columns are all recognised."""
+        df = pd.DataFrame(
+            {
+                "SOURCE": ["SRC"],
+                "TARGET": ["TGT"],
+                "MAPPING_RULES": ["representation"],
+                "SOURCE_CL": [None],
+                "TARGET_CL": [None],
+                "DEFAULT_VALUE": ["_Z"],
+            }
+        )
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            _parse_comp_mapping_sheet({"COMP_MAPPING": df})
+        assert caplog.text == ""
+
+    def test_parse_comp_mapping_sheet_unnamed_column_logs_no_warning(self, caplog):
+        """A blank header cell, which pandas names "Unnamed: N", is not a typo."""
+        df = pd.DataFrame(
+            {
+                "SOURCE": ["SRC"],
+                "TARGET": ["TGT"],
+                "MAPPING_RULES": ["representation"],
+                "Unnamed: 3": [None],
+            }
+        )
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            _parse_comp_mapping_sheet({"COMP_MAPPING": df})
+        assert caplog.text == ""
+
     def test_parse_comp_mapping_sheet_missing_sheet(self):
         """Test that ValueError is raised when the sheet is not present."""
         sheets = {"INFO": pd.DataFrame()}
@@ -2001,6 +2053,74 @@ class TestBuildStructureMapFromTemplateWb:
         # multi-component catch-all is appended last (regex per source component)
         assert list(multi_map.values.maps[-1].source) == ["regex:.*", "regex:.*"]
         assert list(multi_map.values.maps[-1].target) == ["_Z"]
+
+    @pytest.mark.parametrize(
+        ("rule", "kind"),
+        [("implicit", "implicit"), ("fixed:VAL1", "fixed")],
+        ids=["implicit", "fixed"],
+    )
+    def test_default_value_on_rule_that_cannot_apply_it_logs_warning(
+        self, valid_mappings, caplog, rule, kind
+    ):
+        """A DEFAULT_VALUE on an implicit or fixed row is reported as ignored."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["SRC2"],
+                    "TARGET": ["TGT2"],
+                    "MAPPING_RULES": [rule],
+                    "DEFAULT_VALUE": ["_Z"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            build_structure_map_from_template_wb(mappings)
+        assert (
+            f"DEFAULT_VALUE '_Z' for target 'TGT2' is ignored: '{kind}' rules"
+            in caplog.text
+        )
+
+    def test_default_value_on_representation_rule_logs_no_warning(
+        self, valid_mappings, caplog
+    ):
+        """A DEFAULT_VALUE a rule does apply is not reported."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["SRC3"],
+                    "TARGET": ["TGT3"],
+                    "MAPPING_RULES": ["representation"],
+                    "DEFAULT_VALUE": ["_Z"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            build_structure_map_from_template_wb(mappings)
+        assert caplog.text == ""
+
+    def test_blank_default_value_on_implicit_rule_logs_no_warning(
+        self, valid_mappings, caplog
+    ):
+        """An implicit row with no DEFAULT_VALUE has nothing to report."""
+        mappings = {
+            "INFO": valid_mappings["INFO"],
+            "COMP_MAPPING": pd.DataFrame(
+                {
+                    "SOURCE": ["SRC2", "SRC3"],
+                    "TARGET": ["TGT2", "TGT3"],
+                    "MAPPING_RULES": ["implicit", "representation"],
+                    "DEFAULT_VALUE": [None, "_Z"],
+                }
+            ),
+            "REP_MAPPING": valid_mappings["REP_MAPPING"],
+        }
+        with caplog.at_level(logging.WARNING, logger="tidysdmx.structures"):
+            build_structure_map_from_template_wb(mappings)
+        assert caplog.text == ""
 
     def test_default_value_absent_leaves_no_catch_all(self, valid_mappings):
         """Without a DEFAULT_VALUE column the maps keep only explicit rules."""

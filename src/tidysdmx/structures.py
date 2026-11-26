@@ -1,6 +1,7 @@
 """Build SDMX structure artefacts (StructureMap, ValueMap, Codelist, etc.)."""
 
 import contextlib
+import logging
 import re
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
@@ -35,6 +36,8 @@ from pysdmx.model.map import (
 from typeguard import typechecked
 
 from .tidysdmx import parse_artefact_id
+
+logger = logging.getLogger(__name__)
 
 
 @typechecked
@@ -1375,8 +1378,16 @@ def _parse_comp_mapping_sheet(
         sheets: Dictionary containing DataFrames, typically from pd.read_excel.
         sheet_name: Name of the sheet to parse. Defaults to "COMP_MAPPING".
 
+    A column that is neither required nor optional is not read. It is reported
+    in a warning, because a misspelt optional column (``DEFAULT`` for
+    ``DEFAULT_VALUE``, a trailing space, another case) would otherwise be
+    dropped without a word. Columns pandas named ``Unnamed: N`` for a blank
+    header cell are left out of the warning.
+
     Returns:
-        A DataFrame containing 'SOURCE', 'TARGET', and 'MAPPING_RULES' columns.
+        A DataFrame containing 'SOURCE', 'TARGET', and 'MAPPING_RULES' columns,
+        plus the optional 'SOURCE_CL', 'TARGET_CL' and 'DEFAULT_VALUE' columns,
+        filled with None where the sheet has none.
 
     Raises:
         ValueError: If the sheet is missing or does not contain the required columns.
@@ -1395,6 +1406,21 @@ def _parse_comp_mapping_sheet(
         raise ValueError(
             f"Sheet '{sheet_name}' is missing required columns: {missing_columns}. "
             f"Found: {df.columns.tolist()}"
+        )
+
+    recognised = [*required_columns, *optional_columns]
+    unrecognised = [
+        col
+        for col in df.columns
+        if col not in recognised and not str(col).startswith("Unnamed:")
+    ]
+    if unrecognised:
+        logger.warning(
+            "Sheet '%s' has column(s) %s that tidysdmx does not read; they are "
+            "ignored. Recognised columns, spelt exactly: %s.",
+            sheet_name,
+            unrecognised,
+            ", ".join(recognised),
         )
 
     # Extract required columns + any optional columns that exist
@@ -2127,6 +2153,22 @@ def _is_missing_token(s: str) -> bool:
     return s.strip().lower() in _MISSING_RULE_TOKENS
 
 
+def _warn_default_value_ignored(
+    default_value: str | None, rule: str, target_id: str
+) -> None:
+    """Warn that a rule which has no value map cannot apply its DEFAULT_VALUE."""
+    if default_value is None:
+        return
+    logger.warning(
+        "DEFAULT_VALUE '%s' for target '%s' is ignored: '%s' rules do not apply "
+        "a default, so blank source values are not replaced. Only "
+        "'representation' and 'multi_representation' rules do.",
+        default_value,
+        target_id,
+        rule,
+    )
+
+
 @typechecked
 def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
     """Parse a COMP_MAPPING row into a dict of mapping rules.
@@ -2143,6 +2185,9 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
       - target_cl: codelist URN for the target component, or None
       - default_value: catch-all target for unlisted source values, or None
         (only on "representation" and "multi_representation" rules)
+
+    A DEFAULT_VALUE on a "fixed" or "implicit" rule cannot be applied, since
+    neither has a value map to hold it; it is ignored, and a warning says so.
 
     Raises:
       - ValueError: if the rule is syntactically invalid (e.g., bad 'fixed:' format),
@@ -2185,6 +2230,7 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
         if len(parts) < 2 or not parts[1].strip():
             raise ValueError(f"Invalid fixed rule format: {raw_rule}")
         fixed_val = parts[1].strip()
+        _warn_default_value_ignored(default_value, "fixed", target_id)
         return {
             "mapping_rule": "fixed",
             "source_id": source_id,
@@ -2200,6 +2246,7 @@ def _extract_mapping_rule(row: "pd.Series") -> dict[str, str | None]:
             raise ValueError(
                 "Implicit map rule requires a non-empty 'SOURCE' component ID."
             )
+        _warn_default_value_ignored(default_value, "implicit", target_id)
         return {
             "mapping_rule": "implicit",
             "source_id": source_id,
