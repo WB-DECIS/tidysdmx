@@ -26,6 +26,7 @@ from pysdmx.model import (
     Components,
     Concept,
     ConceptScheme,
+    DataConstraint,
     Dataflow,
     DataflowInfo,
     DataProvider,
@@ -247,6 +248,11 @@ def data_structure_definition() -> DataStructureDefinition:
     return DataStructureDefinition(
         id="DSD_TEST", agency="WB", name="Test DSD", components=Components([])
     )
+
+
+@pytest.fixture
+def data_constraint() -> DataConstraint:
+    return DataConstraint(id="DC_TEST", agency="WB", name="Test data constraint")
 
 
 @pytest.fixture
