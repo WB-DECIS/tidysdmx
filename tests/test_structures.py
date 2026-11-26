@@ -1341,7 +1341,8 @@ class TestBuildSchemaFromWbTemplate:
         """Test that rows with 1 item or more than 2 items are excluded."""
         df = pd.DataFrame(
             [
-                ["OnlyOne"],  # 1 valid cell -> Keep
+                # Padded to one length: pandas 3.1 deprecates ragged rows.
+                ["OnlyOne", None, None],  # 1 valid cell -> Keep
                 ["Key", "Value", "Extra"],  # 3 valid cells -> Ignore
                 ["Key2", "Value2", None],  # 2 valid cells -> Keep
             ]

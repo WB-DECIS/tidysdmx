@@ -1323,7 +1323,7 @@ def _parse_info_sheet(  # noqa: C901 - one branch per optional INFO key; splits 
     else:
         all_rows = [df.columns.tolist(), *df.values.tolist()]
 
-    cleaned_rows: list[list[str]] = []
+    cleaned_rows: list[list[str | None]] = []
 
     for row in all_rows:
         valid_cells = []
@@ -1348,9 +1348,11 @@ def _parse_info_sheet(  # noqa: C901 - one branch per optional INFO key; splits 
         if any("DATA CURATION PROCESS" in cell for cell in valid_cells):
             continue
 
-        # We strictly look for Key-Value pairs (but allow the second item to be empty)
+        # We strictly look for Key-Value pairs (but allow the second item to be
+        # empty). A lone key is padded to two cells: pandas 3.1 deprecates
+        # building a DataFrame from rows of unequal length.
         if len(valid_cells) <= 2:
-            cleaned_rows.append(valid_cells)
+            cleaned_rows.append([*valid_cells, None][:2])
 
     if not cleaned_rows:
         return pd.DataFrame(columns=["Key", "Value"])
@@ -1407,10 +1409,9 @@ def _parse_comp_mapping_sheet(
             result_df[col] = None
 
     # Remove rows where ALL columns are NaN/None (empty rows)
-    # We do not use how='any' because some mapping rules might have an empty SOURCE
-    result_df.dropna(how="all", inplace=True)
-
-    return result_df
+    # We do not use how='any' because some mapping rules might have an empty SOURCE.
+    # Not inplace=True: pandas 3.1 deprecates the keyword (PDEP-8).
+    return result_df.dropna(how="all")
 
 
 @typechecked
