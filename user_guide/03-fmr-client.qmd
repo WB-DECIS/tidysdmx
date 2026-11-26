@@ -40,6 +40,7 @@ Every read takes the artefact as an `"AGENCY:ID(VERSION)"` string or as its URN,
 | `"categorisation"` | `fetch_categorisation` | `Categorisation` |
 | `"dataflow"` | `fetch_dataflow` | `Dataflow` |
 | `"datastructure"` | `fetch_dsd` | `DataStructureDefinition` |
+| `"dataconstraint"` | `fetch_data_constraint` | `DataConstraint` |
 | `"provisionagreement"` | `fetch_provision_agreement` | `ProvisionAgreement` |
 | `"metadataflow"` | `fetch_metadataflow` | `Metadataflow` |
 | `"metadatastructure"` | `fetch_msd` | `MetadataStructure` |

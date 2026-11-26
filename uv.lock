@@ -3523,16 +3523,16 @@ wheels = [
 
 [[package]]
 name = "pysdmx"
-version = "1.20.0"
+version = "1.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "msgspec" },
     { name = "parsy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/1a/27b2115087e61b09cd8d4b3409bc51f572e343a8745b9cacb6b2b8d723ad/pysdmx-1.20.0.tar.gz", hash = "sha256:cee050bd2b79585999c91c4999272877c8b3da6a95185791a74f7819faf505a0", size = 221840, upload-time = "2026-09-18T12:51:36.834Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/57/83148ab28dfb95e26247b29aa85fe79b3711121960d8ee72eefd04997063/pysdmx-1.23.0.tar.gz", hash = "sha256:ce73be2dda5efa0aceffeb02a045a68881e00962d21dbed875f8f136c3fbade3", size = 261726, upload-time = "2026-11-20T13:32:26.574Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/b8/5163d0a482cc34c080ad2abfe2d52b8afd655f6e6d0839264e6c096e2641/pysdmx-1.20.0-py3-none-any.whl", hash = "sha256:17d30262a06b3a9e1d6bfa08cfff6f8c65f985174e829040bc3b3272af00cace", size = 321353, upload-time = "2026-09-18T12:51:38.188Z" },
+    { url = "https://files.pythonhosted.org/packages/64/99/9e5a57e9a73e22dc458eddd9eff20edf7558059836d683d58f330a006bde/pysdmx-1.23.0-py3-none-any.whl", hash = "sha256:7576366740677e1ad1b331ac216b5db900eb3bfceee02f6e4015711230768df6", size = 365103, upload-time = "2026-11-20T13:32:27.863Z" },
 ]
 
 [[package]]
@@ -4235,7 +4235,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "openpyxl", specifier = ">=3.1.5,<4" },
     { name = "pandas", specifier = ">=3,<4" },
-    { name = "pysdmx", specifier = ">=1.19.0,<2" },
+    { name = "pysdmx", specifier = ">=1.21.0,<2" },
     { name = "typeguard", specifier = ">=4.4.4,<5" },
 ]
 provides-extras = ["azure"]

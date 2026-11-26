@@ -26,6 +26,7 @@ from pysdmx.model import (
     Components,
     Concept,
     ConceptScheme,
+    DataConstraint,
     Dataflow,
     DataflowInfo,
     DataProvider,
@@ -204,7 +205,9 @@ def codelist() -> Codelist:
         id="CL_TEST",
         agency="WB",
         name="Test codelist",
-        items=[Code(id="A", name="Code A")],
+        # A tuple, as pysdmx's readers build since 1.21: a codelist read from
+        # the registry compares equal to this one only if the containers match.
+        items=(Code(id="A", name="Code A"),),
     )
 
 
@@ -245,6 +248,11 @@ def data_structure_definition() -> DataStructureDefinition:
     return DataStructureDefinition(
         id="DSD_TEST", agency="WB", name="Test DSD", components=Components([])
     )
+
+
+@pytest.fixture
+def data_constraint() -> DataConstraint:
+    return DataConstraint(id="DC_TEST", agency="WB", name="Test data constraint")
 
 
 @pytest.fixture

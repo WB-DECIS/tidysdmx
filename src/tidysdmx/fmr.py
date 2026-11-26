@@ -66,6 +66,7 @@ from pysdmx.model import (
     CategoryScheme,
     Codelist,
     ConceptScheme,
+    DataConstraint,
     Dataflow,
     DataflowInfo,
     DataProvider,
@@ -112,6 +113,7 @@ ArtefactType: TypeAlias = Literal[
     "categorisation",
     "dataflow",
     "datastructure",
+    "dataconstraint",
     "provisionagreement",
     "metadataflow",
     "metadatastructure",
@@ -136,6 +138,7 @@ RegistryArtefact: TypeAlias = (
     | Categorisation
     | Dataflow
     | DataStructureDefinition
+    | DataConstraint
     | ProvisionAgreement
     | Metadataflow
     | MetadataStructure
@@ -830,6 +833,9 @@ _ARTEFACT_SPECS: Final[dict[ArtefactType, _ArtefactSpec]] = {
     "datastructure": _ArtefactSpec(
         "get_data_structures", frozenset({"DataStructure"}), listed=True
     ),
+    "dataconstraint": _ArtefactSpec(
+        "get_data_constraint", frozenset({"DataConstraint"})
+    ),
     "provisionagreement": _ArtefactSpec(
         "get_provision_agreement", frozenset({"ProvisionAgreement"})
     ),
@@ -1057,6 +1063,10 @@ class FmrClient:
     ) -> DataStructureDefinition: ...
     @overload
     def fetch_artefact(
+        self, artefact_id: str, artefact_type: Literal["dataconstraint"]
+    ) -> DataConstraint: ...
+    @overload
+    def fetch_artefact(
         self, artefact_id: str, artefact_type: Literal["provisionagreement"]
     ) -> ProvisionAgreement: ...
     @overload
@@ -1108,12 +1118,13 @@ class FmrClient:
             artefact_type: The SDMX REST resource name of the artefact, one
                 of ``"codelist"``, ``"hierarchy"``, ``"conceptscheme"``,
                 ``"categoryscheme"``, ``"categorisation"``, ``"dataflow"``,
-                ``"datastructure"``, ``"provisionagreement"``,
-                ``"metadataflow"``, ``"metadatastructure"``,
-                ``"metadataprovisionagreement"``, ``"structuremap"``,
-                ``"representationmap"`` or ``"transformationscheme"`` (the
-                values of :data:`ArtefactType`). A schema is not an artefact:
-                use :meth:`fetch_schema`.
+                ``"datastructure"``, ``"dataconstraint"``,
+                ``"provisionagreement"``, ``"metadataflow"``,
+                ``"metadatastructure"``, ``"metadataprovisionagreement"``,
+                ``"structuremap"``, ``"representationmap"`` or
+                ``"transformationscheme"`` (the values of
+                :data:`ArtefactType`). A schema is not an artefact: use
+                :meth:`fetch_schema`.
 
         Returns:
             The artefact, as the pysdmx class its typed method returns.
@@ -1280,6 +1291,25 @@ class FmrClient:
             pysdmx.errors.PysdmxError: Any other registry or connection failure.
         """
         return self.fetch_artefact(artefact_id, "datastructure")
+
+    def fetch_data_constraint(self, artefact_id: str) -> DataConstraint:
+        """Fetch a data constraint by ``"AGENCY:ID(VERSION)"`` or URN.
+
+        Args:
+            artefact_id: The data constraint identifier or URN. The version may
+                be ``~`` (latest) or ``+`` (latest stable).
+
+        Returns:
+            The data constraint: the cube regions and key sets it allows or
+            excludes, and what it is attached to.
+
+        Raises:
+            ValueError: If ``artefact_id`` does not identify exactly one data
+                constraint (see :meth:`fetch_artefact`).
+            pysdmx.errors.NotFound: If the registry has no such data constraint.
+            pysdmx.errors.PysdmxError: Any other registry or connection failure.
+        """
+        return self.fetch_artefact(artefact_id, "dataconstraint")
 
     def fetch_provision_agreement(self, artefact_id: str) -> ProvisionAgreement:
         """Fetch a provision agreement by ``"AGENCY:ID(VERSION)"`` or URN.

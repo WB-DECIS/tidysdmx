@@ -33,6 +33,7 @@ from pysdmx.model import (
     CategoryScheme,
     Codelist,
     ConceptScheme,
+    DataConstraint,
     Dataflow,
     DataflowInfo,
     DataProvider,
@@ -139,6 +140,13 @@ _FETCH_CASES = [
         "data_structure_definition",
         DataStructureDefinition,
         True,
+    ),
+    _FetchCase(
+        "dataconstraint",
+        "fetch_data_constraint",
+        "get_data_constraint",
+        "data_constraint",
+        DataConstraint,
     ),
     _FetchCase(
         "provisionagreement",
