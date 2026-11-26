@@ -618,6 +618,8 @@ def standardize_output(
     ``dataflow``, ``datastructure``, or ``dataprovision`` for a provision
     agreement.
 
+    %seealso map_structures, validate_dataset_local
+
     Args:
         df: Input DataFrame containing SDMX data.
         artefact_id: Unique identifier of the SDMX artefact (e.g.,

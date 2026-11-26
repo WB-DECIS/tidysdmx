@@ -36,7 +36,7 @@ upstream dependency your code wraps:
 
 `docs/reviews/` holds architecture reviews. `docs/reviews/2026-06-architecture-review.md`
 §7 is the live refactoring backlog (A1–C5 with dated statuses, D1–D10 added in
-October 2026, E1–E15 in the November 2026 release review); its §3 finding IDs
+October 2026, E1–E18 in the November 2026 release review); its §3 finding IDs
 (ARCH-nn, CONS-nn, TEST-nn, PROD-nn, PYSDMX-nn) are what code comments cite,
 e.g. `TODO(TEST-15)` in `pyproject.toml`.
 
@@ -69,6 +69,8 @@ commands, and update the `Makefile` rather than inventing new invocations.
 - `make cov` — unit tests with coverage, gate enforced
 - `make build` — sdist + wheel, metadata check, and an isolated wheel import
 - `make docs` / `make docs-preview` — build / live-preview the docs site
+- `make docs-check` — great-docs' docstring lint and link check (reports only; the link
+  check needs network access)
 - `make audit` — pip-audit over the locked dependencies
 - `make release-dry` — show what the next release would be, changing nothing
 - `make bench` — benchmark `map_structures`: working tree vs the last 3 releases
@@ -122,6 +124,8 @@ docs/                       — SDMX domain references and architecture reviews.
 great-docs.yml              — docs site config; reference.sections lists the public API
 index.qmd                   — docs landing page
 user_guide/*.qmd            — narrative documentation
+recipes/*.qmd               — short task-first pages; published through the `sections`
+                              entry in great-docs.yml, not picked up automatically
 SKILL.md                    — API summary published for AI agents consuming this package
 notebooks/                  — exploratory notebooks (outputs stripped by the nbstripout hook)
 
