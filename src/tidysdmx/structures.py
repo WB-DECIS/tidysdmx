@@ -1833,6 +1833,8 @@ def build_structure_map_from_template_wb(  # noqa: C901 - dispatches every rule 
 ) -> StructureMap:
     """Build a complete StructureMap object by parsing a WB-format Excel template.
 
+    %seealso parse_mapping_template_wb, map_structures, prepare_structure_map_for_upload
+
     Args:
         mappings: Dictionary of DataFrames containing all sheets.
         agency: Fallback agency ID if not found in INFO.

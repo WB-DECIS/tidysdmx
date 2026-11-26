@@ -98,6 +98,8 @@ def validate_dataset_local(  # noqa: C901 - sequential guard clauses, one per va
     deprecated shim for callers that previously cached the output of
     :func:`~tidysdmx.utils.extract_validation_info`.
 
+    %seealso standardize_output, extract_validation_info
+
     Args:
         df: The DataFrame to be validated.
         schema: The schema object (optional if ``valid`` is provided).

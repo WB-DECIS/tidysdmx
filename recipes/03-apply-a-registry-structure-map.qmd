@@ -1,0 +1,42 @@
+---
+title: "Apply a structure map kept in the registry"
+description: "Fetch a StructureMap from FMR and apply it to a DataFrame."
+tags: [FMR, Mapping, Workflow]
+status: new
+---
+
+# Apply a structure map kept in the registry
+
+When the structure map is maintained in a Fusion Metadata Registry, fetch it and apply it directly. No template is needed:
+
+```python
+import pandas as pd
+from tidysdmx import FmrClient, map_structures
+
+client = FmrClient("https://fmr.example.org/FMR")
+structure_map = client.fetch_structure_map("WB:SM_DEMO(1.0)")
+
+raw = pd.read_csv("raw_data.csv")
+mapped = map_structures(raw, structure_map)
+```
+
+`fetch_structure_map` returns the map with its representation maps embedded, which is what `map_structures` needs. A structure map that only *references* its representation maps by URN raises `TypeError` when applied.
+
+Then keep the target structure's components and validate:
+
+```python
+from tidysdmx import standardize_output, validate_dataset_local
+
+schema = client.fetch_schema("WB:DF_DEMO(1.0)", "dataflow")
+final = standardize_output(mapped, artefact_id="WB:DF_DEMO(1.0)", schema=schema)
+
+errors = validate_dataset_local(final, schema=schema)
+```
+
+`errors` is a DataFrame with one row per problem; an empty one means the data conforms.
+
+**Good to know:**
+
+- Pass an exact version. `~` asks for the latest version, which may not be final.
+- `map_structures` raises `TypeError` for a map that holds a `DatePatternMap`; date patterns are not applied yet.
+- For a registry behind single sign-on, see [Reach an FMR that needs a token](02-fmr-with-a-token.qmd).

@@ -104,6 +104,8 @@ def map_structures(
     and in stored order within a type, so when several maps write the same
     target, the last one wins.
 
+    %seealso build_structure_map_from_template_wb, standardize_output
+
     Args:
         df: The source dataset.
         structure_map: A StructureMap containing various mapping components.

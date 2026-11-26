@@ -308,6 +308,8 @@ def build_excel_workbook(
 def parse_mapping_template_wb(path: str | Path) -> dict[str, pd.DataFrame]:
     """Read an Excel mapping template and return all sheets as DataFrames.
 
+    %seealso build_structure_map_from_template_wb, map_structures
+
     Args:
         path: Path to the Excel file.
 

@@ -53,6 +53,7 @@ Run `make help` for the full list. The ones you will use:
 | `make cov` | unit tests with coverage, enforcing the gate |
 | `make build` | build the sdist and wheel, check their metadata, import the wheel |
 | `make docs` / `make docs-preview` | build / live-preview the documentation site |
+| `make docs-check` | great-docs' lint of the docstrings and a link check; reports, does not fail |
 | `make bench` | benchmark `map_structures`: the working tree vs the last 3 releases |
 | `make audit` | check locked dependencies for known vulnerabilities |
 | `make release-dry` | show the version the next release would produce |

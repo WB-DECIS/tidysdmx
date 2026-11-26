@@ -1,0 +1,50 @@
+---
+title: "Give blank dimensions a default"
+description: "Map blank source cells to a code such as _Z, so mandatory dimensions are never empty."
+tags: [Mapping]
+status: new
+---
+
+# Give blank dimensions a default
+
+**The problem.** A source column is blank on some rows, because the dimension does not apply there. After mapping, the target dimension is blank too, and validation reports missing values and duplicate keys.
+
+**The fix.** In the template's `COMP_MAPPING` sheet, give the rule a `DEFAULT_VALUE`:
+
+| SOURCE | TARGET | MAPPING_RULES | DEFAULT_VALUE |
+|---|---|---|---|
+| sex | SEX | representation | _Z |
+
+and list the codes you do want translated in `REP_MAPPING`:
+
+| S:sex | T:SEX |
+|---|---|
+| Male | M |
+| Female | F |
+
+Blank cells, and any value the sheet does not list, now become `_Z`:
+
+```python
+import pandas as pd
+from tidysdmx import (
+    build_structure_map_from_template_wb,
+    map_structures,
+    parse_mapping_template_wb,
+)
+
+structure_map = build_structure_map_from_template_wb(
+    parse_mapping_template_wb("mapping_template.xlsx")
+)
+raw = pd.DataFrame({"sex": ["Male", None, "Female", None]})
+
+map_structures(raw, structure_map)["SEX"].tolist()
+# ['M', '_Z', 'F', '_Z']
+```
+
+**Check these if blanks stay blank:**
+
+1. The column header reads `DEFAULT_VALUE` exactly. `DEFAULT`, another case or a trailing space is not read; building the map logs a warning naming the column.
+2. The rule is `representation` or `multi_representation`. An `implicit` rule copies values as they are and ignores the default; building the map logs a warning. Switch the row to `representation` and map each code to itself in `REP_MAPPING`.
+3. You are on tidysdmx 0.11 or later. Earlier versions applied the default to unlisted values but not to blank ones.
+
+A default can hide a mapping mistake: if it creates duplicate keys, `validate_dataset_local` reports them. [Mapping templates](../user-guide/mapping-templates.html) describes the sheets in full.

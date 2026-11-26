@@ -15,6 +15,18 @@ dynamic: true
 repo: https://github.com/WB-DECIS/tidysdmx
 github_style: widget
 
+# Where the site is deployed. great-docs passes it to Quarto as the site URL
+# and uses it for the agent skill's install commands and .well-known/
+# discovery.
+site_url: https://wb-decis.github.io/tidysdmx/
+
+# Canonical links and sitemap entries have a setting of their own. Without
+# it they fall back to a URL built from `repo`, which carries the
+# organisation's upper-case spelling (WB-DECIS.github.io).
+seo:
+  canonical:
+    base_url: https://wb-decis.github.io/tidysdmx/
+
 source:
   enabled: true
   branch: main
@@ -33,11 +45,13 @@ hero:
   tagline: "A tidy toolbox for SDMX data — schemas, mappings, validation, and FMR integration."
   starfield: true
 
-# Announcement banner
+# Announcement banner. The whole banner links to `url`, which must be absolute:
+# the same markup is injected into pages at every depth of the site.
 announcement:
-  content: "⚠️ tidysdmx is under active development. APIs may change between minor versions — feedback welcome!"
+  content: "⚠️ tidysdmx is under active development and APIs may change between minor versions. See what to do when upgrading to 0.11."
   type: warning
   dismissable: true
+  url: https://wb-decis.github.io/tidysdmx/user-guide/upgrading.html
 
 # ----------------------------------------------------------------------
 # Authors and funding
@@ -80,6 +94,7 @@ tags:
 nav_icons:
   navbar:
     User Guide: book-open
+    Recipes: chef-hat
     Reference: code
     Performance: gauge
     Changelog: clock
@@ -107,10 +122,25 @@ markdown_pages: true
 changelog:
   enabled: true
 
+# Lifecycle badges. A page opts in through its frontmatter (`status: new`,
+# `deprecated`, `experimental`, ...); the badge shows in the sidebar and
+# under the page title.
+page_status:
+  enabled: true
+
+# Custom sections.
+#
+# Recipes: short, task-first pages in recipes/. A section needs an entry here
+# to be published; great-docs does not pick the directory up by itself.
+#
 # Performance profile. performance/index.qmd is generated (and gitignored):
 # `make docs` renders it from benchmarks/page.qmd and the newest benchmark
 # results — see benchmarks/report.py and docs.yml's fetch step.
 sections:
+  - title: Recipes
+    dir: recipes
+    index: true
+    navbar_after: User Guide
   - title: Performance
     dir: performance
     navbar_after: Reference
@@ -118,8 +148,9 @@ sections:
 # ----------------------------------------------------------------------
 # Site-wide settings
 # ----------------------------------------------------------------------
-site:
-  show_dates: true
+# Top level, not under `site:`. `site` is passed through to Quarto; great-docs
+# 0.17 still lifts its own keys out of it, but only for older configs.
+show_dates: true
 
 # ----------------------------------------------------------------------
 # API reference structure

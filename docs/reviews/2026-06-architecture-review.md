@@ -453,6 +453,19 @@ was not counted.
   Keycloak-fronted registry without tidysdmx implementing a flow itself. *S*
 - **E15** `FmrClient.fetch_data_constraint` (pysdmx 1.21) makes standalone data
   constraints fetchable; use them with D3 to validate series keys. *M*
+- **E16** A `COMP_MAPPING` row with a rule but a blank `TARGET`, or an `implicit`
+  row with a blank `SOURCE`, is not rejected: the blank cell is stringified to
+  `nan`, so the row builds a map whose target or source is named `nan`, and
+  `map_structures` adds a `nan` column. `_extract_mapping_rule`'s own checks for
+  an empty value never fire, against its docstring. Treat a missing cell as
+  empty for `SOURCE` and `TARGET`. Same in v0.10.0. *S*
+- **E17** Docs tooling: `make docs-check` only reports. Once it is clean, gate
+  CI on `great-docs lint` (today it flags four undocumented dunder methods) and
+  run the link check on a schedule. *S*
+- **E18** Docs content still missing from the user guide: validation, schema
+  inference from a table, and preparing a structure map for upload. Revisit
+  multi-version docs and the reference-customisation API when great-docs
+  releases the latter (it is documented upstream but not in 0.17.0). *M*
 
 ## 8. Out of scope / deferred
 

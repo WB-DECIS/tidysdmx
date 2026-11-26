@@ -14,7 +14,7 @@
 # module entry point, so those two keep their console scripts.
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test cov build docs docs-preview audit release-dry check bench performance-page
+.PHONY: help install lint fmt typecheck test cov build docs docs-preview docs-check audit release-dry check bench performance-page
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -70,6 +70,15 @@ docs: performance-page ## Build the documentation site
 
 docs-preview: performance-page ## Serve the documentation site locally with live reload
 	uv run --group docs great-docs preview
+
+# great-docs' own checks on the documentation, as opposed to the code: `lint`
+# reports public exports without a docstring, `%seealso` directives that name
+# something not exported and docstrings off the configured style; `check-links`
+# requests every URL in the docs and source, so it needs network access. Both
+# only report (they exit 0 on findings), and neither is a CI gate yet.
+docs-check: ## Lint the docs and check their links (reports, does not fail)
+	uv run --group docs great-docs lint
+	uv run --group docs great-docs check-links
 
 # Advisory IDs the audit may skip, space-separated (PYSEC-... or GHSA-...).
 # Only for a vulnerability this project cannot fix: typically a tool in a
