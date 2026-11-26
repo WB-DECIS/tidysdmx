@@ -2,7 +2,7 @@
 
 **Purpose:** This document describes the `pysdmx` library, explains how its objects map to the SDMX Information Model, and documents the subset of the API used by `tidysdmx`. It is intended to orient AI agents and developers so they can leverage existing pysdmx functionality rather than reimplementing it.
 
-**Verified against:** pysdmx **1.20.0** (the version `uv.lock` pins). tidysdmx requires `pysdmx>=1.19.0,<2`. When the lock moves, follow §13 before trusting the details below.
+**Verified against:** pysdmx **1.23.0** (the version `uv.lock` pins). tidysdmx requires `pysdmx>=1.21.0,<2`. When the lock moves, follow §13 before trusting the details below.
 
 ---
 
@@ -52,7 +52,7 @@ from pysdmx.model import RepresentationMap, MultiRepresentationMap
 from pysdmx.model import ValueMap, MultiValueMap
 ```
 
-`MaintainableArtefact` and `ItemScheme` are **not** re-exported (still private in `pysdmx.model.__base` as of 1.20). tidysdmx imports them from there with a comment saying so; keep such imports to those two names.
+`MaintainableArtefact` and `ItemScheme` are **not** re-exported (still private in `pysdmx.model.__base` as of 1.23). tidysdmx imports them from there with a comment saying so; keep such imports to those two names.
 
 ---
 
@@ -159,7 +159,7 @@ There are no other members.
 
 ### 3.5 `DataType` (Enum)
 
-**SDMX IM equivalent:** Facet/representation type for uncoded components. 41 members as of 1.20; 1.17 added `EXC_VAL_RANGE`, `INC_VAL_RANGE`, `GEO_INFO`, `REP_TIME_PERIOD` and `TIME_RANGE`, so code that matches exhaustively over `DataType` must be revisited on upgrades.
+**SDMX IM equivalent:** Facet/representation type for uncoded components. 41 members as of 1.23; 1.17 added `EXC_VAL_RANGE`, `INC_VAL_RANGE`, `GEO_INFO`, `REP_TIME_PERIOD` and `TIME_RANGE`, so code that matches exhaustively over `DataType` must be revisited on upgrades.
 
 Common values used in tidysdmx:
 
@@ -331,7 +331,7 @@ Methods tidysdmx uses or should reach for: `get_schema(context, agency, id, vers
 
 **Version defaults.** Since **1.15** every method's default `version` is `"~"` — the latest version, **including non-final ones**; before 1.15 it was `"+"` (latest stable). Pass an explicit version (tidysdmx always does), or `"+"` when you want only final releases. Since 1.16 semver strings work throughout.
 
-The client has **no authentication hook** — it cannot send an `Authorization` header. `tidysdmx.fmr.FmrClient` works around it; see §5.3 and `docs/pysdmx-shortcomings.md` (PYSDMX-AUTH-01).
+The client has **no authentication hook** — it cannot send an `Authorization` header. (Since 1.23 the `RestService` underneath takes a fixed `token=` string, but `RegistryClient` does not pass one on, and a fixed string cannot be refreshed.) `tidysdmx.fmr.FmrClient` works around it; see §5.3 and `docs/pysdmx-shortcomings.md` (PYSDMX-AUTH-01).
 
 Errors: 404 → `pysdmx.errors.NotFound`; any other 4xx, including 401/403 → `Invalid`; 5xx → `InternalError`; transport failures → `Unavailable`.
 
@@ -403,7 +403,7 @@ tidysdmx is a **thin wrapper** that bridges pysdmx's object model with pandas Da
 | Task | pysdmx provides | tidysdmx adds |
 |---|---|---|
 | **Fetch schema** | `RegistryClient.get_schema()` | `FmrClient.fetch_schema()` — one ID string or URN, endpoint and token from the client (the module-level `fetch_schema()` is deprecated) |
-| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_categorisation()`, `get_dataflows()`, `get_data_structures()`, `get_provision_agreement()`, `get_metadataflows()`, `get_metadata_structures()`, `get_metadata_provision_agreement()`, `get_mapping()`, `get_code_map()`, `get_vtl_transformation_scheme()` — separate agency, id and version; dataflows, DSDs, metadataflows and MSDs only as lists | `FmrClient.fetch_artefact()`, driven by one table of the 14 getters, and one typed `fetch_*` method per type that calls it — one `"AGENCY:ID(VERSION)"` string or URN, a single result, wildcards refused |
+| **Fetch artefacts** | `RegistryClient.get_codes()`, `get_hierarchy()`, `get_concepts()`, `get_categories()`, `get_categorisation()`, `get_dataflows()`, `get_data_structures()`, `get_data_constraint()` (1.21), `get_provision_agreement()`, `get_metadataflows()`, `get_metadata_structures()`, `get_metadata_provision_agreement()`, `get_mapping()`, `get_code_map()`, `get_vtl_transformation_scheme()` — separate agency, id and version; dataflows, DSDs, metadataflows and MSDs only as lists | `FmrClient.fetch_artefact()`, driven by one table of the 14 getters, and one typed `fetch_*` method per type that calls it — one `"AGENCY:ID(VERSION)"` string or URN, a single result, wildcards refused |
 | **Other registry reads** | `RegistryClient.get_dataflow_details()`, `get_agencies()`, `get_providers()`, `get_metadata_providers()`, `get_report()`, `get_reports()` | `FmrClient.fetch_dataflow_info()`, `fetch_agencies()`, `fetch_data_providers()`, `fetch_metadata_providers()`, `fetch_metadata_report()`, `fetch_metadata_reports()` — same reference rules; with `fetch_schema` and the artefact fetchers they wrap every `RegistryClient` getter |
 | **Registry access with authentication** | `RegistryClient` (no auth), `RegistryMaintenanceClient(access_token=...)` (static token) | `FmrClient` — one root URL, `TokenProvider`-based acquisition and refresh, bearer token on reads and writes |
 | **Schema introspection** | `Components.dimensions`, `Component.required`, `Component.enumeration`, `Hierarchy.all_codes()` | `extract_validation_info()`, `get_codelist_ids()`, `extract_component_ids()` |
@@ -541,8 +541,12 @@ result_df = map_structures(df, smap)
 | `StructureMap.__getitem__` | Substring matching on sources (§4.1). |
 | `parse_flow_urn` for `AG:ID(v)` | Not exported; different exception type (§6). |
 | `PandasDataset`, `to_pandas_schema`, SDMX-CSV writer | Need the `data` extra (pyarrow), which tidysdmx does not depend on; `PandasDataset` also casts and mutates the caller's DataFrame. |
-| A dataset-vs-schema validator | Does not exist in pysdmx as of 1.20, so `validation.py` is not a reimplementation. |
-| A StructureMap applier | Does not exist in pysdmx as of 1.20, so `mapping.py` is not a reimplementation. |
+| A dataset-vs-schema validator | Does not exist in pysdmx as of 1.23, so `validation.py` is not a reimplementation. |
+| A StructureMap applier | Does not exist in pysdmx as of 1.23, so `mapping.py` is not a reimplementation. |
+| `RestService(token=...)` (1.23) | A fixed string set at construction, not surfaced on `RegistryClient`; `FmrClient` needs a token that rotates (PYSDMX-AUTH-01). |
+| `pysdmx.api.stat.authentication` (1.23) | OIDC flows for providers with Keycloak's URL layout; Entra ID has another, so `AzureTokenProvider` stays. A candidate backing for a Keycloak `TokenProvider` (backlog E14). |
+| `RegistryTransactionsClient` (1.22, experimental) | Its reads are sent without authentication; not wrapped yet (backlog E13). |
+| `RegistryClient(lenient=True)`, VTL conversions, streaming SDMX-ML/CSV readers, `.Stat` connectors (1.22–1.23) | Nothing tidysdmx does needs them. |
 
 ---
 
@@ -594,3 +598,6 @@ Changes since 1.13 that shaped the current code:
 | 1.17 | RepresentationMap requires source/target when maps are set; MultiRepresentationMap length checks; 5 new `DataType`s | Some tidysdmx `None` checks are now unreachable for maps with values |
 | 1.19 | Stub artefact parsing; `Dataflow.structure` may be `None` | Covered by `artefact_validation` |
 | 1.20 | Availability constraints and time ranges; empty messages read as empty; `local_enum_ref` kept when the codelist is absent | `enumeration` can be `None` while `enum_ref` is set — such a component is treated as uncoded |
+| 1.21 | `RegistryClient.get_data_constraint`; `pysdmx.util.ensure_tz_aware`, naive datetimes read as UTC and written with an offset; readers build tuples, not lists; `RestService.__fetch` renamed `_fetch` | `FmrClient.fetch_data_constraint`; validity dates built UTC-aware (D6 closed); a fixture compared with a parsed response holds a tuple; the read seam is unaffected (it overrides `_headers`) |
+| 1.22 | `RegistryTransactionsClient`, now the base class of `RegistryMaintenanceClient`, owning `_sanitize_endpoint` | The upload seam (`__build_auth`) is unaffected; transactions not wrapped (backlog E13) |
+| 1.23 | `token=` on `RestService`; `lenient=` on `RegistryClient`; `pysdmx.api.stat` | No workaround can be removed — see `docs/pysdmx-shortcomings.md` |

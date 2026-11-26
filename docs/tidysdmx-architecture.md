@@ -448,7 +448,7 @@ Apart from its own token types (`TokenProvider`, `BearerToken` and the two provi
 
 ### Guarded pysdmx seams
 
-pysdmx 1.19.0 offers no way to put an `Authorization` header on reads and no way to refresh the token on writes. `tidysdmx.fmr` reaches into two private hooks to do both. Each seam is (1) isolated in one private class, (2) guarded by a runtime check that raises `RuntimeError` naming the register entry if the hook is gone, (3) covered by a wire-level test that fails on any pysdmx bump that changes the behaviour, and (4) recorded in `docs/pysdmx-shortcomings.md` with the upstream fix and the trigger for deleting the workaround. Adding a third seam means adding all four.
+pysdmx, 1.23.0 included, offers no way to put a refreshing bearer token on registry reads and no way to refresh the token on writes. `tidysdmx.fmr` reaches into two private hooks to do both. Each seam is (1) isolated in one private class, (2) guarded by a runtime check that raises `RuntimeError` naming the register entry if the hook is gone, (3) covered by a wire-level test that fails on any pysdmx bump that changes the behaviour, and (4) recorded in `docs/pysdmx-shortcomings.md` with the upstream fix and the trigger for deleting the workaround. Adding a third seam means adding all four.
 
 ### Deprecation pattern
 

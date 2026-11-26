@@ -3,7 +3,7 @@
 **Purpose:** `tidysdmx` builds on pysdmx and does not reimplement it. Where
 pysdmx has a gap that tidysdmx must work around, the workaround is recorded
 here so it can be removed the moment upstream closes the gap. Every entry names
-the pysdmx code involved (line numbers are for the **published 1.20.0
+the pysdmx code involved (line numbers are for the **published 1.23.0
 wheel**), the impact, the tidysdmx workaround, the proposed upstream change and
 the trigger that lets us delete the workaround.
 
@@ -12,10 +12,21 @@ and `PYSDMX-READ-nn` for the read-side gaps its `fetch_*` methods guard
 against, so they cannot collide with the `PYSDMX-nn` findings in
 `docs/reviews/2026-06-architecture-review.md`. Code comments cite these IDs.
 
-**Verified against:** pysdmx 1.20.0 (PyPI, 2026-09-18); first written against
-1.19.0. Between the two, only `api/fmr/maintenance.py` moved (1.20 added the
-`AvailabilityConstraint` skip to `put_structures`) and every symptom below still
-holds. Re-verify the seams
+**Verified against:** pysdmx 1.23.0 (PyPI, 2026-11-20); first written against
+1.19.0. Every symptom below still holds, and none of the "Remove when" triggers
+has fired. What moved since 1.20.0, without moving either seam:
+
+- 1.21 renamed `RestService.__fetch` to `_fetch` and added
+  `RegistryClient.get_data_constraint` (one more `[0]` reader, READ-01).
+- 1.22 gave `RegistryMaintenanceClient` a base class,
+  `RegistryTransactionsClient`, which now owns the endpoint sanitising
+  (AUTH-06). Its `list_transactions` / `get_transaction` are sent with no
+  authentication at all, so they fail on a registry whose reads sit behind
+  single sign-on; tidysdmx does not wrap them yet (backlog E13).
+- 1.23 added `token=` to `RestService` (AUTH-01) and `lenient=` to
+  `RegistryClient`.
+
+Re-verify the seams
 below on every pysdmx bump — `tests/test_fmr.py` does so on the wire, so a
 Dependabot bump that moves a seam fails CI rather than sending unauthenticated
 requests.
@@ -31,19 +42,19 @@ introduced this register.
 
 | | |
 |---|---|
-| **Symptom** | `RegistryClient` and `AsyncRegistryClient` cannot send an `Authorization` header. Their constructors take only `api_endpoint`, `format`, `pem` and `timeout`; there is no `auth=`, `headers=` or injectable `httpx.Client`. |
-| **pysdmx location** | `api/fmr/__init__.py:332-369` (`RegistryClient.__init__` stores `self.__service = RestService(...)`); `api/qb/service.py:66-68` (`_CoreRestService.__init__` sets `self._headers`); `api/qb/service.py:177-192` and `:330-344` (`__fetch` builds a fresh `httpx.Client(verify=..., follow_redirects=True)` per request and copies `self._headers`). |
+| **Symptom** | `RegistryClient` and `AsyncRegistryClient` cannot send an `Authorization` header. Their constructors take only `api_endpoint`, `format`, `pem`, `timeout` and, since 1.23, `lenient`; there is no `auth=`, `headers=` or injectable `httpx.Client`. Since 1.23 `RestService` itself accepts `token=`, but it is one fixed string, written into the headers at construction, and neither registry client passes it on. |
+| **pysdmx location** | `api/fmr/__init__.py:342-387` (`RegistryClient.__init__` stores `self.__service`, a `RestService` or, with `lenient=True`, a `LenientRestService`); `api/qb/service.py:33-72` (`_CoreRestService.__init__` sets `self._headers`, plus a static `Authorization` entry when given `token=`); `api/qb/service.py:189-204` and `:351-365` (`_fetch`, `__fetch` before 1.21, builds a fresh `httpx.Client(verify=..., follow_redirects=True)` per request and copies `self._headers`). |
 | **Impact** | An FMR whose read endpoints sit behind single sign-on is unreachable through pysdmx. Even where reads are public today, a client that authenticates writes but not reads is an inconsistency waiting to bite. |
 | **tidysdmx workaround** | `tidysdmx.fmr._AuthenticatedRestService` overrides the protected `_headers` attribute with a property that adds `Authorization: Bearer <fresh token>` on every read; `_AuthenticatedRegistryClient` installs it into the name-mangled `_RegistryClient__service` slot after `RegistryClient.__init__` has run. A guard raises `RuntimeError` naming this entry if the slot is missing. `tests/test_fmr.py::TestFmrClientRegistry` asserts the header on the wire and that a held client reference rotates its token. |
 | **Proposed upstream change** | Add `auth: httpx.Auth \| None = None` (and optionally `headers: Mapping[str, str] \| None = None`) to `_CoreRestService`, `RestService` and `AsyncRestService`, forward it to `httpx.Client(auth=...)`, and surface it on `RegistryClient` / `AsyncRegistryClient`. |
-| **Remove when** | A released pysdmx accepts an auth object on `RegistryClient`. Then `FmrClient._build_registry` passes `auth=_SupplierBearerAuth(...)` and both private subclasses are deleted. |
+| **Remove when** | A released pysdmx accepts an auth object, or a callable token, on `RegistryClient`. Then `FmrClient._build_registry` passes `auth=_SupplierBearerAuth(...)` and both private subclasses are deleted. A `token=` string surfaced on `RegistryClient` would not be enough: it cannot rotate. |
 
 ## PYSDMX-AUTH-02 — Static bearer token, no refresh hook, on the maintenance client
 
 | | |
 |---|---|
 | **Symptom** | `RegistryMaintenanceClient(access_token=...)` takes a string. Its docstring says so explicitly: *"The client does not obtain or refresh OIDC/OAuth2 tokens itself."* An Entra ID token lives 60–90 minutes, after which every upload fails. |
-| **pysdmx location** | `api/fmr/maintenance.py:62-114` (constructor), `:116-129` (`__build_auth` wraps `self._access_token` in `BearerAuth`), `:131-158` (`__post` calls `__build_auth` on every POST). |
+| **pysdmx location** | `api/fmr/maintenance.py:240-284` (constructor), `:286-299` (`__build_auth` wraps `self._access_token` in `BearerAuth`), `:301-328` (`__post` calls `__build_auth` on every POST). |
 | **Impact** | Long-running pipelines must watch `expires_on` and rebuild the client; any reference held elsewhere goes stale silently. |
 | **tidysdmx workaround** | `tidysdmx.fmr._RefreshingMaintenanceClient` overrides the private `__build_auth` hook (spelled `_RegistryMaintenanceClient__build_auth` in the subclass) to return `_SupplierBearerAuth`, an `httpx.Auth` that asks the token cache when the request is sent — exactly once per request. The constructor receives a placeholder `access_token` so pysdmx's "no credentials" check passes without a token being acquired. A guard raises `RuntimeError` naming this entry if the hook is gone. `tests/test_fmr.py::TestFmrClientMaintenance` asserts the bearer on the wire and the rotation across two POSTs on one held reference. |
 | **Proposed upstream change** | Accept `access_token: str \| Callable[[], str]`, or add `auth: httpx.Auth \| None` to the constructor and use it in `__post`. |
@@ -54,7 +65,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | An expired or rejected token comes back as `pysdmx.errors.Invalid("Client error 401", ...)`. `pysdmx.errors.Unauthorized` is raised in exactly one place in the library — at `RegistryMaintenanceClient` construction when no credentials are given — never from an HTTP response. `429 Too Many Requests` is likewise `Invalid`, i.e. non-retriable. |
-| **pysdmx location** | `util/_net_utils.py:8-40` (`map_httpx_errors`: 404 → `NotFound`, other 4xx → `Invalid`, 5xx → `InternalError`); `errors.py:92`; `api/fmr/maintenance.py:98-105`. |
+| **pysdmx location** | `util/_net_utils.py:20-51` (`map_httpx_errors`: 404 → `NotFound`, other 4xx → `Invalid`, 5xx → `InternalError`); `errors.py:92`; `api/fmr/maintenance.py:275-282`. |
 | **Impact** | Callers cannot catch authentication failures by type; a refresh-and-retry-once policy has to string-match the title. |
 | **tidysdmx workaround** | None in code. `FmrClient` refreshes tokens before they expire (`refresh_margin`), so 401s are rare; the user guide explains what `Client error 401` and `403` mean. `tests/test_fmr.py::TestFmrClientMaintenance::test_maintenance_surfaces_401_as_pysdmx_invalid` pins the current behaviour so a change upstream is noticed. |
 | **Proposed upstream change** | Map 401 and 403 to `Unauthorized` and 429 to `Unavailable` (retriable) in `map_httpx_errors` and in the duplicated `_map_error` of the GDS service. |
@@ -65,7 +76,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `BearerAuth` lives in `pysdmx.util._net_utils` and is absent from every `__all__`; `docs/howto/maintenance.rst` shows basic auth only. |
-| **pysdmx location** | `util/_net_utils.py:42-72`; `util/__init__.py` (`__all__` exports `map_httpx_errors` but not `BearerAuth`); `docs/howto/maintenance.rst:23-32`. |
+| **pysdmx location** | `util/_net_utils.py:157-187`; `util/__init__.py` (`__all__` exports `map_httpx_errors` but not `BearerAuth`); `docs/howto/maintenance.rst:23-32`. |
 | **Impact** | Nothing reusable to build on; users discover `access_token` by reading the source. |
 | **tidysdmx workaround** | `tidysdmx.fmr._SupplierBearerAuth` (ten lines, callable-backed rather than static); the user guide documents bearer authentication end to end. |
 | **Proposed upstream change** | Export `BearerAuth` (ideally accepting a callable) and document `access_token` in the how-to. |
@@ -76,9 +87,9 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `RegistryMaintenanceClient` is marked *EXPERIMENTAL*; pysdmx's changelog states experimental classes "may change, break, or be removed at any time without prior notice" and without a major version bump. There is no `AsyncRegistryMaintenanceClient`. |
-| **pysdmx location** | `api/fmr/maintenance.py:46-60`; `CHANGELOG.rst`; `docs/api/fmr/maintenance.rst`. |
+| **pysdmx location** | `api/fmr/maintenance.py:224-238`; since 1.22 it inherits the equally experimental `RegistryTransactionsClient` (`:108-221`); `CHANGELOG.rst`; `docs/api/fmr/maintenance.rst`. |
 | **Impact** | Any minor release may change the constructor or the hook AUTH-02 relies on. No async write path for tidysdmx to build on. |
-| **tidysdmx workaround** | `pyproject.toml` pins `pysdmx>=1.19.0,<2`. The upper bound is deliberately not the verified minor: pysdmx ships a minor roughly monthly and only the authenticated path touches these hooks, so a `<1.20` cap would force a tidysdmx release per pysdmx minor on every consumer. Instead, `FmrClient.__init__` builds both pysdmx clients as soon as a token provider is given, so an incompatible pysdmx fails at construction with the register entry named, and the wire tests in `tests/test_fmr.py` fail on any bump that changes the behaviour. Async support is deferred. |
+| **tidysdmx workaround** | `pyproject.toml` pins `pysdmx>=1.21.0,<2`. The upper bound is deliberately not the verified minor: pysdmx ships a minor roughly monthly and only the authenticated path touches these hooks, so a cap at the next minor would force a tidysdmx release per pysdmx minor on every consumer. Instead, `FmrClient.__init__` builds both pysdmx clients as soon as a token provider is given, so an incompatible pysdmx fails at construction with the register entry named, and the wire tests in `tests/test_fmr.py` fail on any bump that changes the behaviour. Async support is deferred. |
 | **Proposed upstream change** | Graduate the client from experimental; add an async twin. |
 | **Remove when** | Graduated — the floor can then follow the normal cadence. |
 
@@ -86,8 +97,8 @@ introduced this register.
 
 | | |
 |---|---|
-| **Symptom** | `RegistryMaintenanceClient.__sanitize_endpoint` removes `/sdmx/v2`, `/ws/secure/sdmxapi/rest` and `/ws/secure/sdmx/v2/metadata` wherever they occur, not only as a suffix. |
-| **pysdmx location** | `api/fmr/maintenance.py:235-241`. |
+| **Symptom** | `RegistryTransactionsClient._sanitize_endpoint`, which `RegistryMaintenanceClient` inherits (its own private `__sanitize_endpoint` before 1.22), removes `/sdmx/v2`, `/ws/secure/sdmxapi/rest` and `/ws/secure/sdmx/v2/metadata` wherever they occur, not only as a suffix. |
+| **pysdmx location** | `api/fmr/maintenance.py:134-140`. |
 | **Impact** | A registry deployed under a path containing one of those fragments (`https://host/sdmx/v2/FMR`) is silently mangled into a wrong URL. |
 | **tidysdmx workaround** | `tidysdmx.fmr._normalise_root` strips only a *trailing* fragment and raises `ValueError` if one is left mid-path, so pysdmx never sees such a root. |
 | **Proposed upstream change** | Use `str.removesuffix` (after stripping the trailing slash). |
@@ -98,7 +109,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `__post` builds `httpx.Client(verify=...)` without `follow_redirects`, while every read client passes `follow_redirects=True`. `raise_for_status()` does not raise on 3xx, so a redirect on upload returns *silently as success* with the redirect body discarded. |
-| **pysdmx location** | `api/fmr/maintenance.py:137` vs `api/qb/service.py:178-180`. |
+| **pysdmx location** | `api/fmr/maintenance.py:307` vs `api/qb/service.py:190-192`. |
 | **Impact** | An authentication proxy that answers a POST with `302` makes uploads look successful when nothing was stored. |
 | **tidysdmx workaround** | None beyond insisting on an absolute `http(s)` root in `FmrClient` (a scheme-less or `http` root behind an `https` redirect is the common cause). Documented in the user guide's troubleshooting section. |
 | **Proposed upstream change** | Either `follow_redirects=True` on the POST client or treat 3xx as an error. |
@@ -109,7 +120,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `RegistryClient` must be given `https://host/FMR/sdmx/v2` (it strips only a trailing slash), whereas `RegistryMaintenanceClient` wants `https://host/FMR` (it strips `/sdmx/v2` itself). |
-| **pysdmx location** | `api/fmr/__init__.py:84-86` vs `api/fmr/maintenance.py:235-241`. |
+| **pysdmx location** | `api/fmr/__init__.py:87-88` vs `api/fmr/maintenance.py:134-140`. |
 | **Impact** | Callers carry two URLs per registry; tidysdmx's module-level `fetch_schema` papered over it by hard-coding `/FMR/sdmx/v2/` (review finding PYSDMX-04), and is now deprecated in favour of `FmrClient.fetch_schema`. |
 | **tidysdmx workaround** | `FmrClient` takes the registry root once and derives `registry_endpoint` for reads and the root for writes. |
 | **Proposed upstream change** | Accept the registry root on `RegistryClient` and append the API path, or document one convention for both clients. |
@@ -120,7 +131,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | The getters that return one artefact take the first one in the response and drop the rest without a word. A query that matches several — `version="*"`, a wildcard or comma-list agency or ID, a SemVer wildcard such as `1.*.0` — returns an arbitrary one. The organisation-scheme getters do the same across schemes: `get_agencies("*")` returns only the first agency scheme's items. A `200` response with an empty list raises `IndexError` rather than `NotFound`. |
-| **pysdmx location** | Fusion-JSON readers: `io/json/fusion/messages/code.py:108-110` (`Codelist[0]`, `ValueList[0]`), `:285` (`Hierarchy[0]`), `concept.py:91`, `category.py:163`, `map.py:230` (`StructureMap[0]`), `:240` (`RepresentationMap[0]`), `vtl.py:479`. Client: `api/fmr/__init__.py:414, 435, 457` (`schemes[0].items`), `:501, 523, 741, 832`. The SDMX-JSON readers under `io/json/sdmxjson2/messages/` take `[0]` at the same places. |
+| **pysdmx location** | Fusion-JSON readers: `io/json/fusion/messages/code.py:105-107` (`Codelist[0]`, `ValueList[0]`), `:282` (`Hierarchy[0]`), `concept.py:91`, `category.py:167`, `map.py:227` (`StructureMap[0]`), `:237` (`RepresentationMap[0]`), `vtl.py:481`. Client: `api/fmr/__init__.py:432, 453, 475` (`schemes[0].items`), `:519, 541, 716, 871` (`:716` is `get_data_constraint`, new in 1.21). The SDMX-JSON readers under `io/json/sdmxjson2/messages/` take `[0]` at the same places. |
 | **Impact** | A reference that is not specific enough fetches the wrong artefact, silently. |
 | **tidysdmx workaround** | `tidysdmx.fmr._check_single` refuses `*` and `,` in the agency, ID and version of every fetch; `~`, `+` and SemVer `+` forms select one version and stay allowed. `_exactly_one` narrows the four list getters (dataflows, data structures, metadataflows, metadata structures) and raises when they return none or several. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_wildcards_and_lists` covers the guard. |
 | **Proposed upstream change** | Raise `Invalid` from a single-artefact getter when the response holds more than one artefact, and `NotFound` when it holds none. |
@@ -131,7 +142,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | The REST service escapes only `[ ] : + * ,` in the query path. Any other reserved character in an agency, ID or version changes the URL's meaning: `get_codes("WB", "CL?X", "1.0")` requests path `/structure/codelist/WB/CL` with query string `X/1.0`, a different artefact. `#` and `/` do the same. |
-| **pysdmx location** | `api/qb/service.py:420-428` (`_sanitize_query`), called from `:183, 202, 336, 354`. |
+| **pysdmx location** | `api/qb/service.py:441-449` (`_sanitize_query`), called from `:195, 214, 357, 375`. |
 | **Impact** | A stray character in a reference — a pasted URL fragment, a space — fetches the wrong artefact, or nothing, without an error that points at the cause. |
 | **tidysdmx workaround** | `tidysdmx.fmr._check_single` accepts only characters an SDMX agency, ID or version can hold (`[A-Za-z0-9_@$.+~-]`) and raises `ValueError` naming the offending part. It also stops the colon splits on which `parse_artefact_id` and `parse_urn` disagree. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_rejects_characters_pysdmx_does_not_escape` covers it. |
 | **Proposed upstream change** | Percent-encode each path segment (`urllib.parse.quote(segment, safe="")`) rather than replacing a fixed set of characters in the joined path. |
@@ -142,7 +153,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `RegistryClient.get_metadata_providers` (and its async twin) is annotated `-> Sequence[DataProvider]`, but its readers build `MetadataProvider` objects, which are siblings of `DataProvider`, not subclasses. A type checker believes the wrong class, and typeguard rejects the real return value against the annotation. |
-| **pysdmx location** | `api/fmr/__init__.py:437-457` (annotation and body); readers `io/json/fusion/messages/org.py:198-215`, `io/json/sdmxjson2/messages/provider.py:135-166`. |
+| **pysdmx location** | `api/fmr/__init__.py:455-475` (annotation and body); readers `io/json/fusion/messages/org.py:204-219`, `io/json/sdmxjson2/messages/provider.py:157-171`. |
 | **Impact** | Wrapping the getter with its own annotation fails at runtime under typeguard; code that trusts the annotation reaches for `DataProvider` attributes on a `MetadataProvider`. |
 | **tidysdmx workaround** | `FmrClient.fetch_metadata_providers` is annotated `-> Sequence[MetadataProvider]` and returns pysdmx's result through `cast("Sequence[MetadataProvider]", ...)`. The cast flags itself: with `warn_redundant_casts` on, mypy reports it as redundant once pysdmx fixes the annotation. `tests/test_fmr.py::TestFmrClientQueries::test_pysdmx_getter_returns_the_query_type[fetch_metadata_providers]` pins the wrong annotation as a strict `xfail`, so the fix upstream fails the suite. |
 | **Proposed upstream change** | Annotate both clients' `get_metadata_providers` as `-> Sequence[MetadataProvider]`. |
@@ -153,7 +164,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | After the registry has answered, the dataflow-details reader keeps only the dataflows matching the agency, ID and *requested version string*. `+` keeps only versions matching `X.Y.Z`, so a dataflow at version `1.0` is dropped; any other string, such as a SemVer wildcard `1.+.0`, is compared literally and never matches. Both raise `NotFound("No matching dataflow")` although the registry returned the dataflow. With `~`, the first match in the payload wins, not the highest version. |
-| **pysdmx location** | `io/json/fusion/messages/dataflow.py:53-71` (`__filter`) and `:85-99`; the SDMX-JSON reader filters the same way (`io/json/sdmxjson2/messages/dataflow.py:191-196`). |
+| **pysdmx location** | `io/json/fusion/messages/dataflow.py:53-71` (`__filter`) and `:85-99`; the SDMX-JSON reader filters the same way (`io/json/sdmxjson2/messages/dataflow.py:193-204`). |
 | **Impact** | `fetch_dataflow_info` fails for version selectors that `fetch_dataflow` handles. |
 | **tidysdmx workaround** | None in code: `FmrClient.fetch_dataflow_info`'s docstring and the user guide tell callers to pass an exact version. |
 | **Proposed upstream change** | Trust the registry's version resolution: filter on agency and ID only and keep the highest version, or drop the filter for version selectors. |
@@ -164,7 +175,7 @@ introduced this register.
 | | |
 |---|---|
 | **Symptom** | `RegistryClient.get_codes` queries `codelist` and, only on `NotFound`, `valuelist`. A Codelist and a ValueList may share an agency, ID and version, since URNs are unique per class, and then the ValueList cannot be fetched: the Codelist comes back instead. A codelist reference with no codelist behind it silently comes back as the ValueList. The getter takes no argument naming the class. |
-| **pysdmx location** | `api/fmr/__init__.py:543-550` (`get_codes`), async twin `:1112-1119`; queries `:228-236` (`_codes_cl_q`, `_codes_vl_q`). |
+| **pysdmx location** | `api/fmr/__init__.py:543-568` (`get_codes`), async twin `:1142-1167`; queries `:231-239` (`_codes_cl_q`, `_codes_vl_q`). |
 | **Impact** | A ValueList URN passed to a wrapper that delegates to `get_codes` fetches a different artefact with no error. |
 | **tidysdmx workaround** | `tidysdmx.fmr._check_codelist_class` compares the class a URN names with the `short_urn` of what pysdmx returned and raises `ValueError` on a mismatch; `AGENCY:ID(VERSION)` names no class and keeps pysdmx's fallback. `FmrClient.fetch_metadata_reports` sends a ValueList URN to the `valuelist` resource rather than `codelist`. `tests/test_fmr.py::TestFmrClientFetchArtefact::test_fetch_artefact_refuses_codelist_of_the_other_class` and `TestFmrClientQueries::test_fetch_metadata_reports_searches_the_class_a_urn_names` cover both. |
 | **Proposed upstream change** | A `get_value_list` getter, or an `sdmx_type` argument on `get_codes` that queries one class without the fallback. |

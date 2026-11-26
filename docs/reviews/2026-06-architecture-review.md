@@ -369,6 +369,9 @@ was not counted.
   code IDs). *S*
 - **D6** Validity dates: tidysdmx builds naive `datetime`s, pysdmx's readers
   return UTC-aware ones, so built and fetched maps compare unequal. Pick UTC. *S*
+  *Status (2026-11): done — pysdmx 1.21 exports the convention as
+  `pysdmx.util.ensure_tz_aware`; `_parse_validity_date` and `build_value_map`
+  call it, so a built map equals the same map read back.*
 - **D7** Cassettes: regenerate under the locked pysdmx with the production
   format (`FUSION_JSON`; the fixtures use the client default, SDMX-JSON) and an
   explicit `get_mapping` version (the default became `"~"` in pysdmx 1.15);
@@ -417,8 +420,10 @@ was not counted.
 - **E7** CI tests only the lock (extends D10). The review ran the unit suite once
   against the declared floors, which passed, and against the newest resolvable
   versions, where pandas 3.1 turned two deprecated calls in `structures.py` into
-  23 failures (fixed in `d622d11`). Add two scheduled lanes, floors and newest.
-  The `httpx>=0.27` floor is also below what pysdmx itself requires (`0.27.2`). *S*
+  23 failures (fixed in `d622d11`). The lock then moved to pysdmx 1.23.0 and
+  the floor to 1.21.0, the first release the code relies on; the range between
+  them is still untested by CI. Add two scheduled lanes, floors and newest. The
+  `httpx>=0.27` floor is also below what pysdmx itself requires (`0.27.2`). *S*
 - **E8** Release process: the `main` → `dev` back-merge PR's head commit carries
   `[skip ci]`, so `All checks` may never report on it; `RELEASING.md` does not say
   how to title the `dev` → `main` PR, which the `pr-title` gate checks; its three
@@ -437,6 +442,17 @@ was not counted.
   `matplotlibrc` lists first, with a generic fallback only when that is DejaVu
   Sans, so `test_render_charts_still_names_dejavu_sans_first` fails on a machine
   with a system `matplotlibrc`. Pin `font.sans-serif` in the `rc_context`. *S*
+- **E13** pysdmx 1.22's experimental `RegistryTransactionsClient`
+  (`list_transactions`, `get_transaction`) is reachable through
+  `FmrClient.maintenance`, but its GETs carry no authentication, so they fail
+  on a registry whose reads need a token. Wrap them on `FmrClient` with the
+  bearer token, once a use for the transaction log exists. *S*
+- **E14** pysdmx 1.23 ships OIDC flows for providers with Keycloak's URL layout
+  (`pysdmx.api.stat.authentication`). They do not fit Entra ID, so
+  `AzureTokenProvider` stays; a small `TokenProvider` over them would serve a
+  Keycloak-fronted registry without tidysdmx implementing a flow itself. *S*
+- **E15** `FmrClient.fetch_data_constraint` (pysdmx 1.21) makes standalone data
+  constraints fetchable; use them with D3 to validate series keys. *M*
 
 ## 8. Out of scope / deferred
 
