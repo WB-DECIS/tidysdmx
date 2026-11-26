@@ -48,4 +48,4 @@ These still work and emit a `FutureWarning`:
 ## New in 0.11
 
 - [`FmrClient`](03-fmr-client.qmd): reads and uploads against a Fusion Metadata Registry, with bearer-token authentication and refresh, and one `fetch_*` method per artefact type.
-- `map_structures` matches each distinct value once. On a million rows it ran roughly 3 to 16 times faster than 0.10 and used 40 to 80% less extra memory, depending on the shape of the data; the [Performance](../performance/index.html) page has the measurements.
+- `map_structures` matches each distinct value once. On a million rows it ran about 3 to 15 times faster than 0.10 and used 40 to 80% less extra memory, depending on the shape of the data; the [Performance](../performance/index.html) page has the measurements.
