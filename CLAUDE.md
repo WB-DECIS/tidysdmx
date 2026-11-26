@@ -128,6 +128,8 @@ recipes/*.qmd               — short task-first pages; published through the `s
                               entry in great-docs.yml, not picked up automatically
 SKILL.md                    — API summary published for AI agents consuming this package
 notebooks/                  — exploratory notebooks (outputs stripped by the nbstripout hook)
+scripts/                    — developer tools run from the repo root, not shipped;
+                              diagnose_fmr_auth.py finds where an FMR sign-in breaks
 
 .github/workflows/          — ci, release, docs, security, pr-review, benchmarks, benchmarks-pr
 ```
