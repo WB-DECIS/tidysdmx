@@ -26,6 +26,9 @@ public contract.
 pip install tidysdmx
 ```
 
+Requires Python 3.11.9 or later and pandas 3 or later; importing under pandas 2
+raises `ImportError`.
+
 ## The main pipeline
 
 The canonical flow is fetch → build a map → apply it → standardise → validate.
@@ -103,6 +106,16 @@ reference columns and rejects every column that is not a schema component.
   `filter_tidy_raw`, `extract_validation_info`) use each component's local
   (constrained) codes when the schema has them, otherwise its concept's codelist;
   when FMR returns a hierarchy, every code at every level is valid.
+- **Every map reads the input frame.** `map_structures` applies each rule to the
+  columns of the DataFrame it was given, never to another rule's output, so one
+  source column can feed several targets. A rule whose source column is missing
+  raises `KeyError`; an implicit rule is skipped with a warning instead.
+- **`DEFAULT_VALUE` covers blanks.** In a mapping template's `COMP_MAPPING`
+  sheet, the optional `DEFAULT_VALUE` column gives a `representation` or
+  `multi_representation` rule a default target for source values `REP_MAPPING`
+  does not list, missing (blank) values included. It does nothing on `implicit`
+  and `fixed:` rows; a warning is logged when one is set there, and when the
+  sheet has a column tidysdmx does not read (the header must be spelt exactly).
 - **`map_structures` needs embedded representation maps.** A `ComponentMap`
   whose representation map is only a URN string raises `TypeError`, as does a
   `DatePatternMap`. Fetch a structure map with

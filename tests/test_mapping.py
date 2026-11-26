@@ -7,6 +7,7 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 import pytest
+from openpyxl import Workbook
 from pysdmx.model import (
     ComponentMap,
     DatePatternMap,
@@ -31,6 +32,7 @@ from tidysdmx.mapping import (
     map_structures,
 )
 from tidysdmx.structures import build_structure_map_from_template_wb
+from tidysdmx.utils import parse_mapping_template_wb
 
 
 # region create fixtures
@@ -966,6 +968,63 @@ class TestMapStructuresTemplateDefaultValue:
 
         assert result["REF_AREA"].tolist() == ["FRA", "_Z", "_Z", "DEU"]
         assert result["INDICATOR"].tolist() == ["GDP_A", "_X", "_X", "_X"]
+
+
+class TestMapStructuresWorkbookDefaultValue:
+    """Issue #273 through a real workbook: a blank source cell gets DEFAULT_VALUE.
+
+    ``parse_mapping_template_wb`` reads every sheet as the nullable ``string``
+    dtype, so the template's blanks are ``pd.NA``; hand-built frames, as in
+    ``TestMapStructuresTemplateDefaultValue``, never exercise that.
+    """
+
+    @pytest.fixture
+    def structure_map(self, tmp_path):
+        workbook = Workbook()
+        info = workbook.active
+        info.title = "INFO"
+        info.append(["Key", "Value"])
+        info.append(["dataflow", "WB:DF_TEST(1.0)"])
+        comp_mapping = workbook.create_sheet("COMP_MAPPING")
+        comp_mapping.append(["SOURCE", "TARGET", "MAPPING_RULES", "DEFAULT_VALUE"])
+        comp_mapping.append(["sex", "SEX", "representation", "_Z"])
+        comp_mapping.append(["country", "REF_AREA", "implicit", None])
+        rep_mapping = workbook.create_sheet("REP_MAPPING")
+        rep_mapping.append(["S:sex", "T:SEX"])
+        rep_mapping.append(["Male", "M"])
+        rep_mapping.append(["Female", "F"])
+        path = tmp_path / "template.xlsx"
+        workbook.save(path)
+        return build_structure_map_from_template_wb(parse_mapping_template_wb(path))
+
+    @pytest.mark.parametrize(
+        ("sex", "expected"),
+        [
+            (pd.Series(["Male", None, "Female"], dtype="str"), ["M", "_Z", "F"]),
+            (pd.Series(["Male", None, "Female"], dtype=object), ["M", "_Z", "F"]),
+            (pd.Series(["Male", None, "Female"], dtype="string"), ["M", "_Z", "F"]),
+            (pd.Series(["Male", "", "Female"], dtype="str"), ["M", "_Z", "F"]),
+            (pd.Series([np.nan, np.nan, np.nan]), ["_Z", "_Z", "_Z"]),
+        ],
+        ids=["str", "object", "string", "empty-string", "all-blank-float"],
+    )
+    def test_map_structures_blank_source_gets_default_value(
+        self, structure_map, sex, expected
+    ):
+        df = pd.DataFrame({"country": ["FRA", "DEU", "KEN"], "sex": sex})
+
+        result = map_structures(df, structure_map)
+
+        assert result["SEX"].tolist() == expected
+
+    def test_map_structures_blank_source_read_from_csv(self, structure_map, tmp_path):
+        """Blanks arrive as NaN when the source file is read with pandas."""
+        csv = tmp_path / "bronze.csv"
+        csv.write_text("country,sex\nFRA,Male\nDEU,\nKEN,Other\n")
+
+        result = map_structures(pd.read_csv(csv), structure_map)
+
+        assert result["SEX"].tolist() == ["M", "_Z", "_Z"]
 
 
 # region row-wise oracle

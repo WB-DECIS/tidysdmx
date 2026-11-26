@@ -36,8 +36,9 @@ upstream dependency your code wraps:
 
 `docs/reviews/` holds architecture reviews. `docs/reviews/2026-06-architecture-review.md`
 §7 is the live refactoring backlog (A1–C5 with dated statuses, D1–D10 added in
-October 2026); its §3 finding IDs (ARCH-nn, CONS-nn, TEST-nn, PROD-nn, PYSDMX-nn)
-are what code comments cite, e.g. `TODO(TEST-15)` in `pyproject.toml`.
+October 2026, E1–E12 in the November 2026 release review); its §3 finding IDs
+(ARCH-nn, CONS-nn, TEST-nn, PROD-nn, PYSDMX-nn) are what code comments cite,
+e.g. `TODO(TEST-15)` in `pyproject.toml`.
 
 ## Python Environment
 

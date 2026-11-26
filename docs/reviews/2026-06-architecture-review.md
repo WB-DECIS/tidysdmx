@@ -387,6 +387,57 @@ was not counted.
   for callers passing the host alone. `fetch_schema` is deprecated instead
   (see A4); the pysdmx-floor part of D10 is still open.*
 
+**E. Found in the November 2026 review for the 0.11.0 release, not fixed there**
+- **E1** `implicit` and `fixed:` template rows cannot honour `DEFAULT_VALUE`: it is
+  parsed, then dropped (with a warning since `c11b28c`). Follow-up to issue #273 —
+  a curator who maps a dimension to itself still gets blanks. SDMX has no
+  implicit-with-default map, so this needs a design: a representation map with a
+  pass-through rule, or a fill step in `map_structures`. *M*
+- **E2** Template headers are matched exactly, so `DEFAULT_VALUE ` or
+  `Default_Value` is an unrecognised column (warned since `c11b28c`). Normalise
+  case and surrounding whitespace in `_parse_comp_mapping_sheet`, and decide the
+  same for `REP_MAPPING`'s `S:` / `T:` headers. *S*
+- **E3** Literal value maps compare the raw source value; regex maps compare
+  `str(value)`. A numeric source column (`1.0`, once blanks make it float) never
+  matches a literal `"1"`, and with a `DEFAULT_VALUE` every row then takes the
+  default without a word. Log how many *present* values took the default;
+  consider matching literals on the printed form. Same in v0.10.0. *M*
+- **E4** The catch-all `regex:.*` is matched with `re.fullmatch`, and `.` excludes
+  newlines, so a source value that holds one escapes `DEFAULT_VALUE`. *S*
+- **E5** `FmrClient` accepts an `http://` root together with a token provider and
+  sends the bearer token in cleartext; behind an http → https redirect,
+  `put_structures` also returns as if it had stored something (PYSDMX-AUTH-07).
+  Warn, or refuse non-loopback http when a provider is set. *S*
+- **E6** `FmrClient` loose ends: single-artefact fetchers can raise `IndexError` on
+  an empty `200` where their docstrings promise `NotFound` (PYSDMX-READ-01);
+  `Raises:` sections omit pysdmx `Invalid` and the token cache's errors;
+  `fetch_schema` raises a bare `KeyError` for an unknown context under
+  `python -O`; the read-side fail-fast guard checks the service slot but not that
+  `RestService` still reads `_headers`. *S*
+- **E7** CI tests only the lock (extends D10). The review ran the unit suite once
+  against the declared floors, which passed, and against the newest resolvable
+  versions, where pandas 3.1 turned two deprecated calls in `structures.py` into
+  23 failures (fixed in `d622d11`). Add two scheduled lanes, floors and newest.
+  The `httpx>=0.27` floor is also below what pysdmx itself requires (`0.27.2`). *S*
+- **E8** Release process: the `main` → `dev` back-merge PR's head commit carries
+  `[skip ci]`, so `All checks` may never report on it; `RELEASING.md` does not say
+  how to title the `dev` → `main` PR, which the `pr-title` gate checks; its three
+  "One-time setup" boxes are unticked. *S*
+- **E9** Changelog noise: `fix(ci)` and `fix(build)` commits, and fixes to code
+  that was never released, reach the user-facing changelog. Use `ci:` / `build:`
+  for pipeline fixes, or exclude those scopes. *S*
+- **E10** `apply_component_map` counts the source's missing values on every call,
+  catch-all or not. The PR benchmark on #280 shows `map_structures` 15–20 % slower
+  than the commit before it from 100k rows up (still 65–94 % faster than
+  v0.10.0). Count only when there is a catch-all, or from the factorize codes. *S*
+- **E11** Ten bare `@pytest.mark.skip` tests remain (`test_mapping.py` 1,
+  `test_structures.py` 3, `test_tidy_raw.py` 2, `test_utils.py` 4), against the
+  testing conventions. Make each pass or `xfail(strict=True)`. *S*
+- **E12** `benchmarks.report.render_charts` names whichever font the machine's
+  `matplotlibrc` lists first, with a generic fallback only when that is DejaVu
+  Sans, so `test_render_charts_still_names_dejavu_sans_first` fails on a machine
+  with a system `matplotlibrc`. Pin `font.sans-serif` in the `rc_context`. *S*
+
 ## 8. Out of scope / deferred
 
 - Performing the module splits (B1–B3) — backlogged with PR slicing above.

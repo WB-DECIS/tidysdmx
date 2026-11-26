@@ -345,6 +345,29 @@ class TestBearerToken:
         with pytest.raises(ValueError, match="non-empty"):
             BearerToken("   ")
 
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "very-secret\n",
+            "very-secret\r\n",
+            "very secret",
+            "\tvery-secret",
+            "very\x00secret",
+        ],
+        ids=["newline", "crlf", "inner-space", "leading-tab", "nul"],
+    )
+    def test_bearer_token_rejects_whitespace_and_control_characters(self, token):
+        with pytest.raises(ValueError, match="whitespace or control characters"):
+            BearerToken(token)
+
+    def test_bearer_token_whitespace_error_hides_token(self):
+        # A token read from a file keeps its newline; the message must not
+        # carry the token into a log.
+        with pytest.raises(ValueError, match="whitespace") as excinfo:
+            BearerToken("very-secret\n")
+
+        assert "very-secret" not in str(excinfo.value)
+
     def test_bearer_token_rejects_naive_expires_at(self):
         with pytest.raises(ValueError, match="timezone-aware"):
             BearerToken("t", expires_at=datetime(2026, 1, 1, 12, 0))
@@ -655,6 +678,24 @@ class TestFmrClientInit:
     )
     def test_fmr_client_rejects_credentials_in_url(self, base_url):
         with pytest.raises(ValueError, match="must not embed credentials") as excinfo:
+            FmrClient(base_url)
+
+        assert "hunter2" not in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            # No scheme, so urlsplit reads "user" as the scheme and finds no
+            # username: the credentials check cannot see the password.
+            "user:hunter2@fmr.example.org/FMR",
+            "https:/user:hunter2@fmr.example.org/FMR",
+            f"{FMR_ROOT}?access_token=hunter2",
+            f"{FMR_ROOT}#hunter2",
+        ],
+        ids=["no-scheme", "one-slash", "query", "fragment"],
+    )
+    def test_fmr_client_url_errors_never_echo_a_secret(self, base_url):
+        with pytest.raises(ValueError, match="base_url") as excinfo:
             FmrClient(base_url)
 
         assert "hunter2" not in str(excinfo.value)
